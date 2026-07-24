@@ -1,3 +1,9 @@
+> **DONE — 2026-07-24.** This brief has been executed; it is a record, not a task. `express` ran
+> on #586 → [PR #665](https://github.com/lmorchard/decafclaw/pull/665), verdict
+> `eligible-for-auto-merge`, six findings fixed. See `docs/design.md` → "`express` dogfood —
+> decafclaw #586". Don't re-run it; the open work is the `needs-review` branch (#625 or #566), a
+> larger vehicle for multi-phase `execute`, and the board-driver.
+
 # Handoff: exercise `express` (move 2)
 
 Task brief for a fresh context. Read `CLAUDE.md` and `docs/design.md` (build status — especially
