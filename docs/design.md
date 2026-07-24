@@ -284,10 +284,51 @@ that oracle-must-exist turns on *whose judgment* (a labeled corpus defers a huma
 not on *whether a test file exists yet* (an ordinary unit test the criterion fully specifies is
 written at Phase 0) — otherwise the rule would send every criterion to `needs-review`.
 
-Pending: finish the move-1 dogfood on a vehicle with a discriminating oracle (re-spec #129's
-AC1, or another issue) so `execute` + the `pr` gate get exercised; then the **board-driver**
-orchestration (above the skill); a triage dogfood; and an interactive-intake check of the
-empty-state observation.
+### Second intake dogfood — decafclaw #638 (filed 2026-07-24)
+
+Switched the move-1 dogfood vehicle off starnet #129 (its remaining path needs a census
+placement flag — an oracle-building prerequisite, i.e. an intake conversation, not a test of the
+execution modes) to **decafclaw #638** (`forkpty` DeprecationWarnings dirty the suite). decafclaw
+is the repo the system was designed to burn down and has a real pytest harness. Filed via the
+augment path: marker + criteria + tier, original text preserved verbatim (concatenation).
+
+Three findings, all from *running* things rather than reading them:
+
+1. **The intuitive check was vacuous again.** `pytest -W error::DeprecationWarning` **passes**
+   today — the warning is emitted in the forked child, so promoting it to an error catches
+   nothing. Had that been stamped as the check it would have gone green immediately and proven
+   nothing. The discriminating check asserts on the `warnings summary` section instead. That is
+   **two for two** (#129's AC1, #638's obvious check) — the vacuous check looks like the *default*
+   outcome when nobody runs the check before freezing it, not a rare slip.
+2. **The issue's own facts were wrong in a way that mattered.** It says `test_terminals.py`
+   spawns twice; it's actually two different files, one spawn each — which changes the mechanism
+   (two marks in two files, not two in one). Verified counts: `make test` → 3234 passed, 2
+   skipped, 2 warnings, 69s.
+3. **Criteria vs. guards** (see below). #638 honestly reduces to **one criterion + three guards**,
+   and there was nowhere to put guards.
+
+Also noted: the chosen mechanism (per-test marks) is what *keeps* the issue `auto-ok` — the
+`pyproject.toml` alternative touches build/CI config, which the risk-gated list pulls toward
+`needs-review`. Mechanism choice and tier are coupled, which wasn't obvious before.
+
+### Criteria vs. regression guards (added 2026-07-24)
+
+The discriminate rule opened a gap: "the full suite stays green" and "output is byte-identical"
+can never fail at freeze, so as criteria they're vacuous — yet they obviously want checking. Two
+dogfoods hit it from opposite directions (the pure-refactor exemplar presenting a golden test as
+a CRITERION; #638 landing as 1 criterion + 3 guards), so it was a hole, not a wording nit.
+
+A **criterion** says what the work must *newly* make true (must fail now); a **guard** says what
+it must not break (must pass now). Guards don't affect the tier. Wired through both engines and
+every consumer — manifest section, spec slot, readiness item, per-phase verification, the
+verifier's remit, and a `guards:` field in the gate block. They earn their place by catching one
+specific cheat: **making a criterion go green by deleting the coverage that contradicted it**,
+which leaves every criterion passing and the suite green, and only a guard notices.
+
+Pending: `execute` + the `pr` gate are **still unexercised by a real run** — #638 is specced and
+ready to be the vehicle (`plan` → `execute` → `pr`). Then the **board-driver** orchestration
+(above the skill); a triage dogfood; and an interactive-intake check of the empty-state
+observation.
 
 Testing calibration (agreed, still holds): workflow/reference skill derived from a proven
 one — scaffold structurally without pressure-scenario TDD; micro-test only novel
