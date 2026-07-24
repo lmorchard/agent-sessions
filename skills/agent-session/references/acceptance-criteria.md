@@ -61,6 +61,13 @@ while building it (e.g. which results get labeled "relevant") is the human judgm
 *deferred*, not eliminated — the premature-confidence trap. Positing a fixture you'd have
 to author does not make a criterion checkable today.
 
+The line is *whose judgment*, not *whether a file exists yet*. "A unit test asserting the
+scoring pass emits no proposal for an occupied node" doesn't exist yet either, but the
+criterion already says exactly what to assert and the test harness is there — that's ordinary
+test-first work, and the freeze phase writes it. "A corpus of queries labeled by relevance"
+needs someone to *decide* what relevant means while building it. Ask: **does authoring this
+check settle a question the criterion left open?** If yes, `needs-review`.
+
 Building the oracle can be its own `auto-ok` issue; the criterion that depends on it stays
 `needs-review` until it exists.
 

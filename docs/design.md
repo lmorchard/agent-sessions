@@ -225,6 +225,25 @@ Built (front-of-funnel), in `skills/agent-session/`:
 - `phases/triage.md` — batch backlog-gardening; subagents fan out to assess + draft proposed
   criteria, human ratifies in a fast pass, augment in place.
 
+Built (back half, move 1), in `skills/agent-session/`:
+- `references/frozen-checks.md` — **the back-half novel core**: the `checks.md` manifest
+  (criteria copied verbatim, stable `C1…Cn` ids), the freeze commit, the read-only rule, the
+  independent verifier subagent, the `git diff <freeze-sha>` tamper check, and the amendment
+  path (stop → human-confirm → log → **downgrade the run to `needs-review`**).
+- `phases/plan.md` — gates on verifiability, re-verifies oracles still exist, **Phase 0 is the
+  freeze** (written before the rest of the plan), bidirectional criteria coverage in self-review.
+- `phases/execute.md` — per-criterion checks by name as the gate; frozen files read-only to
+  implementers; independent verifier + tamper diff, not self-report; evidence produced for
+  human-judgment criteria.
+- `phases/pr.md` + `references/pr-body-template.md` — the **tiered merge gate**, derived by
+  reading rows (all checks pass per the verifier + human-graded judgment criteria + clean
+  tamper diff + green project gates + no unresolved threads + `auto-ok` + no risk-gated paths).
+  Emits a machine-readable `<!-- agent-session:gate -->` block. **Never merges.**
+- `phases/express.md` — Phase 0 checks *preconditions* (marker / readiness / size) instead of
+  judging complexity by feel; a missing marker routes to `intake`. Tier decides only *where the
+  run surfaces to a human*, not whether it runs.
+- `references/session-setup.md`, `references/plan-template.md`, `references/github-projects.md`.
+
 Validated:
 - **intake — micro-tested AND dogfooded.** Micro-test (Sonnet, control vs treatment, 5
   reps/arm) on the criteria-gate wording: control 0/5 checkable, treatment 5/5 → wording is
@@ -233,10 +252,41 @@ Validated:
   criteria + `auto-ok` tier back to the issue; the run surfaced + fixed two skill gaps
   (missing documentarian ref; missing oracle-verification step).
 - **triage — built, NOT yet dogfooded.**
+- **frozen-checks read-only rule + amendment path — micro-tested, LOAD-BEARING.** Fixture: a
+  frozen check whose assertion contradicts its own criterion, implementation already correct.
+  Control 4/5 diagnosed the contradiction and then **edited the frozen check inline**; 1/5
+  asked. Treatment 0/5 edited, 5/5 stopped with the prescribed check-vs-criterion statement.
+  No over-triggering. Caveat: a clean no-guidance control is unreachable on this machine (the
+  global CLAUDE.md's "no weakening test assertions" leaks into every `claude -p` run), so the
+  effect is a **lower bound**.
+- **"run each check by name / aggregate green is not the gate" — micro-tested, NOT load-bearing.**
+  20 reps across two fixtures (including one where the implementation *looks* done — an
+  idiomatic dict dedup keeping the last occurrence where the criterion wants the first, with
+  `make check` green): both arms caught it 10/10. **The `checks.md` manifest naming the exact
+  command is the mechanism; the exhortation adds nothing** — so it was trimmed to one sentence.
+  Two earlier fixtures were discarded as non-discriminating; recording that because "control
+  passed 5/5" is only evidence about wording when the fixture can actually fail.
+- **execute mid-run mechanics + the pr gate — NOT yet exercised by a real run** (see below).
 
-Pending (this is the next work): **execution modes** (`plan`/`execute`/`express`/`pr`)
-adapted from `dev-session` + the **tiered merge gate**; then the **board-driver**
-orchestration (above the skill); and a triage dogfood + an interactive-intake check of the
+Dogfood of move 1 (starnet #129) — **stopped at Phase 0, correctly.** AC1 ("SHALL produce zero
+`tick-cap` runs", checked by a census invocation) **already passes on current code**:
+`{"trace": 20}` at both grade A and S. `census.js` has no placement flag, so the issue's
+"S @ switch-1" evidence isn't reachable through AC1's command, and `tick-cap`
+(`scripts/bot/loop.js:130`) never fires because the bot dies to trace first. AC1 is vacuous —
+it cannot distinguish done from untouched, so the `auto-ok` tier isn't supported. `plan`/
+`frozen-checks` caught it exactly where designed ("a check that passes at freeze — surface it").
+
+The miss was upstream, and is now fixed: `acceptance-criteria.md` required the oracle to
+**exist** but never to **discriminate**, and intake's step 4 accepted a grep. New rule: *run*
+the check, confirm it fails, record the failure; a past evidence table is not a substitute.
+Tell: a "SHALL produce zero X" criterion whose command produces zero X today. Also clarified
+that oracle-must-exist turns on *whose judgment* (a labeled corpus defers a human decision) and
+not on *whether a test file exists yet* (an ordinary unit test the criterion fully specifies is
+written at Phase 0) — otherwise the rule would send every criterion to `needs-review`.
+
+Pending: finish the move-1 dogfood on a vehicle with a discriminating oracle (re-spec #129's
+AC1, or another issue) so `execute` + the `pr` gate get exercised; then the **board-driver**
+orchestration (above the skill); a triage dogfood; and an interactive-intake check of the
 empty-state observation.
 
 Testing calibration (agreed, still holds): workflow/reference skill derived from a proven
@@ -254,12 +304,26 @@ scenarios deferred until there's something worth hardening.
 
 ## Open questions (for the pending work)
 
-- **Verifier-independence mechanics (move 1):** how to keep the check-author separate from
-  the implementer and freeze checks before implementation, inside `execute`/`express`.
-  dev-session already leans on subagent-driven execution + two-stage review — likely most of
-  the way there; the job is to specialize it so the frozen acceptance checks are the gate.
-- **Merge gate (move 1):** how `auto-ok` gates auto-merge — all-green required checks + no
-  unresolved review threads + tier label; where the tier lives (issue label vs. spec
-  frontmatter — dogfood put it in the issue body; labels not yet created in target repos).
 - **Board-driver (later):** local `claude -p` loop vs. scheduled GHA; how it reads/filters
-  the Ready queue by tier. Stays *above* the skill.
+  the Ready queue by tier. Stays *above* the skill. It can now read the PR body's
+  `<!-- agent-session:gate -->` block rather than re-deriving the gate.
+- **Does the discriminate rule need micro-testing?** It was written from a dogfood failure, not
+  tested as *wording*. The intake-side analogue (oracle-must-exist) needed a micro-test to
+  land, so this one plausibly does too.
+
+## Resolved in move 1 (were open)
+
+- **Verifier-independence mechanics** → `references/frozen-checks.md`: freeze commit, read-only
+  frozen paths, check-author subagent that never sees the implementation plan, verifier subagent
+  that never sees the plan or the rationale, and a `git diff <freeze-sha>` tamper check. The
+  mechanical tamper diff is what turns the principle into a check; the read-only wording is
+  micro-tested load-bearing.
+- **Merge gate** → derived in `pr.md` by reading rows, reported as a verdict + a machine-readable
+  gate block, never acted on. `needs-review` is never eligible however green the checks.
+- **Where the tier lives** → **the issue body's Tier section is authoritative** (it carries the
+  reason); a label is a convenience index for querying. If they disagree, surface the conflict
+  rather than picking one. This works today without labels existing in target repos — #129 has
+  no labels at all.
+- **Amendment policy** → amend is allowed but costly: stop, human-confirm, log in `checks.md`,
+  and downgrade the run to `needs-review`. Keeps the loop unstuck on a typo'd check while making
+  an amended oracle forfeit the autonomy it can no longer support.
