@@ -443,6 +443,11 @@ especially — when it agrees with your own instinct to cut.
 Net line count came out roughly flat (1674 → 1658): the correctness fixes added about what the
 deletions removed. The gain was coherence and 8 fixed bugs, not size.
 
+**Next session: `express` (move 2).** Brief at [handoff-express.md](handoff-express.md). Fresh
+context is load-bearing there, not just hygiene — `express` consumes an issue cold through the
+marker, so the context that wrote the criteria can't test the seam. Vehicles ready: #586 and #585
+(`auto-ok`), or 566/625 for the untested `needs-review` branch.
+
 Pending: the **board-driver** orchestration (above the skill); `express` still never run; the
 `needs-review` routing branch still unexercised; an interactive-intake check of the empty-state
 observation; and a consolidation/trim pass — the skill gained ~10 rules in a day, and only two of
