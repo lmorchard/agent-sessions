@@ -74,12 +74,9 @@ fix-up.
    might be acceptable. It runs every check by name, reports observed output and pass/fail per
    criterion, and runs the tamper diff.
 
-   Then confirm the gate: every check passed per *its* report, the tamper diff is empty (or
-   fully explained by logged amendments), and the project's own gates are green.
-
-   **Aggregate green is not the gate.** `make test` passing says nothing about whether C2's
-   check ran — a skipped test, a collection error, and a test nobody wrote all look identical
-   in the aggregate. Per-criterion, by name, output read.
+   Then confirm the gate per `references/frozen-checks.md`: every check passed per *its* report,
+   the tamper diff is empty (or fully explained by logged amendments), and the project's own
+   gates are green. Aggregate green is not the gate.
 
 5. **Scope discipline.** Only what the plan describes. Don't refactor adjacent code, however
    messy. Note anything worth fixing in `notes.md` for a future session.
