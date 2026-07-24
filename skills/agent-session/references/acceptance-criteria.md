@@ -47,6 +47,23 @@ Escalate in this order — don't jump straight to "human decides":
    product-call). This is not a failure of the spec; it is the criterion *telling you* the
    issue belongs in `needs-review`.
 
+### The oracle must already exist
+
+A check counts as "reduced" only if its oracle exists *now* — the test / fixture / eval set
+/ labeled corpus it names is already present, or is trivially writable against current
+behavior. A criterion whose check depends on an oracle that must first be **built** (a
+labeled relevance corpus, a golden eval set, a benchmark that doesn't exist yet) is **not
+reduced** — it is `needs-review` until that oracle exists and has been reviewed
+independently of the implementer.
+
+Reason: an unbuilt oracle is an untrustworthy one, and deciding "what counts as correct"
+while building it (e.g. which results get labeled "relevant") is the human judgment being
+*deferred*, not eliminated — the premature-confidence trap. Positing a fixture you'd have
+to author does not make a criterion checkable today.
+
+Building the oracle can be its own `auto-ok` issue; the criterion that depends on it stays
+`needs-review` until it exists.
+
 ## Tier derivation
 
 The escalation tier is not a separate judgment — it falls out of the criteria:
