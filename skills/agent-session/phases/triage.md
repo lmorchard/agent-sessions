@@ -32,6 +32,11 @@ criteria), and you do the part that does (ratify). See
    - **runs each proposed check** and records what it observed, so the ratify pass knows which
      proposals discriminate (fail today = criterion) and which don't (pass today = guard). A
      subagent that only *reads* code will propose plausible checks that grade nothing,
+   - **is told not to fudge a weak check to keep `auto-ok`.** `intake` carries this rule; a
+     scanning subagent needs it too, or it will go proxy-hunting in good faith — greping for a
+     keyword to "verify" a doc is accurate, or asserting a test exists to "verify" it covers
+     something. An honest `needs-review` beats a checkable-looking proxy. Include the
+     satisfiable-without-the-work test from `acceptance-criteria.md` in the subagent's brief,
    - returns a COMPACT result only: `{issue, score, already_specified, proposed_criteria,
      proposed_guards, proposed_tier, observed_check_results, open_questions}`. Not the raw issue
      body or research dump.

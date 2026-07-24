@@ -89,6 +89,28 @@ criterion is rewritten around one. Evidence from a past run (a table in the issu
 someone remembers) is not a substitute for running it: the repo has moved, and the invocation
 that produced that table may not be the one you wrote down.
 
+### The check must not be satisfiable without the work
+
+Third test, after *exists* and *discriminates*: **can this check pass without the work being
+done?** A check can discriminate — fail today, pass tomorrow — and still grade nothing. Three
+shapes seen in the wild:
+
+| Criterion | Check | Satisfied by |
+|---|---|---|
+| "a test covering X exists" | `pytest ...::test_x` | `def test_x(): pass` |
+| "the doc explains Y" | `grep -E "separate\|distinct"` | typing the word "separate" |
+| anything named-but-absent | `no tests ran` | the same output a typo'd node name gives |
+
+Ask what the *cheapest* way to make the check green is. If that's not the work, the check is a
+proxy — name it as one, and either strengthen it (assert the specific behaviour, not the
+presence of a name or a keyword) or accept that the real oracle is a human read.
+
+**Test-coverage issues are the hard case: the work *is* the oracle.** When the deliverable is a
+test, the freeze/implement split degenerates — the freeze phase would write the test and leave
+nothing to implement, so the implementer authors the very thing that grades it. Either the
+criterion names the specific assertions the test must make (so the check grades content, not
+existence), or it's `needs-review` and a human confirms the test asserts something real.
+
 ## Criteria vs. regression guards
 
 Not every check worth running is a criterion. Sort them:
@@ -119,6 +141,24 @@ The escalation tier is not a separate judgment — it falls out of the criteria:
   (per the merge gate) auto-merge.
 - **`needs-review`** — *any* criterion rests on human judgment, OR the issue touches a
   risk-gated path. A human stays in the loop.
+
+**A third trigger: the issue withholds a decision its criteria depend on.** Empirically the most
+common one — in an 8-issue triage of a real backlog, *all five* `needs-review` calls were driven
+by this, none by the risk-gated list acting alone. The issue asks a question ("remove it, or
+document it?"), lists remediation options without choosing, says "decide with data first", or
+needs an architecture decision with no existing wiring point. Every individual criterion may be
+perfectly checkable; what's undecided is *which set applies*.
+
+The test is **does the choice change which criteria apply?**
+
+- **No** → implementation style, irrelevant to the tier. "Delete the guard, or replace it with
+  `conversations_root()`" — both satisfy the same greps. Stays `auto-ok`.
+- **Yes** → the loop would have to *pick the goal* rather than implement it. "Remove the
+  function" and "keep it with a docstring" have different criteria. `needs-review`.
+
+This is upstream of criteria verifiability, so check it first: a perfectly checkable criterion
+set for a goal nobody chose is a confident answer to the wrong question. Resolving the decision
+converts the issue — one question to a human, and it can drop to `auto-ok`.
 
 **Risk-gated paths force `needs-review` regardless of verifiability** (project-configurable;
 sensible defaults): authentication/authorization, secrets/credentials, data migrations or
