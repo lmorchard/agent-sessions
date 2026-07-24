@@ -32,7 +32,24 @@ touching auth/data/deploy/deps stays human-gated).
 The two skills share a **contract**: the acceptance-criteria format and escalation labels.
 Design it once; both sides read from it, or it drifts.
 
+## Reality check (2026-07-23)
+
+The existing `dev-session` skill **already implements the producer/consumer core** above —
+`file` produces a spec-embedded issue, `express` autonomously consumes it, with a research
+substep, a recommended-answer interview, board transitions, and a crude autonomy tier all
+present. So this repo is not a reimplementation. It's an **upgrade + orchestration layer**.
+The genuinely new, high-leverage parts:
+
+1. **Verifiable acceptance criteria as first-class** — make each criterion name a runnable
+   check (the "spec names its own verifier" upgrade to the spec template + readiness gate).
+2. **A durable, verifiability-derived tier label** stamped at filing time, so a loop can route on it.
+3. **A conditional merge gate** (auto-merge only `auto-ok` + all-green + no unresolved threads).
+4. **A board-level driver** that picks the next Ready issue and runs the loop unattended.
+
+(1)+(2) extend `dev-session`; (3)+(4) sit above it. See [docs/design.md](docs/design.md).
+
 ## Status
 
-Bootstrapping. See [docs/design.md](docs/design.md) for the full design captured from the
-originating brainstorm (2026-07-23).
+Bootstrapping — design captured, prior-art survey in flight. No skill code composed yet
+(deliberately holding until prior art lands, to avoid reinventing schemas like Spec Kit /
+Kiro / Gherkin).

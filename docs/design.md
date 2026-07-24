@@ -150,12 +150,59 @@ The seam between intake's *output* and execution's *input*: the acceptance-crite
 + escalation labels. Design once, both read from it. (In the spirit of decafclaw's
 "don't hand-maintain parallel field lists that rot in lockstep.")
 
+## Finding (2026-07-23, later): dev-session already IS the producer/consumer core
+
+Studied the existing `~/.claude/skills/dev-session` skill (SKILL.md + phases + references).
+It already implements most of the two-skill system sketched above — not "similar to," but
+*is* it. The sequel is therefore an **upgrade + orchestration layer**, not a reimplementation.
+
+Already covered by dev-session:
+
+| Sketched as "new" | Where it already lives |
+|---|---|
+| Producer/consumer split | `file` (produces spec-embedded issue) → `express` (autonomously consumes); `<!-- dev-session:spec -->` marker = the shared contract/seam |
+| Research-then-plan-live | `brainstorm` documentarian substep → `research.md`; plan generated at `plan`/`express` time, never frozen at filing |
+| Grilling-style interview | `brainstorm` step 3: propose best judgment + trade-offs, confirm/adjust, no open-ended Qs, multiple-choice preferred |
+| Crude autonomy tier | `express` Phase 0 complexity check (pushes back on L/XL/ambiguous); feel-driven carve-out refuses autonomous execution of subjective visual work |
+| Board transitions | Ready → In Progress → In Review via `references/github-projects.md` |
+| Spec-readiness gate | Readiness checklist in `spec-template.md` |
+| Scope proportional to complexity | `brainstorm` step 4 |
+
+The genuine gaps — the ~20% that is actually new and high-leverage:
+
+1. **Verifiable acceptance criteria as first-class (the core gap).** spec-template's
+   "Desired end state" is *prose* (user-visible behavior, API surface); the Readiness
+   checklist gates on placeholders / consistency / scope / ambiguity but **nothing requires
+   each criterion to name a runnable check.** Upgrading spec-template + the readiness
+   checklist to demand a runnable oracle per criterion (`test_x` passes, `make check`
+   green, an eval case) is the highest-value change — and it's small. This is
+   "a good spec names its own verifier" made concrete.
+2. **A durable, verifiability-derived tier label** stamped at `file` time (not decided
+   ad-hoc at `express` Phase 0), so a board/cron loop can *route* on it. The tier falls
+   out of "did every criterion resolve to a check?" (all → `auto-ok`; any human-eyeball →
+   `needs-review`).
+3. **The merge gate.** `express` stops at PR-with-Copilot-addressed; merge is human.
+   Conditional auto-merge by tier (all-green + no unresolved threads + `auto-ok`) is new.
+4. **The board-level driver.** Nothing today *picks the next Ready issue and runs `express`
+   unattended*, then advances. That orchestration (headless `claude -p` / scheduled GHA)
+   is the actual "burndown loop" and sits *above* a per-issue skill.
+
+Reframed build: (1)+(2) are **enhancements to dev-session** (spec-template, brainstorm,
+readiness checklist, `file`). (3)+(4) live *above* a per-issue skill — the orchestration
+bookends. So "standalone skill vs dev-session phase" resolves mostly toward *extend
+dev-session*; the separate artifact is the driver + merge gate.
+
 ## Open questions
 
-- Exact shape of the shared schema (criteria format, label set, where tier lives).
-- intake as a standalone skill vs. a new phase in `dev-session` — leaning standalone
-  (different funnel position: board-gardening vs. building one thing) but reusing
-  dev-session's brainstorming machinery rather than reimplementing it.
-- Where the loop runs first (local vs. GHA) and how the board queue is read.
+- Exact shape of the upgraded criteria schema: how a criterion names its check (freeform
+  vs. structured `check:` field), and where the tier label lives (issue label vs. spec
+  frontmatter vs. board field).
+- Whether the verifiable-criteria upgrade lands as edits to the existing dev-session
+  skill, or as an overlay this repo owns (fork/patch vs. upstream contribution to Les's
+  skill).
+- Where the board driver runs first (local `claude -p` loop vs. scheduled GHA) and how it
+  reads/filters the Ready queue by tier.
 - How `auto-ok` / `needs-review` is enforced at the merge gate (labels + branch protection
-  + a checks gate).
+  + a required-checks gate).
+- What the external prior-art survey (running) turns up — esp. whether Spec Kit / Kiro /
+  Gherkin already model "criterion → runnable check" in a way worth borrowing.
