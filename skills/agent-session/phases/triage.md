@@ -38,6 +38,18 @@ criteria), and you do the part that does (ratify). See
 
    The main context now holds a scored list, not dozens of issue bodies.
 
+   **Cap what a scanning subagent may run.** "Run each proposed check" and "fan out in parallel"
+   collide: N agents each invoking the project's full suite will thrash the machine, and a
+   parallel test runner (`pytest -n auto`, `cargo test`, `go test ./...`) already claims every
+   core on its own. Tell each subagent explicitly: **targeted commands only** — a single test
+   node, a `grep`/`rg`, a one-line interpreter call — and **never `make test` / `make check` /
+   the full suite**. A criterion that can only honestly be checked by the full suite gets marked
+   UNRUN and verified once, serially, during the ratify pass.
+
+   This is a real limit on what a batch scan can conclude, so state it rather than letting UNRUN
+   read as verified. Also give each subagent read-only tools where the harness allows it — a
+   scanner has no business editing the repo it's scoring.
+
 3. **Present the triage table** to the user: which issues are already fine, which are
    under-specified, and for each weak one the *proposed* criteria + tier. Let the user pick
    which to augment now (don't auto-edit the whole backlog).
