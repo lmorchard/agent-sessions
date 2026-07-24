@@ -14,6 +14,13 @@ a human only for issues that actually need it.
 
 **An agent is only as autonomous as its verifier is trustworthy.**
 
+**Corollary (added from prior-art survey, see [prior-art.md](prior-art.md)):** trustworthy
+means the *oracle itself* must be validated. "Criterion is machine-checkable" is necessary
+but **not sufficient** — the check must also be *correct*, the verifier must be
+**independent of the implementer**, and acceptance tests **frozen before implementation**
+so the implementer can't weaken them (SWE-bench documents test-log misparsing; Anthropic
+names self-verification bias). An untrustworthy green check is worse than no check.
+
 (From Anthropic's ["Enabling Claude Code to work more autonomously"](https://www.anthropic.com/news/enabling-claude-code-to-work-more-autonomously)
 and the long-running-agent research: if the agent can check its own work with a near-perfect
 oracle, it can run; where the oracle is weak or missing, a human belongs.)
@@ -196,7 +203,15 @@ dev-session*; the separate artifact is the driver + merge gate.
 
 - Exact shape of the upgraded criteria schema: how a criterion names its check (freeform
   vs. structured `check:` field), and where the tier label lives (issue label vs. spec
-  frontmatter vs. board field).
+  frontmatter vs. board field). **Prior-art lead:** adopt **EARS** (`WHEN … THE SYSTEM
+  SHALL …`, from Kiro) or **Given-When-Then** (Gherkin) as the criteria grammar rather than
+  inventing one — both map condition→assertion and are human-readable + machine-checkable.
+- **Verifier-independence mechanics:** how to keep the check-author separate from the
+  implementer and freeze tests before implementation, within dev-session's existing
+  execute/express flow (it already leans on subagent-driven execution + two-stage review —
+  may be most of the way there).
+- **Property-based middle tier:** for criteria that can't be a concrete example test, allow
+  an invariant/property check before falling through to `needs-review`.
 - Whether the verifiable-criteria upgrade lands as edits to the existing dev-session
   skill, or as an overlay this repo owns (fork/patch vs. upstream contribution to Les's
   skill).
