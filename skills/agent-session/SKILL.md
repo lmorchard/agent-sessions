@@ -23,25 +23,39 @@ which mode, or assess the current session state and suggest one.
 |---|---|---|
 | `intake` | `phases/intake.md` | Interview a new request *or* existing issue → spec with verifiable acceptance criteria → file/update the issue with a tier label |
 | `triage` | `phases/triage.md` | Batch: scan a repo/board for under-specified issues, score them (subagent fan-out), propose criteria, augment the weak ones |
-| `plan` | *(pending — adapt from `dev-session` plan)* | Implementation plan from the spec, generated against current code |
-| `execute` | *(pending — adapt from `dev-session` execute)* | Execute the plan; verifier kept independent of implementer |
-| `express` | *(pending — adapt from `dev-session` express)* | Interactive intake → autonomous through PR |
-| `pr` | *(pending — adapt from `dev-session` pr)* | Self-review, squash, push, PR, review cycle; tiered merge gate |
+| `plan` | `phases/plan.md` | Freeze the acceptance checks, then plan vertical slices against current code |
+| `execute` | `phases/execute.md` | Execute the plan; the criteria's checks are the gate, graded by a context that didn't write the code |
+| `express` | `phases/express.md` | Consume a specified issue autonomously through PR; the tier sets the autonomy |
+| `pr` | `phases/pr.md` | Self-review, squash, push, PR, review cycle, then stop at the tiered merge gate |
 
-The execution modes are being adapted from `dev-session` and are not yet specialized here;
-until they land, run the corresponding `dev-session` phase.
+The **producer/consumer seam** is the `<!-- agent-session:spec -->` marker: `intake` and
+`triage` produce issues carrying it; `plan`/`execute`/`express` refuse to run without it.
 
 ## The shared engine (in-dir references)
 
-Both `intake` and `triage` run the *same* requirements engine. It lives in `references/`
-so neither mode duplicates it (duplication drifts — a correctness bug, not just untidy).
-Each mode reads these only when it reaches an interview/criteria step:
+Two engines, front and back, each read by more than one mode. They live in `references/` so
+no mode duplicates them (duplication drifts — a correctness bug, not just untidy). Modes read
+them only on reaching the relevant step:
+
+**Front half — making criteria checkable** (read by `intake`, `triage`):
 
 | File | What it holds |
 |---|---|
-| `references/acceptance-criteria.md` | The core rules: every criterion names a runnable check; verifier-independence; concrete-test → property → human-judgment ladder; tier derivation |
+| `references/acceptance-criteria.md` | The core rules: every criterion names a runnable check; oracle-must-already-exist; concrete-test → property → human-judgment ladder; tier derivation + risk-gated paths |
 | `references/criteria-grammar.md` | EARS + Given-When-Then syntax reference (patterns, templates, how to pick) |
-| `references/spec-template.md` | Spec skeleton + readiness checklist, upgraded to require verifiable criteria |
+| `references/spec-template.md` | Spec skeleton + readiness checklist, gating on verifiability |
+
+**Back half — keeping the checks trustworthy** (read by `plan`, `execute`, `pr`):
+
+| File | What it holds |
+|---|---|
+| `references/frozen-checks.md` | The verification contract: the `checks.md` manifest, the freeze commit, the read-only rule, the independent verifier, the tamper diff, the amendment path |
+| `references/session-setup.md` | Branch + worktree + session dir + marker/tier detection (shared by `plan` and `express`) |
+| `references/plan-template.md` | `plan.md` skeleton — Phase 0 freeze, criteria-per-phase traceability |
+| `references/pr-body-template.md` | PR body skeleton — per-criterion results + the `agent-session:gate` block |
+
+**Either half:** `references/documentarian-prompt.md` (neutral framing for research subagents),
+`references/github-projects.md` (optional board transitions).
 
 ## Context management (the reason for this structure)
 
@@ -62,8 +76,15 @@ Each mode reads these only when it reaches an interview/criteria step:
 - **Explicit mode arguments.** `/agent-session <mode>` — the dispatcher never infers.
 - **Verification before completion.** Never claim a criterion is checkable, a spec ready,
   or a phase done without having run the check and read the output. Evidence before claims.
-- **Tier label is durable.** Derived at intake/triage time (see `acceptance-criteria.md`)
-  and written onto the issue, so a downstream loop can route on it.
+- **Tier is durable, and the issue body owns it.** Derived at intake/triage time (see
+  `acceptance-criteria.md`) and written into the spec's Tier section *with its reason*. A tier
+  label on the issue is a convenience index for querying — if the two disagree, surface the
+  conflict rather than picking one.
+- **Makefile-first.** Verification commands assume `make lint` / `make test` / `make check`.
+  If the project lacks a target, run the native tool, say so, and offer to add the target
+  rather than reconstructing the command in three phases.
+- **The skill never merges.** No `gh pr merge`, with or without `--auto`. `pr` derives and
+  reports the merge-gate verdict; acting on it belongs to a human or the board-driver.
 
 ## When NOT to use
 
