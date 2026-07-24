@@ -208,48 +208,58 @@ adding modes doesn't confound the LLM mid-phase — the only confounding risk is
 boundary, mitigated by explicit mode arguments + an ask-don't-guess dispatcher. Heavy modes
 fan out to subagents; the board-driver stays *above* the skill as orchestration.
 
-Scaffolded (first slice, front-of-funnel — exercises the shared-refs + subagent ideas):
-- `skills/agent-session/SKILL.md` — dispatcher, context-management notes, conventions.
-- `skills/agent-session/references/acceptance-criteria.md` — **the novel core**: every
-  criterion names a runnable check; EARS / Given-When-Then; verifier-independence +
-  freeze-before-implementation; the concrete-test → property → human-judgment escalation
-  ladder; tier derivation (auto-ok/needs-review) + risk-gated-path override.
-- `skills/agent-session/references/spec-template.md` — upgraded: criteria replace prose
-  "desired end state"; readiness checklist gates on *verifiability*, not just placeholders.
-- `skills/agent-session/phases/intake.md` — new + existing-issue (augment) modes; the
-  interview reduces each requirement to criterion+check; derives tier; files/updates issue.
-- `skills/agent-session/phases/triage.md` — batch backlog-gardening; subagents fan out to
-  *assess + draft proposed* criteria (no human needed), human ratifies in a fast pass
-  (subagents can't interview), augment in place. Demonstrates the context lesson.
+Built (front-of-funnel), in `skills/agent-session/`:
+- `SKILL.md` — dispatcher, context-management notes, conventions.
+- `references/acceptance-criteria.md` — **the novel core**: every criterion names a runnable
+  check; verifier-independence + freeze-before-implementation; concrete-test → property →
+  human-judgment escalation ladder; **oracle-must-already-exist** rule; tier derivation
+  (auto-ok/needs-review) + risk-gated-path override.
+- `references/criteria-grammar.md` — EARS (five patterns, verified against Mavin) +
+  Given-When-Then syntax reference.
+- `references/spec-template.md` — criteria replace prose "desired end state"; readiness
+  checklist gates on *verifiability*.
+- `references/documentarian-prompt.md` — neutral negation rules for the research subagent
+  (shared by intake + triage); includes the oracle-existence question.
+- `phases/intake.md` — new + existing-issue (augment) modes; reduce each requirement to
+  criterion+check; verify each check's oracle exists *now*; derive tier; file/update issue.
+- `phases/triage.md` — batch backlog-gardening; subagents fan out to assess + draft proposed
+  criteria, human ratifies in a fast pass, augment in place.
 
-Pending: execution modes (`plan`/`execute`/`express`/`pr`) adapted from dev-session + merge
-gate; the board-driver orchestration.
+Validated:
+- **intake — micro-tested AND dogfooded.** Micro-test (Sonnet, control vs treatment, 5
+  reps/arm) on the criteria-gate wording: control 0/5 checkable, treatment 5/5 → wording is
+  load-bearing; a 4:1 tier-split surfaced the oracle-must-exist gap, fix closed it 5/5.
+  Then dogfooded end-to-end on a real issue (starnet #129) via the augment path — filed
+  criteria + `auto-ok` tier back to the issue; the run surfaced + fixed two skill gaps
+  (missing documentarian ref; missing oracle-verification step).
+- **triage — built, NOT yet dogfooded.**
 
-Testing calibration (agreed): treat this as a workflow/reference skill derived from a proven
-one — scaffold structurally without pressure-scenario TDD; micro-test the one novel
-behavior-shaping bit (the "every criterion names a check" gate + tier derivation) once it
-exists, per writing-skills' own reference-skill carve-out. Full pressure scenarios deferred
-until there's something worth hardening.
+Pending (this is the next work): **execution modes** (`plan`/`execute`/`express`/`pr`)
+adapted from `dev-session` + the **tiered merge gate**; then the **board-driver**
+orchestration (above the skill); and a triage dogfood + an interactive-intake check of the
+empty-state observation.
 
-## Open questions
+Testing calibration (agreed, still holds): workflow/reference skill derived from a proven
+one — scaffold structurally without pressure-scenario TDD; micro-test only novel
+behavior-shaping wording against a no-guidance control (5+ reps, read every match by hand);
+don't add nuance clauses to a winning recipe; dogfood after building. Full pressure
+scenarios deferred until there's something worth hardening.
 
-- Exact shape of the upgraded criteria schema: how a criterion names its check (freeform
-  vs. structured `check:` field), and where the tier label lives (issue label vs. spec
-  frontmatter vs. board field). **Prior-art lead:** adopt **EARS** (`WHEN … THE SYSTEM
-  SHALL …`, from Kiro) or **Given-When-Then** (Gherkin) as the criteria grammar rather than
-  inventing one — both map condition→assertion and are human-readable + machine-checkable.
-- **Verifier-independence mechanics:** how to keep the check-author separate from the
-  implementer and freeze tests before implementation, within dev-session's existing
-  execute/express flow (it already leans on subagent-driven execution + two-stage review —
-  may be most of the way there).
-- **Property-based middle tier:** for criteria that can't be a concrete example test, allow
-  an invariant/property check before falling through to `needs-review`.
-- Whether the verifiable-criteria upgrade lands as edits to the existing dev-session
-  skill, or as an overlay this repo owns (fork/patch vs. upstream contribution to Les's
-  skill).
-- Where the board driver runs first (local `claude -p` loop vs. scheduled GHA) and how it
-  reads/filters the Ready queue by tier.
-- How `auto-ok` / `needs-review` is enforced at the merge gate (labels + branch protection
-  + a required-checks gate).
-- What the external prior-art survey (running) turns up — esp. whether Spec Kit / Kiro /
-  Gherkin already model "criterion → runnable check" in a way worth borrowing.
+## Resolved (was open)
+
+- Criteria grammar → **EARS + Given-When-Then** (not invented); see `criteria-grammar.md`.
+- Property middle tier → **done** (in the escalation ladder).
+- dev-session edits vs. overlay → **fresh single `agent-session` skill** this repo owns.
+- Prior-art → surveyed; see `prior-art.md`.
+
+## Open questions (for the pending work)
+
+- **Verifier-independence mechanics (move 1):** how to keep the check-author separate from
+  the implementer and freeze checks before implementation, inside `execute`/`express`.
+  dev-session already leans on subagent-driven execution + two-stage review — likely most of
+  the way there; the job is to specialize it so the frozen acceptance checks are the gate.
+- **Merge gate (move 1):** how `auto-ok` gates auto-merge — all-green required checks + no
+  unresolved review threads + tier label; where the tier lives (issue label vs. spec
+  frontmatter — dogfood put it in the issue body; labels not yet created in target repos).
+- **Board-driver (later):** local `claude -p` loop vs. scheduled GHA; how it reads/filters
+  the Ready queue by tier. Stays *above* the skill.

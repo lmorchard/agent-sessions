@@ -54,10 +54,11 @@ Scaffolding the **`agent-session`** skill (`skills/agent-session/`) — one skil
 dispatcher (dev-session lineage), shared in-dir reference "engine," heavy modes fan out to
 subagents, board-driver lives above as orchestration.
 
-- **Built (front-of-funnel):** `intake` (spec a new/existing issue → verifiable criteria +
-  tier) and `triage` (batch-augment an under-specified backlog via subagent fan-out), plus
-  the shared engine (`references/acceptance-criteria.md`, `references/spec-template.md`).
+- **Built + validated:** `intake` (spec a new/existing issue → verifiable criteria + tier) —
+  micro-tested *and* dogfooded end-to-end on a real issue. `triage` (batch-augment via
+  subagent fan-out) — built, not yet dogfooded. Shared engine: `acceptance-criteria.md`,
+  `criteria-grammar.md`, `spec-template.md`, `documentarian-prompt.md`.
 - **Pending:** execution modes (`plan`/`execute`/`express`/`pr`, adapted from dev-session)
-  + tiered merge gate, and the board-driver.
+  + tiered merge gate, then the board-driver.
 
 See [docs/design.md](docs/design.md) (design + build log) and [docs/prior-art.md](docs/prior-art.md).
