@@ -37,19 +37,22 @@ model is good at.
    only where the plan needs more detail. For a large surface, dispatch a research subagent per
    `references/documentarian-prompt.md` so the reading stays in its context, not this one.
 
-4. **Re-run every check.** Intake verified these at filing time; time has passed and the repo
-   has moved. Each criterion's check must still **fail** (it grades work not yet done) and each
-   guard must still **pass**. Run them; don't infer either from the spec's record.
-   - A criterion's check that now passes → the behavior arrived, or it was a guard misfiled as
-     a criterion. Surface it; don't posit a replacement.
+4. **Re-confirm the spec's own evidence still holds.** Intake demonstrated each criterion's
+   condition failing, using whatever was runnable *at filing time* — a repro script, an existing
+   test's output, a grep count. Time has passed and the repo has moved, so re-run those
+   demonstrations. This is not the acceptance tests (step 5 writes those); it's checking that the
+   gap the issue describes is still there.
+   - A criterion whose condition no longer holds → the behavior arrived, or it was a guard
+     misfiled as a criterion. Surface it; don't posit a replacement.
    - A guard that now fails → a pre-existing break. Surface it *before* implementing, or you'll
      mistake it for your own regression at the gate.
    - An oracle that has disappeared → that criterion is back to `needs-review`.
 
-5. **Freeze the checks — this is Phase 0 of the plan.** Follow `references/frozen-checks.md`:
-   write `checks.md` with ids `C1…Cn`, dispatch a check-author subagent to write the tests, run
-   each one, confirm it **fails for the expected reason**, commit, record the sha. No
-   implementation code in this phase.
+5. **Freeze the checks — this is Phase 0 of the plan.** Now the acceptance tests get *authored*,
+   which is why step 4 couldn't have run them. Follow `references/frozen-checks.md`: write
+   `checks.md` with ids `C1…Cn`, dispatch a check-author subagent to write the tests, run each
+   one, confirm it **fails for the expected reason**, commit, then record the sha in a follow-up
+   commit. No implementation code in this phase.
 
    Do this before writing the rest of the plan, not after. A check authored after the
    implementation approach is settled tends to test the approach instead of the criterion.

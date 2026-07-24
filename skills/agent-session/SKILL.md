@@ -41,7 +41,7 @@ them only on reaching the relevant step:
 
 | File | What it holds |
 |---|---|
-| `references/acceptance-criteria.md` | The core rules: every criterion names a runnable check; oracle-must-already-exist; concrete-test → property → human-judgment ladder; tier derivation + risk-gated paths |
+| `references/acceptance-criteria.md` | The core rules: every criterion names a runnable check; the three tests every check must pass (oracle exists / discriminates / not satisfiable without the work); criteria vs. guards; tier derivation |
 | `references/criteria-grammar.md` | EARS + Given-When-Then syntax reference (patterns, templates, how to pick) |
 | `references/spec-template.md` | Spec skeleton + readiness checklist, gating on verifiability |
 
@@ -57,34 +57,23 @@ them only on reaching the relevant step:
 **Either half:** `references/documentarian-prompt.md` (neutral framing for research subagents),
 `references/github-projects.md` (optional board transitions).
 
-## Context management (the reason for this structure)
-
-- **The dispatcher is a lazy-loader.** Only one phase file is ever in context. Modes never
-  co-reside, so their instructions cannot bleed into each other — the same laziness that
-  saves tokens also prevents cross-mode confusion.
-- **Heavy modes fan out to subagents.** `triage` (reading/scoring many issues) and the
-  execution modes (reading/editing code) do the token-heavy work in *subagent* contexts
-  and return only compact results. Working context stays in the subagent, not the main
-  loop. See `superpowers:dispatching-parallel-agents`.
-- **The board-driver is NOT part of this skill.** The unattended burndown loop (pick next
-  Ready issue → run → tiered merge) is orchestration that *invokes* this skill repeatedly,
-  each invocation a fresh context. It lives above the skill as a script / GitHub Action.
-
 ## Shared conventions
 
-- **gh CLI** for all GitHub reads/writes. Confirm auth with `gh repo view` before writing.
+- **Heavy modes fan out to subagents.** `triage` (scoring many issues) and the execution modes
+  (reading/editing code) do the token-heavy work in *subagent* contexts and return compact
+  results — working context stays in the subagent. See `superpowers:dispatching-parallel-agents`.
 - **Explicit mode arguments.** `/agent-session <mode>` — the dispatcher never infers.
 - **Verification before completion.** Never claim a criterion is checkable, a spec ready,
   or a phase done without having run the check and read the output. Evidence before claims.
-- **Tier is durable, and the issue body owns it.** Derived at intake/triage time (see
-  `acceptance-criteria.md`) and written into the spec's Tier section *with its reason*. A tier
-  label on the issue is a convenience index for querying — if the two disagree, surface the
-  conflict rather than picking one.
 - **Makefile-first.** Verification commands assume `make lint` / `make test` / `make check`.
   If the project lacks a target, run the native tool, say so, and offer to add the target
   rather than reconstructing the command in three phases.
-- **The skill never merges.** No `gh pr merge`, with or without `--auto`. `pr` derives and
-  reports the merge-gate verdict; acting on it belongs to a human or the board-driver.
+
+## Out of scope
+
+**The board-driver is not part of this skill.** The unattended burndown loop (pick next Ready
+issue → run → tiered merge) is orchestration that *invokes* this skill repeatedly, each run a
+fresh context. It lives above the skill as a script / GitHub Action. Nothing here merges a PR.
 
 ## When NOT to use
 

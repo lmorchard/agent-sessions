@@ -54,19 +54,20 @@ line at each transition:
 |---|---|---|
 | 2a. Plan + freeze | `phases/plan.md` | Phase 0 freeze is mandatory — no override |
 | 2b. Plan self-review | `plan.md`'s self-review step | Replaces the human plan review: fix and continue |
-| 2c. Execute | `phases/execute.md` | Per-phase manual pauses deferred to 2e; per-criterion checks are not deferrable |
+| 2c. Execute | `phases/execute.md` | Per-phase manual pauses deferred to 2f; per-criterion checks are not deferrable |
 | 2d. Independent verification | `execute.md`'s verifier + tamper diff | Never skipped, never self-reported |
-| 2e. Branch self-review | `pr.md`'s **Self-review** section | Catches what the bot reviewer misses |
-| 2f. Rebase, squash, open PR | `pr.md`'s **Rebase and re-verify** + **Squash and open** | Board hook runs here |
-| 2g. Review cycle | `pr.md`'s **Review cycle** | Always run; don't wait for confirmation |
-| 2h. Merge gate | `pr.md`'s **Merge gate** | Report the verdict and stop |
+| 2e. Rebase + re-verify | `pr.md`'s **Rebase and re-verify** | Must precede 2f — a pre-rebase diff hides your changes among upstream's and corrupts both self-review and squash |
+| 2f. Branch self-review | `pr.md`'s **Self-review** section | Catches what the bot reviewer misses |
+| 2g. Tamper check, squash, open PR | `pr.md`'s **Squash and open** | Tamper check runs *before* the squash destroys its baseline; board hook runs here |
+| 2h. Review cycle | `pr.md`'s **Review cycle** | Always run; don't wait for confirmation |
+| 2i. Merge gate | `pr.md`'s **Merge gate** | Report the verdict and stop |
 
 ## What the tier changes
 
 Everything above runs either way — a PR is reversible, so producing one unattended is safe even
 for `needs-review`. What the tier changes is where the run **surfaces to a human**:
 
-- **`auto-ok`** — run straight through 2a–2h without stopping. Report the gate verdict.
+- **`auto-ok`** — run straight through 2a–2i without stopping. Report the gate verdict.
 - **`needs-review`** — same run, plus a stop at each point the tier's reason implies:
   - *A human-judgment criterion.* Produce its `EVIDENCE TO PRESENT`, then stop and ask the human
     to grade it. Don't grade it yourself and don't record it as pending-and-fine; an ungraded
@@ -79,18 +80,14 @@ for `needs-review`. What the tier changes is where the run **surfaces to a human
 The gate itself is always a stop. `eligible-for-auto-merge` is a finding this mode reports, not
 an action it takes.
 
-Feel-driven work needs no special carve-out here the way it does in `dev-session`: subjective
-visual/interaction feel can't reduce to a check, so it arrives as a human-judgment criterion and
-the tier has already routed it to `needs-review`. If it somehow arrived as `auto-ok` with a
-"tune by eye" criterion, that's an intake bug — surface it rather than autonomously locking in
-visual defaults the feel-work will discard.
-
 ## When to break out of autonomous mode
 
 - Plan self-review uncovers a design decision the spec doesn't cover.
 - A check passes at freeze (the behavior already exists — stale issue, or the check doesn't test
   its criterion).
 - A check's oracle no longer exists.
+- An `auto-ok` issue turns out to carry a "tune by eye" criterion — subjective feel can't reduce
+  to a check, so that's an intake bug, not something to lock in visual defaults for.
 - Execute hits a fundamental plan error: wrong API, missing dependency, structural mismatch.
 - A frozen check appears to be wrong.
 - Self-review finds a bug whose fix would change the spec's intent.

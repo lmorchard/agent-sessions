@@ -129,8 +129,10 @@ git diff <freeze-sha> -- <each path in Check files>
 Must be empty. A non-empty diff means a frozen check changed after the freeze — the run's
 green checks are not evidence until that diff is explained by a logged amendment.
 
-Run this at the end of `execute` and again in `pr` before the gate. It's two seconds and it's
-the difference between a claim and a check.
+Run this at the end of `execute`, and again in `pr` **before the squash** — a soft-reset squash
+collapses the freeze commit and the baseline stops being reachable from the branch, so the verdict
+recorded at that point is what the gate cites. It's two seconds and it's the difference between a
+claim and a check.
 
 ### When the work must edit its own oracle
 
@@ -143,30 +145,31 @@ allowed line forms**:
 > `skip`/`xfail` marker, or signature change. Sanctioned: `<the specific edit the plan calls
 > for>`.
 
-"Every added line must be a `@pytest.mark.filterwarnings` decorator" looks stricter and is
-worse: it fires on inert additions like an explanatory comment. **False positives are how a
-safety mechanism gets disabled** — a rule that cries wolf on comments teaches the operator to
-wave the rule through, which costs more than the rule ever bought. Write what must stay true,
-not what a line may look like. Pair it with a behavioural guard (the tests still run and pass),
-which is what actually catches a weakened oracle.
-
-### Amendment vs. clarification
-
-- **Amendment** — changes what a criterion or guard *asserts*. Full path: stop, human-confirm,
-  log, **downgrade the run to `needs-review`**.
-- **Clarification** — fixes wording that never matched its own intent and alters no criterion
-  or guard. Log it, no tier change.
-
-The line is narrow on purpose, and the guard against relabelling an amendment as a
-clarification is that a clarification still needs a human to adjudicate, and the verifier's
-substantive finding has to be on the record. If you're arguing that a check *means* something
-other than what it says, and the difference decides pass or fail, that's an amendment.
+A whitelist of permitted line forms ("every added line must be a `filterwarnings` decorator")
+looks stricter and is worse: it fires on inert additions like a comment, and a rule that cries
+wolf gets waved through. Pair the invariant with a behavioural guard — the tests still run and
+pass — which is what actually catches a weakened oracle.
 
 ## When a check is genuinely wrong
 
 Sometimes it is: a path typo'd at intake, a fixture renamed since, a criterion whose check
-mis-states the criterion. A rule that never bends would strand a good run on a typo. So there
-is one path, and it is deliberately visible and costly:
+mis-states the criterion. A rule that never bends would strand a good run on a typo. Two paths,
+depending on what actually changes:
+
+- **Clarification** — the wording never matched its own intent, and fixing it alters no
+  criterion or guard. Log it; no tier change.
+- **Amendment** — it changes what a criterion or guard *asserts*. Follow the five steps below,
+  ending in a tier downgrade.
+
+The line is mechanical, not rhetorical: **re-run every criterion and guard under both the old and
+the new wording. If any verdict changes, it's an amendment.** A clarification can't change what
+passes — that's what makes it a clarification. Both paths need a human to adjudicate and put the
+verifier's finding on the record; only the amendment path costs the tier.
+
+The reason the cheap path exists at all: downgrading a run over a typo is a false positive, and
+false positives train the operator to wave the mechanism through.
+
+The amendment path is deliberately visible and costly:
 
 1. **STOP.** Do not edit the check.
 2. State the case explicitly: what the check asserts, what the criterion says, why the check
@@ -186,7 +189,11 @@ stay autonomous gains nothing by it.
 "The implementation would be cleaner if the check allowed X" is not a wrong check — that's the
 check doing its job. Only a check that fails to test its own criterion qualifies.
 
-## The gate condition
+## The verification gate
+
+This is the *verification* half only. `phases/pr.md` owns the **merge** gate, which adds tier,
+unresolved review threads, and risk-gated paths on top of everything here — don't read this list
+as complete for merge purposes.
 
 A run's verification passes when **all** hold:
 

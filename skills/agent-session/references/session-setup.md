@@ -27,7 +27,6 @@ and a drifted worktree path means a run that tests the wrong branch.
    fresh. If resuming, suggest the next mode and stop here.
 
 3. **Fetch the issue and detect the marker.** `gh issue view <n> --json title,body,labels`.
-   Confirm `gh` auth first (`gh repo view`).
    - **`<!-- agent-session:spec -->` present** — the issue carries a spec with verifiable
      criteria. Capture the body (strip the marker line and any trailing `_Filed by_` footer).
    - **Marker absent** — the issue has not been through the front of the funnel. It has no
@@ -48,15 +47,11 @@ and a drifted worktree path means a run that tests the wrong branch.
 7. **Set up an isolated worktree.** Prefer `superpowers:using-git-worktrees` if available —
    it handles directory priority, gitignore verification, dependency install detection, and a
    baseline test run. Fallback:
-   a. **Use the project's existing worktree location, don't impose one.** Run `git worktree
-      list` — if the repo already keeps worktrees somewhere (`.claude/worktrees/`, `worktrees/`,
-      a sibling directory), use that. Only fall back to `.worktrees/` when there's no precedent.
-      A second convention in a repo that already has one is a mess you're leaving for someone.
-   b. Confirm the chosen location is ignored (an existing convention usually already is — e.g.
-      `.claude/worktrees/` under an ignored `.claude/`). If it isn't and you'd have to add it:
-      **don't commit that to the default branch.** Put the `.gitignore` line on the feature
-      branch, or pick a location that's already ignored. Committing unrelated changes to `main`
-      to satisfy setup is out of scope for the run and out of bounds besides.
+   a. **Use the project's existing worktree location.** `git worktree list` — if the repo already
+      keeps them somewhere (`.claude/worktrees/`, `worktrees/`, a sibling dir), use that; only fall
+      back to `.worktrees/` with no precedent.
+   b. Confirm it's ignored. If it isn't, put the `.gitignore` line on the feature branch or pick an
+      already-ignored location — don't commit setup changes to the default branch.
    c. `git worktree add {location}/{branch-name} -b {branch-name}`
    d. `cd` into the worktree.
    e. Run project setup auto-detected from project files (venv / `npm install` / `go mod

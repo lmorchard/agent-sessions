@@ -5,8 +5,7 @@ Self-review, squash, push, open a PR, run the review cycle, and **stop at the me
 Reads `references/frozen-checks.md` (gate condition), `references/pr-body-template.md` (body +
 gate block), `references/github-projects.md` (board hook).
 
-The gate is where this mode ends. **This skill never merges a PR and never enables auto-merge.**
-It reports whether the gate is satisfied; acting on that is a human's or the board-driver's job.
+The gate is where this mode ends: it reports whether the gate is satisfied and stops.
 
 ## Inputs
 
@@ -39,16 +38,6 @@ It reports whether the gate is satisfied; acting on that is a human's or the boa
    Then re-run the tamper check: a conflict resolution inside a frozen check file is an edit to
    a frozen check, whoever made it.
 
-   **Expect guards pinned to absolute numbers to trip here.** Upstream adds tests, so a guard
-   written as `3234 passed` goes stale while the property it protects — nothing lost, newly
-   skipped, or newly failing — still holds. That's a mis-stated guard, not a regression: restate
-   it as the invariant and log a clarification. Better, don't pin counts at intake.
-
-3. **Run the tamper check before squashing, and record the result.** `git reset --soft
-   origin/main` collapses the freeze commit away, so afterwards the baseline is unreachable from
-   the branch (the object survives locally until GC, but not for a reviewer or CI). The tamper
-   verdict recorded in `checks.md` and the gate block is the durable evidence — or keep the
-   freeze commit as the PR's first commit instead of squashing it away.
 
 ## Self-review
 
@@ -72,7 +61,13 @@ It reports whether the gate is satisfied; acting on that is a human's or the boa
    files that landed in between (a sibling PR merging is enough). If new commits appear, redo
    the rebase and re-verification.
 
-5. **Squash** all branch commits into one with a comprehensive message, and **push**.
+5. **Run the tamper check, then squash.** In this order, because `git reset --soft origin/main`
+   collapses the freeze commit away and the baseline becomes unreachable from the branch (the
+   object survives locally until GC, but not for a reviewer or CI). So: run
+   `git diff <freeze-sha> -- <check files>`, **record the verdict in `checks.md` and the gate
+   block** — that record is the durable evidence the gate cites, since the command won't be
+   reproducible afterwards. Then squash all branch commits into one with a comprehensive message,
+   and **push**.
 
 6. **Open the PR** using `references/pr-body-template.md`. Title under 70 chars. Fill the
    **Acceptance criteria** table from the *independent verifier's* report — never from the
@@ -84,13 +79,12 @@ It reports whether the gate is satisfied; acting on that is a human's or the boa
 
 ## Review cycle
 
-8. **Request a review:**
+8. **Record the current comment count as a baseline**, then **request a review**:
    ```
    gh pr edit <number> --add-reviewer copilot-pull-request-reviewer
    ```
-   That slug is the current GitHub-published bot identity; if it's renamed or this install uses
-   a different one, the command silently no-ops. Confirm with `gh api
-   repos/{owner}/{repo}/assignees | jq '.[] | select(.type=="Bot")'` if unsure.
+   `gh api repos/{owner}/{repo}/pulls/{number}/comments --jq 'length'` — step 9 needs that number
+   to tell a new comment from an existing one.
 
 9. **Poll for new comments.** `gh api repos/{owner}/{repo}/pulls/{number}/comments --jq
    'length'` every 30s for up to 10 minutes; stop early once the count exceeds the pre-request
@@ -115,21 +109,26 @@ It reports whether the gate is satisfied; acting on that is a human's or the boa
 11. **Fix worthwhile comments**, then re-run the criteria's checks (a fix can break a
     criterion), lint, and commit.
 
-12. **Squash again and force-push** with `--force-with-lease` — it refuses if the remote has
+12. **Re-dispatch the independent verifier** if anything changed since the last report — a rebase
+    re-verification or a review-cycle fix means the standing report describes an earlier tree, and
+    every gate row below sources from *the verifier's* run, not the implementer's. Fresh context,
+    `checks.md` and the repo only, per `references/frozen-checks.md`.
+
+13. **Squash again and force-push** with `--force-with-lease` — it refuses if the remote has
     commits you haven't fetched, preventing silent overwrites of work pushed from another
     machine. Re-check `origin/main` first; main may have advanced during the poll-and-fix cycle.
     **Refresh the gate block** so it describes the pushed state.
 
 ## Merge gate
 
-13. **Derive the verdict.** Not a judgment call — read each row and take the result:
+14. **Derive the verdict.** Not a judgment call — read each row and take the result:
 
     | Condition | Source |
     |---|---|
-    | Every criterion with a check: `pass` | The independent verifier's report |
+    | Every criterion with a check: `pass` | The independent verifier's report (step 12's, if it re-ran) |
     | Every human-judgment criterion: graded by a human | `checks.md` evidence + an actual human answer |
     | Every guard still `pass` | The verifier's report — a pass→fail flip is a regression you caused |
-    | Tamper diff clean, or every difference logged as an amendment | `git diff <freeze-sha> -- <check files>` |
+    | Tamper diff clean, or every difference logged as an amendment | The verdict recorded at step 5 (pre-squash) |
     | Project gates green | `make check` on the pushed head |
     | No unresolved review threads | `gh pr view <n> --json reviewThreads` |
     | Tier is `auto-ok` (and not downgraded by an amendment) | `spec.md` Tier section |
@@ -141,9 +140,9 @@ It reports whether the gate is satisfied; acting on that is a human's or the boa
     A `needs-review` tier is never eligible, however green the checks. That's the tier doing its
     job — it was set because something here isn't check-decidable.
 
-14. **Stop.** Report the PR URL, the verdict + reason, what was fixed, and what was skipped or
-    deferred. Do not merge. Do not run `gh pr merge`, with or without `--auto`. `eligible-for-
-    auto-merge` is a *finding*; the unattended loop that acts on it lives above this skill.
+15. **Stop.** Report the PR URL, the verdict + reason, what was fixed, and what was skipped or
+    deferred. Do not merge — no `gh pr merge`, with or without `--auto`. `eligible-for-auto-merge` is a
+    *finding*; the unattended loop that acts on it lives above this skill.
 
 ## When to skip
 

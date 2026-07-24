@@ -22,8 +22,7 @@ and stop; don't re-interview.
 
 ## Process
 
-1. **Read the source thoroughly** (prompt or issue body). Confirm `gh` auth if a URL is
-   given (`gh repo view`).
+1. **Read the source thoroughly** (prompt or issue body).
 
 2. **Codebase research substep** (skip only for changes so localized context is obvious).
    Dispatch a documentarian subagent (`Explore`/`general-purpose`) framed per
@@ -46,28 +45,35 @@ and stop; don't re-interview.
    ladder aloud (property? else human-judgment?) so the user sees *why* it lands where it
    does. The standing follow-up whenever an answer stays vague: *"how would we actually
    know — what command or test proves that?"*
-   **Before finalizing each criterion, run its check.** The command / test / fixture / harness
-   it names must be real today *and* must **fail on current behavior** — a check that already
-   passes will still pass if nothing gets built. Actually run it and record the failure; don't
-   infer either property from a table in the issue or from the command merely existing. Then
-   apply `acceptance-criteria.md`: an oracle that must first be built, or one that can't
-   reproduce the condition the criterion is about, makes the criterion `needs-review`, not
-   `auto-ok` (building the oracle can be its own `auto-ok` prerequisite).
 
-   **A check that passes today is a guard, not a criterion** — file it under Regression guards
-   and keep looking for what this work makes newly true. Expect small cleanup and refactor issues
-   to land as one criterion plus several guards; if *everything* passes today, you have no
-   criteria yet. Run the guards too, and confirm they pass now — a guard that already fails is a
-   pre-existing break worth naming before anyone implements against it.
+5. **Demonstrate that each criterion's condition fails today.** Not "assert that it does" — show
+   it, with a command you actually ran, and record the output.
 
-5. **Derive the tier** (`auto-ok` / `needs-review`) mechanically from the criteria + risk
+   **You are proving the behavior is absent, not running the final acceptance test.** That test
+   often doesn't exist yet, and by design it isn't written until `plan`'s freeze phase — so use
+   whatever runnable means demonstrates the gap *now*: a throwaway reproduction script, the
+   output of an existing test, a `grep -c` with the wrong count, a one-line interpreter call.
+   "The test node doesn't exist yet" (`no tests ran`) is **not** a demonstration — that's the same
+   output a typo'd name gives, and it would be satisfied by an empty test body.
+
+   Then apply the three tests in `acceptance-criteria.md` (oracle exists / discriminates / not
+   satisfiable without the work). A criterion that fails any of them is `needs-review`, not
+   `auto-ok` — building a missing oracle can be its own `auto-ok` prerequisite.
+
+6. **Sort criteria from guards.** A check that passes today is a **guard**, not a criterion — file
+   it under Regression guards and keep looking for what this work makes newly true. Expect small
+   cleanup and refactor issues to land as one criterion plus several guards; if *everything*
+   passes today, you have no criteria yet. Run the guards too and confirm they pass now — one that
+   already fails is a pre-existing break worth naming before anyone implements against it.
+
+7. **Derive the tier** (`auto-ok` / `needs-review`) mechanically from the criteria + risk
    paths. State it and its reason; don't editorialize it upward or downward.
 
-6. **Write the spec** to the `spec-template.md` structure. Run the **readiness checklist**.
+8. **Write the spec** to the `spec-template.md` structure. Run the **readiness checklist**.
    Fix failures inline. Show the user the spec (goal, criteria+checks, tier, what-we're-NOT-
    doing) and get confirmation before filing.
 
-7. **File or update the issue.**
+9. **File or update the issue.**
    - *New:* `gh issue create` with body = `<!-- agent-session:spec -->` + spec; title from
      the Goal (<70 chars); apply the tier label (`--label`); add to the board's Ready
      column if configured.
@@ -75,7 +81,7 @@ and stop; don't re-interview.
      spec sections, apply the tier label. **Preserve the original author's text**; augment,
      don't overwrite intent.
 
-8. **Report** the issue URL, the tier + reason, and the resume command.
+10. **Report** the issue URL, the tier + reason, and the resume command.
 
 ## Escalation — stop and surface when
 

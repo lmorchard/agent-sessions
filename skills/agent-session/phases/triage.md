@@ -18,7 +18,7 @@ criteria), and you do the part that does (ratify). See
 
 ## Process
 
-1. **Scope the scan.** Confirm `gh` auth. Get the candidate set — `gh issue list` filtered
+1. **Scope the scan.** Get the candidate set — `gh issue list` filtered
    by label/board column/query (e.g. all open, or the Backlog column). Confirm the scope
    with the user before fanning out (a scan of 200 issues is a lot of subagents).
 
@@ -65,7 +65,7 @@ criteria), and you do the part that does (ratify). See
    on the open questions the subagent flagged. Where a criterion won't reduce to a check,
    apply the escalation ladder — it lands the issue in `needs-review`.
 
-5. **Write back (augment in place).** For each ratified issue, run `intake` step 7's
+5. **Write back (augment in place).** For each ratified issue, run `intake`'s file-or-update step,
    *existing-issue* path: `gh issue edit <n>` — prepend the marker, add the verifiable
    criteria + tier sections, apply the tier label, **preserving the original author's
    text**. Update the board if configured.

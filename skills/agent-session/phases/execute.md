@@ -37,7 +37,6 @@ fix-up.
 1. **Load and review.** Read `plan.md`, `checks.md`, and `spec.md`. Confirm the freeze commit
    exists (`checks.md`'s `Frozen at` sha resolves) — if it doesn't, Phase 0 never happened;
    go back to `plan`. Check existing checkboxes and resume from the first unchecked phase.
-   Critically review the plan: concerns, missing pieces, ordering problems? Raise them now.
 
 2. **For each phase:**
    - Read every file the phase references before changing anything.
@@ -58,9 +57,8 @@ fix-up.
      criterion, that's a **STOP** — follow the amendment path in
      `references/frozen-checks.md` (surface it, get confirmation, log it, tier drops to
      `needs-review`). Never resolve it inline.
-   - **Pre-commit `git status`.** Confirm every file the phase meant to touch is staged and
-     nothing unexpected is. Catches the "subagent did `git mv`, edited, forgot `git add`"
-     failure where a commit lands a stale renamed file while the working tree still tests green.
+   - **Pre-commit `git status`.** Confirm every file the phase meant to touch is staged and nothing
+     unexpected is — an unstaged rename lands a stale file while the working tree still tests green.
    - Commit as one commit (`Phase N: <name>`) — keeps phases independently revertable.
    - Manual verification items: interactive mode waits for confirmation; `express` collects the
      evidence and defers the human pause per its tier rules.
@@ -92,8 +90,9 @@ fix-up.
 
 ## Resuming after context reset
 
-- **Verify the working directory.** `pwd` — confirm you're inside `.worktrees/{branch-name}/`.
-  Running tests or commits from the main checkout hits the wrong branch.
+- **Verify the working directory.** `pwd` — confirm you're inside the session's worktree (whatever location the project uses; see
+  `references/session-setup.md`). Running tests or commits from the main checkout hits the wrong
+  branch.
 - Read `plan.md` (ticked boxes = done) and `checks.md` (the definition of done).
 - **Re-run the last completed phase's checks.** Trust completed work only after fresh evidence.
   Also re-run the tamper diff — a reset is exactly when an unlogged check edit goes unnoticed.

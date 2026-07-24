@@ -92,5 +92,3 @@ No implementation in this phase.
 - **No placeholders.** "TBD", "add appropriate error handling" without showing how, "write
   tests for the above" without the tests, or references to types no phase defines — all plan
   failures.
-- **Aim for proportionality.** Roughly 1 line of plan per 1-2 lines of expected code. Much
-  longer and you're writing the implementation; much shorter and you're missing detail.
