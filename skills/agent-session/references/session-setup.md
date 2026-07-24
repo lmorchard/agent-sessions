@@ -8,7 +8,7 @@ and a drifted worktree path means a run that tests the wrong branch.
 
 ## Outputs
 
-- Feature branch + worktree at `.worktrees/{branch-name}/`, dependencies installed, baseline
+- Feature branch + worktree at the project's worktree location, dependencies installed, baseline
   test status reported (green → proceed; red → surface for the human to decide)
 - Session directory at `{base}/{timestamp}-{slug}/` with `spec.md` populated from the issue,
   and `checks.md` / `plan.md` / `notes.md` empty
@@ -48,12 +48,20 @@ and a drifted worktree path means a run that tests the wrong branch.
 7. **Set up an isolated worktree.** Prefer `superpowers:using-git-worktrees` if available —
    it handles directory priority, gitignore verification, dependency install detection, and a
    baseline test run. Fallback:
-   a. Verify `.worktrees/` is in `.gitignore`; if not, add and commit it.
-   b. `git worktree add .worktrees/{branch-name} -b {branch-name}`
-   c. `cd` into the worktree.
-   d. Run project setup auto-detected from project files (venv / `npm install` / `go mod
+   a. **Use the project's existing worktree location, don't impose one.** Run `git worktree
+      list` — if the repo already keeps worktrees somewhere (`.claude/worktrees/`, `worktrees/`,
+      a sibling directory), use that. Only fall back to `.worktrees/` when there's no precedent.
+      A second convention in a repo that already has one is a mess you're leaving for someone.
+   b. Confirm the chosen location is ignored (an existing convention usually already is — e.g.
+      `.claude/worktrees/` under an ignored `.claude/`). If it isn't and you'd have to add it:
+      **don't commit that to the default branch.** Put the `.gitignore` line on the feature
+      branch, or pick a location that's already ignored. Committing unrelated changes to `main`
+      to satisfy setup is out of scope for the run and out of bounds besides.
+   c. `git worktree add {location}/{branch-name} -b {branch-name}`
+   d. `cd` into the worktree.
+   e. Run project setup auto-detected from project files (venv / `npm install` / `go mod
       download` / `cargo build`).
-   e. Run the test suite for a clean baseline. **Report failures rather than proceeding
+   f. Run the test suite for a clean baseline. **Report failures rather than proceeding
       silently** — a red baseline makes every later check ambiguous, since you can no longer
       tell your failure from the pre-existing one.
 

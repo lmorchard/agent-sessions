@@ -80,7 +80,12 @@ Phase 0 of every plan, no implementation in it:
    import error, a typo'd path, or a missing fixture is not yet a check; it would pass later
    for reasons unrelated to the criterion. Record the observed failure per criterion in
    `AT FREEZE`.
-4. Commit. Record the sha as `Frozen at`. That sha is the reference point for the tamper diff.
+4. Commit. Then record that commit's sha as `Frozen at` **in a follow-up commit** — a commit
+   cannot contain its own hash, so this is two commits, not one. The freeze commit (the first)
+   is the tamper-diff baseline; the second just writes the sha down.
+
+   Re-anchor the sha if the branch is ever rebased, and run the tamper check before any squash
+   that would collapse the freeze commit away — see `phases/pr.md`.
 
 A **criterion's** check that *passes* at freeze means the behavior already exists — surface it,
 don't proceed. Either the criterion is already satisfied (the issue may be stale), the check
