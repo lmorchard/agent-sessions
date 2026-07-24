@@ -413,6 +413,36 @@ Augmented on GitHub (marker + criteria + guards + tier, author text preserved ve
 
 **Queue state: 2 `auto-ok` issues ready for the loop** (585, 586).
 
+### Consolidation pass (2026-07-24, end of day)
+
+A fresh-context reviewer read the whole skill cold — the one review the author structurally can't
+do. Verdict: *"not a pile of rules; it's one engine with stale copies of an earlier draft bolted
+to its consumers,"* which reframed the work as propagation + deletion rather than redesign. It
+found **8 correctness bugs**, the two worst being (a) `intake` instructing you to *run* a check
+that by design isn't authored until `plan`'s freeze — which is also why the triage batch produced
+the weak `no tests ran` signal — and (b) the merge gate sourcing every row from a verifier report
+that predates the rebase re-verification and review fixes, making it unsatisfiable honestly (a
+rule the #638 run violated unnoticed).
+
+Three rules micro-tested, 5 reps/arm — and the results went all three ways, which is the point:
+
+| Rule | Result | Action |
+|---|---|---|
+| Gameability (satisfiable-without-the-work) | control 0/5 on the test-as-oracle case, treatment 5/5 | **keep** |
+| Goal-ambiguity tier trigger | control 5/5 *without* it — folds into the human-judgment trigger unprompted | **cut** (18 lines → 4) |
+| `criteria-grammar.md` | control picks the right EARS pattern 1/5, 1/5, 2/5, 5/5 across four requirement shapes; treatment 5/5 on all four | **keep** |
+
+The grammar result is the most instructive. The cold reviewer's most confident deletion was
+"it teaches EARS to a model that already knows EARS" — plausible, and wrong. The model knows *of*
+EARS but defaults nearly everything to `WHEN`, losing Ubiquitous (always-true invariants) and
+`WHILE` (state-driven), and missing `IF/THEN` for the error path 3 times in 5. Those patterns map
+to different check shapes, so flattening them costs the criterion→assertion mapping the grammar
+exists to produce. **Confident architectural review is not a substitute for measurement**, even —
+especially — when it agrees with your own instinct to cut.
+
+Net line count came out roughly flat (1674 → 1658): the correctness fixes added about what the
+deletions removed. The gain was coherence and 8 fixed bugs, not size.
+
 Pending: the **board-driver** orchestration (above the skill); `express` still never run; the
 `needs-review` routing branch still unexercised; an interactive-intake check of the empty-state
 observation; and a consolidation/trim pass — the skill gained ~10 rules in a day, and only two of
