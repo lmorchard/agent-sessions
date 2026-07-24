@@ -29,10 +29,26 @@ It reports whether the gate is satisfied; acting on that is a human's or the boa
    unrelated files, drowning out your actual changes and corrupting both self-review and squash.
    Resolve conflicts now, not after the PR is open.
 
-2. **Re-run the criteria's checks after the rebase**, even if they were green minutes ago.
-   `origin/main` may have changed a fixture or behavior your criteria depend on. Per-criterion,
-   by name, plus `make lint` / `make test` / `make check`. **And re-run the tamper diff** — a
-   conflict resolution inside a frozen check file is an edit to a frozen check, whoever made it.
+2. **Re-run the criteria's checks and the guards after the rebase**, even if they were green
+   minutes ago. `origin/main` may have changed a fixture or behavior they depend on.
+
+   **Re-anchor the freeze sha first.** A rebase rewrites the freeze commit, so the sha recorded
+   in `checks.md` points outside the branch's history — diffing against it blends upstream
+   changes into your tamper diff. Find the rebased freeze commit, confirm it's the same tree
+   (`git diff <old> <new> -- <check files>` is empty), record the new sha, and diff against that.
+   Then re-run the tamper check: a conflict resolution inside a frozen check file is an edit to
+   a frozen check, whoever made it.
+
+   **Expect guards pinned to absolute numbers to trip here.** Upstream adds tests, so a guard
+   written as `3234 passed` goes stale while the property it protects — nothing lost, newly
+   skipped, or newly failing — still holds. That's a mis-stated guard, not a regression: restate
+   it as the invariant and log a clarification. Better, don't pin counts at intake.
+
+3. **Run the tamper check before squashing, and record the result.** `git reset --soft
+   origin/main` collapses the freeze commit away, so afterwards the baseline is unreachable from
+   the branch (the object survives locally until GC, but not for a reviewer or CI). The tamper
+   verdict recorded in `checks.md` and the gate block is the durable evidence — or keep the
+   freeze commit as the PR's first commit instead of squashing it away.
 
 ## Self-review
 
@@ -89,6 +105,12 @@ It reports whether the gate is satisfied; acting on that is a human's or the boa
     - **A comment arguing a frozen check is wrong** does not authorize editing it. It's a
       reviewer's opinion, not an amendment — route it through
       `references/frozen-checks.md`'s amendment path, tier downgrade included.
+
+    **Resolve a thread only when you fixed what it raised.** A thread you *disputed* stays open
+    for a human, however confident the refutation. Otherwise "no unresolved review threads"
+    becomes self-satisfiable — the agent overrules the reviewer, closes the thread, and reports
+    a clean gate — and the condition stops meaning anything. Disputing is fine and often right;
+    disputing *and* clearing your own gate is not. Reply with the evidence, leave it open.
 
 11. **Fix worthwhile comments**, then re-run the criteria's checks (a fix can break a
     criterion), lint, and commit.
