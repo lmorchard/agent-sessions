@@ -127,6 +127,36 @@ green checks are not evidence until that diff is explained by a logged amendment
 Run this at the end of `execute` and again in `pr` before the gate. It's two seconds and it's
 the difference between a claim and a check.
 
+### When the work must edit its own oracle
+
+Test-infrastructure issues break the assumption that check files and implementation files are
+disjoint — the files to change *are* the oracle. A whole-file diff would flag the sanctioned
+edit, so scope the check instead, and **state it as an invariant, never as a whitelist of
+allowed line forms**:
+
+> No line in the diff may change what any frozen check asserts — no test body, assertion,
+> `skip`/`xfail` marker, or signature change. Sanctioned: `<the specific edit the plan calls
+> for>`.
+
+"Every added line must be a `@pytest.mark.filterwarnings` decorator" looks stricter and is
+worse: it fires on inert additions like an explanatory comment. **False positives are how a
+safety mechanism gets disabled** — a rule that cries wolf on comments teaches the operator to
+wave the rule through, which costs more than the rule ever bought. Write what must stay true,
+not what a line may look like. Pair it with a behavioural guard (the tests still run and pass),
+which is what actually catches a weakened oracle.
+
+### Amendment vs. clarification
+
+- **Amendment** — changes what a criterion or guard *asserts*. Full path: stop, human-confirm,
+  log, **downgrade the run to `needs-review`**.
+- **Clarification** — fixes wording that never matched its own intent and alters no criterion
+  or guard. Log it, no tier change.
+
+The line is narrow on purpose, and the guard against relabelling an amendment as a
+clarification is that a clarification still needs a human to adjudicate, and the verifier's
+substantive finding has to be on the record. If you're arguing that a check *means* something
+other than what it says, and the difference decides pass or fail, that's an amendment.
+
 ## When a check is genuinely wrong
 
 Sometimes it is: a path typo'd at intake, a fixture renamed since, a criterion whose check
