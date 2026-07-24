@@ -86,7 +86,11 @@ fix-up.
 ## When to skip
 
 - No `plan.md`, or no freeze commit → run `plan` first; don't improvise.
-- A single trivial edit → make it and go to `pr`.
+- A single trivial edit → skip the *phase machinery* (per-phase commits, slice unit tests, a
+  subagent per phase) and make the edit directly. **Step 4's independent verification is not part
+  of what you skip**, and neither are the guards. A one-line diff is the case where self-reporting
+  feels most obviously harmless, which is why it's the case where the habit forms. Most issues an
+  unattended loop picks up are this size.
 
 ## Resuming after context reset
 

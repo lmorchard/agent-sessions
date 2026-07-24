@@ -32,6 +32,11 @@ Fetch the issue. Three checks, in order — each is a stop, not a warning:
 2. **Readiness.** Run the readiness checklist from `references/spec-template.md` against the
    issue's spec. A spec that fails the gate can't be executed autonomously; route to `intake`.
 
+   Most issues reaching this mode were **augmented in place** by `intake` or `triage`, not written
+   to the full template — so apply the checklist's *augmented existing issue* variant. Against the
+   full checklist they fail on sections augmentation never emits, and routing them to `intake`
+   sends them back to the mode that produced them. Say which variant you applied.
+
 3. **Size.** The tier says whether the work is *safe* unattended; it says nothing about whether
    one run can *finish* it. A well-specified XL issue spanning several subsystems is still a bad
    express fit — **push back and recommend `plan` + `execute` interactively**, rather than

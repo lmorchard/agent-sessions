@@ -443,15 +443,100 @@ especially — when it agrees with your own instinct to cut.
 Net line count came out roughly flat (1674 → 1658): the correctness fixes added about what the
 deletions removed. The gain was coherence and 8 fixed bugs, not size.
 
-**Next session: `express` (move 2).** Brief at [handoff-express.md](handoff-express.md). Fresh
-context is load-bearing there, not just hygiene — `express` consumes an issue cold through the
-marker, so the context that wrote the criteria can't test the seam. Vehicles ready: #586 and #585
-(`auto-ok`), or 566/625 for the untested `needs-review` branch.
+### `express` dogfood — decafclaw #586 → PR #665 (2026-07-24, move 2)
 
-Pending: the **board-driver** orchestration (above the skill); `express` still never run; the
-`needs-review` routing branch still unexercised; an interactive-intake check of the empty-state
-observation; and a consolidation/trim pass — the skill gained ~10 rules in a day, and only two of
-them (the read-only rule, and the discriminate rule via this batch) have real evidence behind them.
+**`express` ran end to end for the first time**, cold through the marker the way a driver would
+invoke it: [PR #665](https://github.com/lmorchard/decafclaw/pull/665), verdict
+**`eligible-for-auto-merge`** — the first time that verdict has been reached. Three of the four
+things the handoff flagged came out clean: the size check didn't push back on an XS issue; the
+chain genuinely chained (session dir, freeze sha, `checks.md` handed off across plan → execute →
+pr with no state carried in the driver's head); and `auto-ok` produced no spurious stops.
+
+Also the first dogfood where **the issue's facts held up** — #129's AC1 was vacuous and #638's
+mechanism description was wrong, but #586's claim about `iter_conversation_archives` checked out and
+both greps still returned `1` at the lines the issue named. The triage-side discriminate rule works.
+
+**The headline finding: `eligible-for-auto-merge` was reached with two of eight gate rows satisfied
+by substitute evidence rather than by the mechanism the gate cites.** Both are now fixed.
+
+1. **The gate cited a command that does not exist.** `gh pr view <n> --json reviewThreads` — not a
+   valid field (gh 2.96.0); it errors and prints the field list, which reads a lot like "no
+   threads." One of eight rows had no runnable command. Replaced with a verified GraphQL query
+   (tested in its line-wrapped form, since a hard wrap inside a code fence is what misled Copilot
+   on #638).
+2. **The tamper mechanism is vacuous when criteria are commands rather than test files** — the
+   shape a board-driver will meet most often. `Check files` empty ⇒ the read-only rule protects
+   nothing, `git diff <freeze-sha> -- <check files>` has nothing to compare, and the freeze's
+   "author the tests" step is a no-op. Worse, the `tamper:` vocabulary was `clean | amended |
+   DIRTY`, so the honest result rendered as `clean` and a machine reader could not distinguish
+   *diffed-and-clean* from *nothing-to-diff*. **A null was being reported as a positive.** New
+   `frozen-checks.md` section defines three substitutes (manifest integrity as an invariant,
+   byte-equality against the issue, no collateral edits) and a `clean-by-substitute` verdict value.
+3. **`checks.md` was outside its own tamper baseline** — and for command-based criteria the manifest
+   *is* the entire oracle. The non-obvious part: it can't simply be added, because the freeze
+   procedure guarantees the file differs (the sha lands in a follow-up commit) and `pr` step 5
+   mandates writing the tamper verdict into it. So it had to become an invariant over *what*
+   changed — no CRITERION/CHECK/guard line may differ; appends are inert — which is the lesson
+   `frozen-checks.md` already taught about tamper rules and had not applied to itself.
+4. **`execute.md`'s trivial-edit skip could drop the verifier `express` calls non-skippable.** "A
+   single trivial edit → make it and go to `pr`" bypasses step 4. #586 *is* a single trivial edit,
+   and so is most of what an unattended loop picks up. Now scoped to skipping the phase machinery
+   only.
+5. **The gate block was published before its rows were knowable.** Step 6 filled it at PR-open, but
+   `threads` and the post-review verifier report only exist at step 14 — so a machine-readable
+   `verdict: eligible-for-auto-merge` sat in the body throughout the review cycle, actionable by a
+   driver polling PRs. Now opens `verdict: pending`.
+6. **Express's readiness precondition could not be passed by this skill's own output.** Checklist
+   item 6 wants a "What we're NOT doing" section; `triage`'s write-back emits marker + criteria +
+   guards + tier only. So #586 — specced and stamped `auto-ok` *by this skill* — failed its own
+   readiness gate on a literal reading, whose remedy is "route to `intake`," i.e. back to the mode
+   that just produced it. Fixed with an **augmented-existing-issue variant** of the checklist
+   (items 1–5 and 7 unchanged; item 6 becomes "scope bounded somewhere in the body"; missing
+   template sections are not failures, a missing criterion still is), wired into `express` and
+   `plan`.
+
+**The verifier earned its place again.** Dispatched as `Explore` (no Edit/Write), it established
+that post-squash the freeze commit is a dangling local object — resolvable locally, *not* an
+ancestor of HEAD, `fatal: couldn't find remote ref` against origin — so nobody else can reproduce
+the tamper diff and the pre-squash record does all the work, exactly as `pr.md` predicts. Now
+stated in `pr.md` where the record is written.
+
+**Self-review caught what neither the criteria nor Copilot did:** guard G1's `12 passed` is mostly
+irrelevant tests — 8 of 12 are `test_startup_scan_workflows_*`, a different method (#581) the change
+never touches. Only 4 exercise `startup_scan` and exactly 1 covers the missing-directory path at
+issue. Verified empirically that the one does (the `config` fixture's `data_home` is a bare
+`tmp_path` and `workspace_path` isn't created eagerly). Left un-narrowed — editing a frozen guard
+mid-run is what the contract forbids — and recorded in the PR instead. **Generalizable: a guard's
+pass count is not a coverage measure, and `-k` selections silently include neighbours.**
+
+Two findings left unfixed by agreement: `plan.md` step 10's "every phase advances at least one
+`Cn`" flags Phase 0, which by the template's own design advances none (wording nit). And board
+transitions silently no-op on decafclaw (no `## GitHub Project` in its `CLAUDE.md`) — correct per
+the rules, but an operator can't distinguish "no board" from "transition failed," and decafclaw does
+have the board (project 6) the driver premise assumes.
+
+One deviation owned rather than hidden: `execute.md` says to invoke `subagent-driven-development`
+unconditionally when available; a 4-line deletion got done inline instead. Left alone deliberately —
+an `unless trivial` clause is exactly the nuance-on-a-winning-recipe that degrades things, and it
+cuts against finding 4's direction. Measure before touching.
+
+**Still unexercised:** the `needs-review` branch, the amendment path, and multi-phase `execute` with
+real implementer subagents. #586 was two greps on a 4-line diff, so it tested the *chain*, not the
+*work* — a vehicle for the latter needs its own `intake` pass on something larger.
+
+**Move 2 is done.** The brief at [handoff-express.md](handoff-express.md) is now a record of that
+run rather than a task. Its central bet paid off: fresh context *was* load-bearing, not hygiene —
+running `express` cold through the marker is what surfaced findings 1, 2, and 6, none of which the
+context that wrote the criteria could have hit.
+
+Pending: the **board-driver** orchestration (above the skill); the `needs-review` routing branch and
+the amendment path, both still unexercised (#625 or #566 are the vehicles); a larger `intake` vehicle
+so multi-phase `execute` gets a real run; an interactive-intake check of the empty-state observation;
+and the standing evidence gap — the skill has accumulated rules faster than measurements, and the six
+fixes above are mechanical corrections rather than tested wording, which is the right treatment for
+broken commands but means they carry no behavioural evidence.
+
+Queue: #585 (`auto-ok`) remains ready for a second cheap `auto-ok` data point.
 
 Testing calibration (agreed, still holds): workflow/reference skill derived from a proven
 one — scaffold structurally without pressure-scenario TDD; micro-test only novel

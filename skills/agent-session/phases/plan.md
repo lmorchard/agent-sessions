@@ -32,6 +32,10 @@ model is good at.
    any criterion is bare prose, or the Tier section is missing, **stop and route to
    `intake`** — planning against unverifiable criteria produces a run nothing can grade.
 
+   Use the checklist's *augmented existing issue* variant when `spec.md` came from an issue
+   augmented in place rather than one written to the template; missing template sections aren't
+   failures there, missing criteria still are.
+
 3. **Read the relevant source files.** Start from the `file:line` refs in the spec (a snapshot
    from intake — verify they still point where they claim; the repo has moved since) and extend
    only where the plan needs more detail. For a large surface, dispatch a research subagent per

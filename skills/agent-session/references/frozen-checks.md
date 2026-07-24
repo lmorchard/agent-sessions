@@ -31,6 +31,8 @@ weakening, because the paraphrase is authored by the implementer.
 **Check files — read-only from Phase 1 onward:**
 - `tests/test_export.py`
 - `tests/test_dedup.py`
+(If every criterion is a command rather than a test, this list is empty — say so explicitly and
+follow "When the criteria are commands, not test files" below. Don't leave it blank.)
 
 ## C1
 CRITERION: WHEN a user exports a dataset over 10k rows THE SYSTEM SHALL stream the file
@@ -110,6 +112,10 @@ not modify, and that a failing frozen check is a report-back, not a fix-up.
 Unit tests written *for* a slice are a different thing and are freely editable — they are the
 implementer's own scaffolding. Only what `Check files` lists is frozen.
 
+`checks.md` is frozen too, in one direction: **append only.** The sanctioned writes are the
+`Frozen at` sha, a logged amendment, and the pre-squash tamper verdict. Changing a CRITERION line
+or a CHECK command in it is editing the oracle, whatever the diff's size.
+
 ## Independent verification
 
 At the end of `execute` (and again in `pr`), dispatch a **verifier subagent** with a fresh
@@ -129,10 +135,44 @@ git diff <freeze-sha> -- <each path in Check files>
 Must be empty. A non-empty diff means a frozen check changed after the freeze — the run's
 green checks are not evidence until that diff is explained by a logged amendment.
 
+**An empty `Check files` list makes this command meaningless rather than satisfied.** If that's
+the case, run the substitutes in "When the criteria are commands, not test files" below.
+
 Run this at the end of `execute`, and again in `pr` **before the squash** — a soft-reset squash
 collapses the freeze commit and the baseline stops being reachable from the branch, so the verdict
 recorded at that point is what the gate cites. It's two seconds and it's the difference between a
 claim and a check.
+
+### When the criteria are commands, not test files
+
+Some criteria are satisfied by a command rather than a test — a `grep` count, a CLI invocation, a
+one-line interpreter call. Then `Check files` is empty and everything above quietly goes slack:
+no file to hold read-only, nothing for `git diff <freeze-sha>` to compare, no test for the
+check-author subagent to write. **An empty diff there is an absent result, not a clean one.** Say
+so in those words, or a reader downstream takes the null for a pass.
+
+Three things substitute, and each must be run and recorded:
+
+1. **Manifest integrity.** For a command-based criterion the manifest *is* the whole oracle, so
+   diff the manifest: `git diff <freeze-sha> -- <session-dir>/checks.md`. That diff is never
+   empty — the freeze procedure itself writes the sha in a follow-up commit — so state it as an
+   invariant, never as an equality: **no CRITERION line, CHECK command, or guard command may
+   differ from the freeze version.** Sanctioned appends (the `Frozen at` sha, a logged amendment,
+   the pre-squash tamper verdict) are inert. A changed command is not — quote both sides.
+2. **Equality against the independent source.** The commands were copied verbatim from the issue,
+   and the issue is a record the implementer did not write. Confirm each CHECK and guard command
+   is byte-identical to the issue body's, whitespace and lookalike punctuation included — a smart
+   quote that silently changes a grep pattern is exactly what this catches.
+3. **No collateral edits.** `git diff <freeze-sha> --stat`, read for files no phase named — test
+   files above all, which a command-based criterion has no reason to touch.
+
+Report the tamper verdict as `clean-by-substitute` with its basis, not bare `clean`. The
+distinction is what tells a downstream reader whether a mechanism ran or was unavailable.
+
+A command-based check is also the more gameable kind, because it asserts over *text* rather than
+behaviour: a rename, a reflow across two lines, or a comment-out drives `grep -c` to `0` with the
+behaviour untouched. So pair one with a guard over the behaviour, and have the verifier state
+plainly whether the diff could satisfy the check without doing the work.
 
 ### When the work must edit its own oracle
 
@@ -202,7 +242,8 @@ A run's verification passes when **all** hold:
 - Every human-judgment criterion: its named evidence was presented and a human graded it.
 - **Every guard still passes**, by its own command. A guard that flipped from pass to fail is a
   regression this work caused, and it blocks the gate exactly like a failing criterion.
-- The tamper diff is empty, or every difference is explained by a logged amendment.
+- The tamper diff is empty, or every difference is explained by a logged amendment. Where
+  `Check files` is empty, the substitutes ran instead and the verdict says `clean-by-substitute`.
 - The project's own gates (`make lint`, `make test`, `make check`) are green.
 
 Watch the specific cheat the guards exist to catch: making a criterion go green by deleting or

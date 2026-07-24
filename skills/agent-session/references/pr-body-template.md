@@ -60,14 +60,24 @@ Field values, so the block stays parseable:
 | `tier` | `auto-ok` \| `needs-review` \| `needs-review (downgraded: <reason>)` |
 | `checks` | `Cn pass` \| `Cn fail` \| `Cn human-graded` \| `Cn human-graded-pending`, `·`-separated |
 | `guards` | `Gn pass` \| `Gn REGRESSED`, `·`-separated; `none` if the spec listed no guards |
-| `tamper` | `clean` \| `amended (see amendments)` \| `DIRTY — unexplained diff in <path>` |
+| `tamper` | `clean` \| `clean-by-substitute — <basis>` \| `amended (see amendments)` \| `DIRTY — unexplained diff in <path>` |
 | `freeze` | the freeze commit sha |
 | `project-gates` | `make check green` \| `red: <what failed>` |
 | `threads` | `N unresolved` |
 | `risk-paths` | `none` \| the risk-gated paths this PR touches |
 | `amendments` | `none` \| `Cn: <old> → <new>` |
-| `verdict` | `eligible-for-auto-merge` \| `human-merge-required` |
+| `verdict` | `pending` \| `eligible-for-auto-merge` \| `human-merge-required` |
 | `reason` | required when the verdict is `human-merge-required` |
+
+`clean-by-substitute` exists because a run whose criteria are commands rather than test files has
+no `Check files` to diff — the tamper command has nothing to compare and returns empty. Reporting
+that as `clean` hands a reader a null dressed as a positive. Name what stood in instead (manifest
+integrity, byte-equality against the issue, no collateral edits) per
+`frozen-checks.md`'s "When the criteria are commands, not test files".
+
+`pending` is what the block says from PR-open until step 14 derives the verdict. Unresolved
+threads and the post-review verifier report don't exist before then, so an earlier verdict is a
+guess — and this block is machine-readable, so a guess is one a driver can act on.
 
 **The block reports; it does not act.** Nothing in this skill merges a PR or enables
 auto-merge — `eligible-for-auto-merge` means a human or the board-driver *may* merge, and both

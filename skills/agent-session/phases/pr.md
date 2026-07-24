@@ -66,13 +66,24 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
    object survives locally until GC, but not for a reviewer or CI). So: run
    `git diff <freeze-sha> -- <check files>`, **record the verdict in `checks.md` and the gate
    block** — that record is the durable evidence the gate cites, since the command won't be
-   reproducible afterwards. Then squash all branch commits into one with a comprehensive message,
+   reproducible afterwards. (Post-squash the freeze commit is a dangling local object: not an
+   ancestor of the branch and absent from `origin`, so nobody else can re-run it. The record *is*
+   the evidence.) If `Check files` is empty, run the substitutes from `frozen-checks.md`'s "When
+   the criteria are commands, not test files" instead and record `clean-by-substitute` + its basis;
+   the bare command proves nothing there. Then squash all branch commits into one with a comprehensive message,
    and **push**.
 
 6. **Open the PR** using `references/pr-body-template.md`. Title under 70 chars. Fill the
    **Acceptance criteria** table from the *independent verifier's* report — never from the
    implementer's own run. Include `Closes #N`, links to `spec.md` / `checks.md` / `plan.md`, and
    the gate block.
+
+   **Open with `verdict: pending`.** Two of the gate's rows — unresolved threads, and the
+   verifier's post-review report — do not exist yet at this point, so any verdict written here is
+   a guess. The block is machine-readable and a board-driver may read it at any moment; a
+   provisional `eligible-for-auto-merge` sitting in the body through the whole review cycle is a
+   window where an automated reader can act on a verdict nobody derived. Step 14 writes the real
+   one.
 
 7. **Board hook.** If a board is configured, move each `Closes #N` issue to `in_review`. Skip
    silently otherwise.
@@ -128,14 +139,33 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
     | Every criterion with a check: `pass` | The independent verifier's report (step 12's, if it re-ran) |
     | Every human-judgment criterion: graded by a human | `checks.md` evidence + an actual human answer |
     | Every guard still `pass` | The verifier's report — a pass→fail flip is a regression you caused |
-    | Tamper diff clean, or every difference logged as an amendment | The verdict recorded at step 5 (pre-squash) |
+    | Tamper diff clean, or every difference logged as an amendment | The verdict recorded at step 5 (pre-squash) — `clean-by-substitute` counts, bare `clean` on an empty `Check files` list does not |
     | Project gates green | `make check` on the pushed head |
-    | No unresolved review threads | `gh pr view <n> --json reviewThreads` |
+    | No unresolved review threads | The GraphQL query below — there is no `--json reviewThreads` field |
     | Tier is `auto-ok` (and not downgraded by an amendment) | `spec.md` Tier section |
     | PR touches no risk-gated path | The diff vs. `acceptance-criteria.md`'s risk list |
 
+    Unresolved threads, verified working (`gh` has no `reviewThreads` JSON field — asking for one
+    errors out and prints the valid list, which is easy to misread as "no threads"):
+
+    ```bash
+    gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,
+      name:$repo){pullRequest(number:$pr){reviewThreads(first:100){nodes{isResolved}}}}}' \
+      -F owner=<owner> -F repo=<repo> -F pr=<n> \
+      --jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)]|length'
+    ```
+
+    Note that a bot review carrying **no** inline comments produces zero threads while still
+    registering as a review — so check the review itself landed (`gh pr view <n> --json reviews`)
+    rather than reading `0 unresolved` as proof a reviewer ran.
+
     **All true → `eligible-for-auto-merge`. Any false → `human-merge-required`**, with the
     failing row as the reason. Write the verdict into the gate block and report it.
+
+    Any row satisfied by a substitute rather than by its cited mechanism is still a pass, but
+    **name the substitute in the gate block** where the row would otherwise read as a clean
+    mechanical result. A row that silently reports the mechanism's absence as the mechanism's
+    verdict is the one failure this table cannot survive.
 
     A `needs-review` tier is never eligible, however green the checks. That's the tier doing its
     job — it was set because something here isn't check-decidable.

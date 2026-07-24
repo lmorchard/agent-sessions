@@ -87,6 +87,29 @@ The spec is ready iff:
 If any criterion fails, re-open the interview (`intake`) — a spec that fails the gate can't
 be filed as `auto-ok`, and filing it anyway defeats the purpose.
 
+### Variant: an augmented existing issue
+
+The checklist above assumes a spec written to this template. An issue augmented in place — by
+`intake`'s existing-issue path or by `triage` — carries only the marker, criteria, guards, and
+tier bolted onto the author's original text, because those paths preserve that text verbatim
+rather than regenerating it into template sections. Judged against the full checklist it fails on
+items it was never going to have, and "route to `intake`" would bounce it back to the mode that
+just produced it.
+
+So for an augmented issue, the gate is:
+
+- **Items 1–5 and 7 apply unchanged.** They're about the criteria, and the criteria are exactly
+  what augmentation adds. This is the whole load-bearing part.
+- **Item 6 becomes: scope is bounded *somewhere* in the body.** The author's own prose plus the
+  criteria set the boundary; a named "What we're NOT doing" section is one way to do that, not the
+  only one. What still fails: a body whose criteria could be satisfied by an unbounded amount of
+  work, or one that names an alternative approach without saying whether it's in scope.
+- **Missing template sections are not failures** — no `Current state`, `Design decisions`,
+  `Patterns to follow`, or `Open questions` heading is expected. A missing *criterion* still is.
+
+State which variant you applied and why. A stop-or-go gate read two ways is worse than either
+reading, and an unattended mode has nobody to ask.
+
 ## Filing as a GitHub issue
 
 `intake` lifts this into an issue body, prepends `<!-- agent-session:spec -->` (the resume
