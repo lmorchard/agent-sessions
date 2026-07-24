@@ -325,10 +325,54 @@ verifier's remit, and a `guards:` field in the gate block. They earn their place
 specific cheat: **making a criterion go green by deleting the coverage that contradicted it**,
 which leaves every criterion passing and the suite green, and only a guard notices.
 
-Pending: `execute` + the `pr` gate are **still unexercised by a real run** — #638 is specced and
-ready to be the vehicle (`plan` → `execute` → `pr`). Then the **board-driver** orchestration
-(above the skill); a triage dogfood; and an interactive-intake check of the empty-state
-observation.
+### Move 1 dogfood COMPLETE — decafclaw #638 → PR #659 (2026-07-24)
+
+Ran `plan` → `execute` → `pr` end to end on decafclaw #638, stopping at the gate.
+[PR #659](https://github.com/lmorchard/decafclaw/pull/659): all criteria and guards pass, tamper
+diff clean, **verdict `human-merge-required`** — see thread hole below. The whole back half now
+has real-run evidence.
+
+**The verifier caught its own author.** The scoped tamper constraint I wrote mid-run said "every
+added line MUST be a `@pytest.mark.filterwarnings` decorator", but the plan also required an
+explanatory comment per mark. My own mechanical check used a looser regex allowing comments —
+i.e. I silently applied the rule's intent rather than its letter and passed myself. The
+independent verifier (dispatched as `Explore`, which has **no Edit/Write**, so it structurally
+cannot touch the oracle it grades) read the constraint literally and reported the mismatch.
+
+Les's call on the resolution was right and corrected an over-strict instinct: comments are inert
+to pytest and cannot weaken an assertion, so this is a *mis-stated rule*, not an oracle change.
+The generalizable lesson is stronger than the strictness I was defending — **a tamper rule that
+fires on inert changes produces false positives, and false positives train the operator to wave
+the mechanism through.** State tamper rules as invariants over *what a check asserts*, never as
+whitelists of allowed line forms. This also produced the **amendment vs. clarification** split
+(amendment changes what a check asserts → downgrade; clarification fixes wording that never
+matched its own intent → logged, human-adjudicated, no downgrade).
+
+**The same defect class appeared twice in one run.** Guard G1 pinned `3234 passed, 2 skipped`;
+the rebase pulled in upstream tests and it read `3265`, tripping the letter while the property
+("nothing lost, newly skipped, or newly failing") held. Brittle absolutes encoding relative
+invariants — worth watching for as a category, not two one-offs.
+
+**Three gate holes found, all fixed in `pr.md`:**
+1. **Disputed threads must not be self-resolved.** Copilot filed 4 comments; 3 were factually
+   wrong (its claim that the warning message contains a newline defeating the regex — refuted by
+   `repr()`: single line, `re.match` succeeds; it was misled by a hard line-wrap inside a code
+   fence in the issue body my `spec.md` copied) and 1 was already answered in the artifact.
+   Skipping them is right, but *resolving* them would have cleared the gate's "no unresolved
+   threads" condition on the agent's own say-so — self-satisfiable, therefore meaningless. Rule:
+   resolve only what you fixed. This is why #659 ends at `human-merge-required`, which is the
+   gate working, not failing.
+2. **Rebase invalidates the freeze sha** (rewritten commit → baseline outside branch history).
+3. **Squash destroys the freeze commit**, so the tamper baseline is unreachable afterwards.
+
+**Also found:** `session-setup.md` hardcodes `.worktrees/` — decafclaw already uses
+`.claude/worktrees/`, so it must detect the project's existing convention. And the freeze
+procedure said "commit, record the sha", which is impossible in one commit (a commit can't
+contain its own hash) — needs a follow-up commit.
+
+Pending: the **board-driver** orchestration (above the skill); a `triage` dogfood; an
+interactive-intake check of the empty-state observation; and the discriminate rule still wants a
+micro-test as *wording*.
 
 Testing calibration (agreed, still holds): workflow/reference skill derived from a proven
 one — scaffold structurally without pressure-scenario TDD; micro-test only novel
