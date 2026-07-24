@@ -46,11 +46,13 @@ and stop; don't re-interview.
    ladder aloud (property? else human-judgment?) so the user sees *why* it lands where it
    does. The standing follow-up whenever an answer stays vague: *"how would we actually
    know — what command or test proves that?"*
-   **Before finalizing each criterion, verify its check's oracle exists now** — the command
-   / test / fixture / harness it names must be real and runnable today. Grep or run to
-   confirm; don't assume. If the oracle would have to be built, apply the oracle-must-exist
-   rule in `acceptance-criteria.md`: the criterion is `needs-review`, not `auto-ok` (building
-   the oracle can be its own `auto-ok` prerequisite).
+   **Before finalizing each criterion, run its check.** The command / test / fixture / harness
+   it names must be real today *and* must **fail on current behavior** — a check that already
+   passes will still pass if nothing gets built. Actually run it and record the failure; don't
+   infer either property from a table in the issue or from the command merely existing. Then
+   apply `acceptance-criteria.md`: an oracle that must first be built, or one that can't
+   reproduce the condition the criterion is about, makes the criterion `needs-review`, not
+   `auto-ok` (building the oracle can be its own `auto-ok` prerequisite).
 
 5. **Derive the tier** (`auto-ok` / `needs-review`) mechanically from the criteria + risk
    paths. State it and its reason; don't editorialize it upward or downward.

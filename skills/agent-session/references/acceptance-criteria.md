@@ -64,6 +64,24 @@ to author does not make a criterion checkable today.
 Building the oracle can be its own `auto-ok` issue; the criterion that depends on it stays
 `needs-review` until it exists.
 
+### The oracle must also discriminate
+
+Existing is not enough — **run the check and confirm it fails on current behavior.** A check
+that already passes proves nothing about the work: it will still pass if the implementer
+changes nothing at all. Either the behavior is already there (the issue is stale) or the check
+isn't testing the criterion.
+
+Watch for the near-miss: the *command* exists and runs, but it can't reproduce the condition
+the criterion is about. A census/benchmark invocation that omits the placement or config where
+the problem actually appears will report a clean result forever. The tell is a criterion phrased
+as "SHALL produce zero X" whose command produces zero X today.
+
+So: for each criterion, run its check and record the observed failure. If it passes now, the
+criterion is not reduced — `needs-review` until there's a command that discriminates, or the
+criterion is rewritten around one. Evidence from a past run (a table in the issue, a number
+someone remembers) is not a substitute for running it: the repo has moved, and the invocation
+that produced that table may not be the one you wrote down.
+
 ## Tier derivation
 
 The escalation tier is not a separate judgment — it falls out of the criteria:
