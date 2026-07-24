@@ -199,6 +199,38 @@ readiness checklist, `file`). (3)+(4) live *above* a per-issue skill — the orc
 bookends. So "standalone skill vs dev-session phase" resolves mostly toward *extend
 dev-session*; the separate artifact is the driver + merge gate.
 
+## Build status (2026-07-24)
+
+Decided: **single `agent-session` skill, multi-mode dispatcher** (dev-session lineage), not
+separate skills. Rationale: sidesteps the unverified cross-skill file-sharing mechanism
+entirely (all refs in-dir), and the dispatcher's lazy-load means modes never co-reside, so
+adding modes doesn't confound the LLM mid-phase — the only confounding risk is at the entry
+boundary, mitigated by explicit mode arguments + an ask-don't-guess dispatcher. Heavy modes
+fan out to subagents; the board-driver stays *above* the skill as orchestration.
+
+Scaffolded (first slice, front-of-funnel — exercises the shared-refs + subagent ideas):
+- `skills/agent-session/SKILL.md` — dispatcher, context-management notes, conventions.
+- `skills/agent-session/references/acceptance-criteria.md` — **the novel core**: every
+  criterion names a runnable check; EARS / Given-When-Then; verifier-independence +
+  freeze-before-implementation; the concrete-test → property → human-judgment escalation
+  ladder; tier derivation (auto-ok/needs-review) + risk-gated-path override.
+- `skills/agent-session/references/spec-template.md` — upgraded: criteria replace prose
+  "desired end state"; readiness checklist gates on *verifiability*, not just placeholders.
+- `skills/agent-session/phases/intake.md` — new + existing-issue (augment) modes; the
+  interview reduces each requirement to criterion+check; derives tier; files/updates issue.
+- `skills/agent-session/phases/triage.md` — batch backlog-gardening; subagents fan out to
+  *assess + draft proposed* criteria (no human needed), human ratifies in a fast pass
+  (subagents can't interview), augment in place. Demonstrates the context lesson.
+
+Pending: execution modes (`plan`/`execute`/`express`/`pr`) adapted from dev-session + merge
+gate; the board-driver orchestration.
+
+Testing calibration (agreed): treat this as a workflow/reference skill derived from a proven
+one — scaffold structurally without pressure-scenario TDD; micro-test the one novel
+behavior-shaping bit (the "every criterion names a check" gate + tier derivation) once it
+exists, per writing-skills' own reference-skill carve-out. Full pressure scenarios deferred
+until there's something worth hardening.
+
 ## Open questions
 
 - Exact shape of the upgraded criteria schema: how a criterion names its check (freeform

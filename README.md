@@ -50,6 +50,14 @@ The genuinely new, high-leverage parts:
 
 ## Status
 
-Bootstrapping — design captured, prior-art survey in flight. No skill code composed yet
-(deliberately holding until prior art lands, to avoid reinventing schemas like Spec Kit /
-Kiro / Gherkin).
+Scaffolding the **`agent-session`** skill (`skills/agent-session/`) — one skill, multi-mode
+dispatcher (dev-session lineage), shared in-dir reference "engine," heavy modes fan out to
+subagents, board-driver lives above as orchestration.
+
+- **Built (front-of-funnel):** `intake` (spec a new/existing issue → verifiable criteria +
+  tier) and `triage` (batch-augment an under-specified backlog via subagent fan-out), plus
+  the shared engine (`references/acceptance-criteria.md`, `references/spec-template.md`).
+- **Pending:** execution modes (`plan`/`execute`/`express`/`pr`, adapted from dev-session)
+  + tiered merge gate, and the board-driver.
+
+See [docs/design.md](docs/design.md) (design + build log) and [docs/prior-art.md](docs/prior-art.md).
