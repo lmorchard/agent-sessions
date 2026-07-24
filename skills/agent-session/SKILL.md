@@ -39,7 +39,8 @@ Each mode reads these only when it reaches an interview/criteria step:
 
 | File | What it holds |
 |---|---|
-| `references/acceptance-criteria.md` | The core: every criterion names a runnable check; EARS / Given-When-Then grammar; verifier-independence; tier derivation |
+| `references/acceptance-criteria.md` | The core rules: every criterion names a runnable check; verifier-independence; concrete-test → property → human-judgment ladder; tier derivation |
+| `references/criteria-grammar.md` | EARS + Given-When-Then syntax reference (patterns, templates, how to pick) |
 | `references/spec-template.md` | Spec skeleton + readiness checklist, upgraded to require verifiable criteria |
 
 ## Context management (the reason for this structure)

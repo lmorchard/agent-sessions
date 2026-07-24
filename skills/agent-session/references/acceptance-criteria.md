@@ -16,32 +16,24 @@ The whole autonomy tier derives from this one distinction.
 
 ## Grammar — don't invent one
 
-Write each criterion in one of two established forms (pick per criterion; both map cleanly
-condition → assertion and are human-readable *and* machine-checkable):
-
-- **EARS** (from AWS Kiro): `WHEN <condition> THE SYSTEM SHALL <observable behavior>.`
-  Good for event/state-triggered behavior.
-- **Given-When-Then** (Gherkin/BDD): `GIVEN <context> WHEN <action> THEN <observable
-  outcome>.` Good for scenario/flow behavior.
-
-Each criterion then adds its check:
+Write each criterion in one of two established forms — **EARS** or **Given-When-Then** —
+then pair it with a check. Both force a condition → observable-response shape that maps to
+an assertion. Full syntax, patterns, and how to pick: `references/criteria-grammar.md`.
 
 ```
-- CRITERION: WHEN the input list is empty THE SYSTEM SHALL return an empty result (not error).
+- CRITERION: WHEN the input list is empty, the system SHALL return an empty result (not error).
   CHECK: `pytest tests/test_foo.py::test_empty_input` passes.
 ```
 
 ## The check must be trustworthy (verifier fallibility)
 
 "Machine-checkable" is **necessary but not sufficient** — the check must also be *correct*.
-A green check from a bad oracle is worse than no check (SWE-bench documents test-log
-misparsing; the "same agent that wrote the patch is biased toward accepting it").
+A green check from a bad oracle is worse than no check.
 
 - **Verifier independent of implementer.** The check is authored/reviewed separately from
   the code that satisfies it (a separate subagent/context in execution).
-- **Freeze the checks before implementation.** Acceptance checks are written at intake and
-  must not be weakened during execute — an implementer editing its own oracle is the
-  failure mode this rule exists to block.
+- **Freeze the checks before implementation.** Written at intake; the implementer must not
+  weaken them during execute.
 
 ## When a criterion won't reduce to a concrete check
 
@@ -94,3 +86,29 @@ Write the resulting tier onto the issue as a label so a downstream loop can rout
 ```
 **Tier:** `needs-review` (the third criterion won't reduce). Drop or prototype it, and the
 issue becomes `auto-ok`.
+
+## More examples
+
+**Property tier** — no single input captures "done", so check an invariant instead of an
+example (the escalation rung that's easiest to skip past into "human decides"):
+```
+- CRITERION: the deduplication pass SHALL NOT drop or merge two records with distinct ids.
+  CHECK (property): hypothesis test `test_dedup_preserves_distinct_ids` — for any generated
+  list of records, every distinct id in the input appears in the output.
+```
+
+**Pure refactor** — "done" means behavior is unchanged, so the check is an equivalence/
+golden test plus the existing suite staying green:
+```
+- CRITERION: WHILE the public API is unchanged, the parser SHALL produce byte-identical
+  output to the pre-refactor version for the fixture corpus.
+  CHECK: `pytest tests/test_parser_golden.py` (golden-file diff) passes, and the full
+  existing suite stays green (regression / PASS_TO_PASS).
+```
+
+**Unwanted-behavior (EARS `IF/THEN`)** — error paths are criteria too:
+```
+- CRITERION: IF the upload exceeds the size limit, THEN the API SHALL reject it with 413
+  and SHALL NOT write a partial file.
+  CHECK: `pytest tests/test_upload.py::test_oversize_rejected_no_partial` passes.
+```
