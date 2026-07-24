@@ -5,7 +5,8 @@ label**, then file (or update) the GitHub issue. This is the human-in-the-loop f
 intent capture and criteria judgment are human work; everything downstream trusts what this
 produces.
 
-Reads the shared engine: `references/acceptance-criteria.md`, `references/spec-template.md`.
+Reads the shared engine: `references/acceptance-criteria.md`, `references/criteria-grammar.md`,
+`references/spec-template.md`. Dispatches research per `references/documentarian-prompt.md`.
 
 ## Two entry modes
 
@@ -25,10 +26,13 @@ and stop; don't re-interview.
    given (`gh repo view`).
 
 2. **Codebase research substep** (skip only for changes so localized context is obvious).
-   Dispatch a documentarian subagent (`Explore`/`general-purpose`) to answer 3–5 *neutral*
-   questions about how the relevant area works today — describe what exists, don't propose
-   the change. This is what lets step 4 propose criteria grounded in reality (and keeps the
-   token-heavy reading in the subagent's context, not here).
+   Dispatch a documentarian subagent (`Explore`/`general-purpose`) framed per
+   `references/documentarian-prompt.md` (describe what exists, cite `file:line`, answer only
+   what's asked). Ask 3–5 *neutral* questions about how the relevant area works today —
+   **including, for each thing the requirement will need to check, whether that oracle
+   exists today** (the metric / test / harness / way to reproduce the scenario). This
+   grounds step 4's criteria in reality and its tier in what's actually checkable, and keeps
+   the token-heavy reading in the subagent's context, not here.
 
 3. **Interview — clarify / probe / finish, one question at a time.** Ground every question
    in the research. **Propose your best answer with its trade-off; ask to confirm or
@@ -42,6 +46,11 @@ and stop; don't re-interview.
    ladder aloud (property? else human-judgment?) so the user sees *why* it lands where it
    does. The standing follow-up whenever an answer stays vague: *"how would we actually
    know — what command or test proves that?"*
+   **Before finalizing each criterion, verify its check's oracle exists now** — the command
+   / test / fixture / harness it names must be real and runnable today. Grep or run to
+   confirm; don't assume. If the oracle would have to be built, apply the oracle-must-exist
+   rule in `acceptance-criteria.md`: the criterion is `needs-review`, not `auto-ok` (building
+   the oracle can be its own `auto-ok` prerequisite).
 
 5. **Derive the tier** (`auto-ok` / `needs-review`) mechanically from the criteria + risk
    paths. State it and its reason; don't editorialize it upward or downward.
