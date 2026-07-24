@@ -106,6 +106,7 @@ It reports whether the gate is satisfied; acting on that is a human's or the boa
     |---|---|
     | Every criterion with a check: `pass` | The independent verifier's report |
     | Every human-judgment criterion: graded by a human | `checks.md` evidence + an actual human answer |
+    | Every guard still `pass` | The verifier's report — a pass→fail flip is a regression you caused |
     | Tamper diff clean, or every difference logged as an amendment | `git diff <freeze-sha> -- <check files>` |
     | Project gates green | `make check` on the pushed head |
     | No unresolved review threads | `gh pr view <n> --json reviewThreads` |

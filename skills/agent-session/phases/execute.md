@@ -48,7 +48,9 @@ fix-up.
      anticipate, **surface the mismatch** rather than silently improvising.
    - **Run each check the phase advances, by name, and read its output.** Use the exact command
      from `checks.md` — `pytest tests/test_export.py::test_large_export_is_streamed`, not `make
-     test`. Then run `make lint` / `make test` / `make check` for regressions.
+     test`. Then run the **guards** from `checks.md` and `make lint` / `make test` / `make check`
+     for regressions. A guard that flips pass→fail is a regression you just caused; fix it before
+     moving on, and never by weakening the guard.
    - Tick `- [ ]` → `- [x]` only after reading the actual output of that specific command.
      Never from an impression that it should pass.
    - **A failing frozen check means the implementation is wrong.** Fix the code. Do not edit,
@@ -71,8 +73,8 @@ fix-up.
 4. **Independent verification (the gate).** Once all phases are done, dispatch a **verifier
    subagent** with a fresh context per `references/frozen-checks.md`: give it `checks.md` and
    the repo, and nothing else — not the plan, not your notes, not any account of why a failure
-   might be acceptable. It runs every check by name, reports observed output and pass/fail per
-   criterion, and runs the tamper diff.
+   might be acceptable. It runs every check *and every guard* by name, reports observed output
+   and pass/fail for each, and runs the tamper diff.
 
    Then confirm the gate per `references/frozen-checks.md`: every check passed per *its* report,
    the tamper diff is empty (or fully explained by logged amendments), and the project's own

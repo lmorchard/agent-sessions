@@ -54,6 +54,12 @@ and stop; don't re-interview.
    reproduce the condition the criterion is about, makes the criterion `needs-review`, not
    `auto-ok` (building the oracle can be its own `auto-ok` prerequisite).
 
+   **A check that passes today is a guard, not a criterion** — file it under Regression guards
+   and keep looking for what this work makes newly true. Expect small cleanup and refactor issues
+   to land as one criterion plus several guards; if *everything* passes today, you have no
+   criteria yet. Run the guards too, and confirm they pass now — a guard that already fails is a
+   pre-existing break worth naming before anyone implements against it.
+
 5. **Derive the tier** (`auto-ok` / `needs-review`) mechanically from the criteria + risk
    paths. State it and its reason; don't editorialize it upward or downward.
 

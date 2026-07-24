@@ -37,10 +37,14 @@ model is good at.
    only where the plan needs more detail. For a large surface, dispatch a research subagent per
    `references/documentarian-prompt.md` so the reading stays in its context, not this one.
 
-4. **Confirm each check's oracle still exists.** Intake verified this at filing time; time has
-   passed. For each check, confirm the command/test/fixture it names is real and runnable
-   *now* — grep or run it, don't assume. If an oracle has disappeared, that criterion is back
-   to `needs-review`; say so and surface it rather than positing a replacement.
+4. **Re-run every check.** Intake verified these at filing time; time has passed and the repo
+   has moved. Each criterion's check must still **fail** (it grades work not yet done) and each
+   guard must still **pass**. Run them; don't infer either from the spec's record.
+   - A criterion's check that now passes → the behavior arrived, or it was a guard misfiled as
+     a criterion. Surface it; don't posit a replacement.
+   - A guard that now fails → a pre-existing break. Surface it *before* implementing, or you'll
+     mistake it for your own regression at the gate.
+   - An oracle that has disappeared → that criterion is back to `needs-review`.
 
 5. **Freeze the checks — this is Phase 0 of the plan.** Follow `references/frozen-checks.md`:
    write `checks.md` with ids `C1…Cn`, dispatch a check-author subagent to write the tests, run

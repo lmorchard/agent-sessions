@@ -33,6 +33,7 @@ tamper diff clean.
 ```yaml
 tier: auto-ok
 checks: C1 pass · C2 pass · C3 human-graded-pending
+guards: G1 pass · G2 pass
 tamper: clean
 freeze: a1b2c3d
 project-gates: make check green
@@ -58,6 +59,7 @@ Field values, so the block stays parseable:
 |---|---|
 | `tier` | `auto-ok` \| `needs-review` \| `needs-review (downgraded: <reason>)` |
 | `checks` | `Cn pass` \| `Cn fail` \| `Cn human-graded` \| `Cn human-graded-pending`, `·`-separated |
+| `guards` | `Gn pass` \| `Gn REGRESSED`, `·`-separated; `none` if the spec listed no guards |
 | `tamper` | `clean` \| `amended (see amendments)` \| `DIRTY — unexplained diff in <path>` |
 | `freeze` | the freeze commit sha |
 | `project-gates` | `make check green` \| `red: <what failed>` |

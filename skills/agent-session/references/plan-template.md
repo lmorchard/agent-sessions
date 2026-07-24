@@ -27,8 +27,10 @@ No implementation in this phase.
 - Create: `tests/exact/path/to/test_acceptance.ext` — the tests C1…Cn name
 
 **Verification — automated:**
-- [ ] Every check in `checks.md` runs and **fails for the expected reason** (not an import
-      error, not a typo'd path) — record the observed failure per criterion
+- [ ] Every criterion's check runs and **fails for the expected reason** (not an import error,
+      not a typo'd path) — record the observed failure per criterion
+- [ ] Every guard runs and **passes** — a guard already failing is a pre-existing break, and
+      knowing that now is what keeps it from reading as your regression later
 - [ ] Freeze commit made; sha recorded in `checks.md`
 
 ---
@@ -56,6 +58,7 @@ No implementation in this phase.
 **Verification — automated:**
 - [ ] C1's check passes: `[the exact command from checks.md]`
 - [ ] C2's check passes: `[the exact command from checks.md]`
+- [ ] Guards still pass: `[each guard's command from checks.md]`
 - [ ] `make lint` passes
 - [ ] `make test` passes (no regression)
 

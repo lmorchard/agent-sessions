@@ -49,6 +49,14 @@ CRITERION: the export button's spinner should feel responsive.
 CHECK: none — human judgment. Forces tier `needs-review`.
 EVIDENCE TO PRESENT: screen recording of a 50k-row export, for the human to grade.
 
+## Guards
+(Pass today; must keep passing. Not criteria — they can't fail at freeze. See
+`acceptance-criteria.md` "Criteria vs. regression guards".)
+
+- G1: `pytest tests/test_export.py -q` — the existing export suite. Passed at freeze.
+- G2: `test_real_pty_echo_and_cleanup` still RUNS and passes — not skipped, not deleted.
+  Passed at freeze.
+
 ## Amendments
 (Append-only. Empty unless an amendment was made — see "When a check is genuinely wrong".)
 ````
@@ -74,9 +82,13 @@ Phase 0 of every plan, no implementation in it:
    `AT FREEZE`.
 4. Commit. Record the sha as `Frozen at`. That sha is the reference point for the tamper diff.
 
-A check that *passes* at freeze means the behavior already exists — surface it, don't proceed.
-Either the criterion is already satisfied (the issue may be stale) or the check doesn't
-actually test the criterion.
+A **criterion's** check that *passes* at freeze means the behavior already exists — surface it,
+don't proceed. Either the criterion is already satisfied (the issue may be stale), the check
+doesn't actually test the criterion, or it was a guard filed as a criterion.
+
+**Guards are the opposite:** run them at freeze and confirm they **pass**. A guard that already
+fails isn't guarding anything — it's a pre-existing break, and you need to know that *now*
+rather than discover it at the gate and mistake it for your own regression.
 
 ## The read-only rule
 
@@ -146,9 +158,14 @@ A run's verification passes when **all** hold:
 - Every criterion in `checks.md` with a check: that check ran and passed, per the independent
   verifier's report — individually observed, by its own command.
 - Every human-judgment criterion: its named evidence was presented and a human graded it.
+- **Every guard still passes**, by its own command. A guard that flipped from pass to fail is a
+  regression this work caused, and it blocks the gate exactly like a failing criterion.
 - The tamper diff is empty, or every difference is explained by a logged amendment.
-- The project's own gates (`make lint`, `make test`, `make check`) are green — regressions
-  count, not just the new criteria.
+- The project's own gates (`make lint`, `make test`, `make check`) are green.
+
+Watch the specific cheat the guards exist to catch: making a criterion go green by deleting or
+skipping the coverage that contradicted it. That leaves every criterion passing and the suite
+green, and only a guard notices.
 
 Aggregate green is not the gate. `make test` passing tells you nothing about whether C2's
 check ran; a skipped test, a collection error, or a test that never got written all look like

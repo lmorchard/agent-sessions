@@ -28,9 +28,13 @@ criteria), and you do the part that does (ratify). See
    - scores spec-completeness: does it have a clear goal? verifiable acceptance criteria?
      is it already marked with `<!-- agent-session:spec -->`?
    - if under-specified, does light codebase research and **drafts *proposed* criteria +
-     checks + a tier** per `acceptance-criteria.md` — a proposal, not a commitment,
+     checks + guards + a tier** per `acceptance-criteria.md` — a proposal, not a commitment,
+   - **runs each proposed check** and records what it observed, so the ratify pass knows which
+     proposals discriminate (fail today = criterion) and which don't (pass today = guard). A
+     subagent that only *reads* code will propose plausible checks that grade nothing,
    - returns a COMPACT result only: `{issue, score, already_specified, proposed_criteria,
-     proposed_tier, open_questions}`. Not the raw issue body or research dump.
+     proposed_guards, proposed_tier, observed_check_results, open_questions}`. Not the raw issue
+     body or research dump.
 
    The main context now holds a scored list, not dozens of issue bodies.
 

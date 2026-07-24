@@ -26,6 +26,16 @@ forces tier = needs-review.]
 
 - CRITERION: [WHEN … THE SYSTEM SHALL … | GIVEN … WHEN … THEN …]
   CHECK: [`command / test name / assertion` that proves it]
+  VERIFIED DISCRIMINATING: [the failure observed when the check was run at intake]
+
+## Regression guards
+
+[What this work must not break. These pass *today* and must keep passing — existing suites,
+golden/equivalence tests, coverage that mustn't be deleted to make a criterion go green. They
+are not criteria (they can't fail at freeze) and they don't affect the tier. See
+`acceptance-criteria.md` "Criteria vs. regression guards".]
+
+- GUARD: [`command`] — [what it protects]. Passes today.
 
 ## Tier
 
@@ -61,13 +71,18 @@ The spec is ready iff:
    concrete-test check, a property check, or is explicitly acknowledged as human-judgment
    (which forces `needs-review`). This is the upgrade — dev-session gated on placeholders;
    this gates on *verifiability*.
-2. **Tier is derived and stated**, with its reason, per `acceptance-criteria.md`.
-3. **Checks are freezable.** Each check is specific enough to write *before* implementation
+2. **Every criterion's check was run and observed to fail**, with the failure recorded. A check
+   that passes today grades nothing. If it passes, it's a guard — move it, and find the
+   criterion it was standing in for. **At least one criterion must discriminate**; a spec whose
+   every check already passes has no acceptance criteria yet.
+3. **Tier is derived and stated**, with its reason, per `acceptance-criteria.md`. Guards don't
+   enter into it.
+4. **Checks are freezable.** Each check is specific enough to write *before* implementation
    and not be weakened by it (names a test/command/assertion, not "tests should pass").
-4. **Placeholder scan:** no "TBD"/"TODO"/vague requirements. Open questions each carry a
+5. **Placeholder scan:** no "TBD"/"TODO"/vague requirements. Open questions each carry a
    default answer.
-5. **Scope bounded:** "What we're NOT doing" present and concrete.
-6. **No load-bearing ambiguity:** any requirement readable two ways is pinned to one.
+6. **Scope bounded:** "What we're NOT doing" present and concrete.
+7. **No load-bearing ambiguity:** any requirement readable two ways is pinned to one.
 
 If any criterion fails, re-open the interview (`intake`) — a spec that fails the gate can't
 be filed as `auto-ok`, and filing it anyway defeats the purpose.

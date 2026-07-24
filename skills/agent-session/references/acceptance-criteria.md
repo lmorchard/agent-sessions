@@ -89,6 +89,27 @@ criterion is rewritten around one. Evidence from a past run (a table in the issu
 someone remembers) is not a substitute for running it: the repo has moved, and the invocation
 that produced that table may not be the one you wrote down.
 
+## Criteria vs. regression guards
+
+Not every check worth running is a criterion. Sort them:
+
+- A **criterion** says what this work must *newly* make true. It has to discriminate — fail
+  now, pass when done.
+- A **guard** says what this work must not *break*. It passes now and must keep passing:
+  existing suites, golden/equivalence tests, "the test being exempted still runs."
+
+Without this split the discriminate rule would reject legitimate checks. "The full suite stays
+green" and "output is byte-identical" can never fail at freeze, so as *criteria* they're
+vacuous — as *guards* they're exactly right. Demoting one isn't a downgrade; it's filing it
+where it works.
+
+Practical consequence: **small cleanup and refactor issues are often one criterion and several
+guards.** If every check you've written passes today, you have a list of guards and no
+criterion yet — go back and ask what this work makes newly true.
+
+Guards don't affect the tier. Tier derives from the criteria and the risk-gated paths; a guard
+grades nothing new, so it has no bearing on autonomy.
+
 ## Tier derivation
 
 The escalation tier is not a separate judgment — it falls out of the criteria:
@@ -139,13 +160,16 @@ example (the escalation rung that's easiest to skip past into "human decides"):
   list of records, every distinct id in the input appears in the output.
 ```
 
-**Pure refactor** — "done" means behavior is unchanged, so the check is an equivalence/
-golden test plus the existing suite staying green:
+**Pure refactor** — the obvious criterion ("behavior unchanged", via a golden test) is really a
+*guard*: it passes before and after, so it can't tell done from untouched. The discriminating
+criterion is **structural** — the thing the refactor is actually *for*:
 ```
-- CRITERION: WHILE the public API is unchanged, the parser SHALL produce byte-identical
-  output to the pre-refactor version for the fixture corpus.
-  CHECK: `pytest tests/test_parser_golden.py` (golden-file diff) passes, and the full
-  existing suite stays green (regression / PASS_TO_PASS).
+- CRITERION: token classification SHALL live only in `Lexer.classify()` — no other module
+  SHALL re-implement it.
+  CHECK: `rg -l TOKEN_PATTERNS src/ | wc -l` returns 1. (Returns 3 today — discriminates.)
+
+- GUARD: `pytest tests/test_parser_golden.py` (golden-file diff) passes and the full suite
+  stays green — output byte-identical to pre-refactor. Passes today; must keep passing.
 ```
 
 **Unwanted-behavior (EARS `IF/THEN`)** — error paths are criteria too:
