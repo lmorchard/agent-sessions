@@ -611,6 +611,48 @@ don't get to schedule. #649 came close — the frozen check constrained the deni
 `"was denied by user"`, and complying rather than amending was the right call, so the path stayed
 unexercised for the right reason.
 
+### Micro-test: the withheld-decision exception — CUT (2026-07-24)
+
+Measured the one rule from move 2b with real over-trigger risk: intake's withheld-decision
+exception, which converts a stop into a proceed. Two fixtures, control (no clause) vs treatment.
+
+| Cell | Result |
+|---|---|
+| **treatment** + a properly-specified issue carrying `Open questions` **with a default** | 5/5 `VERIFY-ONLY` — **no over-trigger**, and all five named the right discriminator (the question carries a default, so nothing is withheld) |
+| **control** + #649's real pre-decision state + the decision arriving conversationally | 5/5 `RE-INTAKE` — correct **without** the clause |
+
+**Verdict: cut.** The clause does no harm, but it earns nothing. Control didn't merely get the
+answer right — it independently reproduced three of the paragraph's four sentences: *"that's exactly
+the 'withheld decision the criteria depend on' the process calls out"*; *"tier stays `needs-review`
+regardless (the risk-gated trigger doesn't go away)"*; *"though narrowly — recording the decision and
+confirming/refining C1 against it, not a full re-interview from scratch."*
+
+**The mechanism, and it's the same one as the aggregate-green trim:** `acceptance-criteria.md`'s
+trigger 1 already names the withheld-decision case, and intake reads that file. Once the concept
+exists *somewhere* in context, restating it as an entry-mode carve-out adds nothing. The concept has
+to exist; the second statement doesn't.
+
+**The instrument was wrong first, and the first run's numbers were discarded.** Initial fixture used a
+placeholder repo URL and a STOP/PROCEED verdict pair. Two artifacts: one rep detected the URL was
+synthetic and refused (it read this repo's own docs to do it — subagents run *here*, so a fixture must
+be sealed), and one answered PROCEED meaning *"proceed to verify, then stop"* — the correct behaviour
+wearing the wrong label, because "confirm it still holds **and stop**" doesn't fit a two-way
+stop/proceed split. Fixed by sealing the fixture ("this text is the complete ground truth, use no
+tools") and replacing the labels with `VERIFY-ONLY` / `RE-INTAKE`, each spelled out as an action.
+**Same lesson as the two discarded fixtures in move 1: a result is only evidence about wording once
+the instrument can't produce it by accident.**
+
+Two cells were not run (control+A, treatment+B) and the decision doesn't need them: treatment+A
+establishes no harm, control+B establishes no benefit, and that pair alone settles it. Saying so
+rather than implying a full 2×2.
+
+**Meta, worth keeping:** this is the second rule added-then-measured-away (after the goal-ambiguity
+tier trigger, 18 lines → 4). Both were written from a real failure, both felt necessary, and neither
+changed behaviour. The tell they share: **the concept was already reachable elsewhere in the skill,
+and the new rule restated it closer to where the failure was noticed.** Worth checking for that
+before adding, since the instinct to add is apparently reliable and the judgment that it's *needed*
+is not.
+
 **Standing evidence gap, now larger.** Two runs added roughly a dozen rules and only three of the
 skill's rules have measurements behind them (the read-only rule, the gameability rule, the grammar).
 Everything from these two days is mechanical correction — broken commands, unsatisfiable rows, missing

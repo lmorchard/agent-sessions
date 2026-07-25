@@ -18,14 +18,9 @@ Determined by input, like `dev-session` brainstorm's blank-slate/refine split:
   intent, backfill the missing criteria + tier. This is the mode `triage` drives per issue.
 
 If the issue already carries the marker, it's already specified — confirm it still holds
-and stop; don't re-interview.
-
-**Exception — a withheld decision has since been made.** An issue can carry the marker and still
-be unspecifiable: it went `needs-review` because it withheld a decision its criteria depend on, so
-no criteria could be written for the undecided part. When that decision arrives, **re-run intake.**
-That isn't re-interviewing a specified issue; it's the first pass that can produce criteria at all.
-Interview only what the decision opens, keep what the earlier pass established, and re-derive the
-tier — resolving a decision retires trigger 1, but a risk-gated path holds the tier where it is.
+and stop; don't re-interview. (An issue that went `needs-review` for a *withheld decision* is the
+exception, and needs no rule here: `acceptance-criteria.md`'s trigger 1 already names that case, and
+5/5 control reps navigated it from the tier rules alone — see the micro-test in `docs/design.md`.)
 
 ## Process
 
