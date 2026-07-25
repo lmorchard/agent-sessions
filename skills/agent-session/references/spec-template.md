@@ -106,6 +106,8 @@ So for an augmented issue, the gate is:
   work, or one that names an alternative approach without saying whether it's in scope.
 - **Missing template sections are not failures** — no `Current state`, `Design decisions`,
   `Patterns to follow`, or `Open questions` heading is expected. A missing *criterion* still is.
+  (An augmented issue that settled no decisions has nothing to put under `Design decisions`. One
+  whose criteria *depend* on an unrecorded decision fails item 7, which is the item for that.)
 
 State which variant you applied and why. A stop-or-go gate read two ways is worse than either
 reading, and an unattended mode has nobody to ask.

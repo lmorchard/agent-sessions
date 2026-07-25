@@ -68,7 +68,9 @@ criteria), and you do the part that does (ratify). See
 5. **Write back (augment in place).** For each ratified issue, run `intake`'s file-or-update step,
    *existing-issue* path: `gh issue edit <n>` — prepend the marker, add the verifiable
    criteria + tier sections, apply the tier label, **preserving the original author's
-   text**. Update the board if configured.
+   text**. Update the board if configured. Where the ratify pass settled a decision, carry
+   `intake`'s Design-decisions step with it — the body, not a comment; comments are invisible
+   to every downstream mode.
 
 6. **Report** a summary: scanned N, already-specified M, augmented K (with tiers), left
    under-specified (and why — e.g. needs a design decision only the user can make).

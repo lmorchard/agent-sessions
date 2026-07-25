@@ -20,6 +20,13 @@ Determined by input, like `dev-session` brainstorm's blank-slate/refine split:
 If the issue already carries the marker, it's already specified — confirm it still holds
 and stop; don't re-interview.
 
+**Exception — a withheld decision has since been made.** An issue can carry the marker and still
+be unspecifiable: it went `needs-review` because it withheld a decision its criteria depend on, so
+no criteria could be written for the undecided part. When that decision arrives, **re-run intake.**
+That isn't re-interviewing a specified issue; it's the first pass that can produce criteria at all.
+Interview only what the decision opens, keep what the earlier pass established, and re-derive the
+tier — resolving a decision retires trigger 1, but a risk-gated path holds the tier where it is.
+
 ## Process
 
 1. **Read the source thoroughly** (prompt or issue body).
@@ -69,11 +76,19 @@ and stop; don't re-interview.
 7. **Derive the tier** (`auto-ok` / `needs-review`) mechanically from the criteria + risk
    paths. State it and its reason; don't editorialize it upward or downward.
 
-8. **Write the spec** to the `spec-template.md` structure. Run the **readiness checklist**.
+8. **Record the decisions the interview settled** in the spec's **Design decisions** section —
+   each as decision / why / what was rejected. Any answer that changed which criteria apply is a
+   decision, not a detail: the criteria below it are unreadable without it, and the next context
+   (or the next `express` run) has no other way to learn why the obvious alternative was passed
+   over. On the augment path this section goes into the **issue body** too. A decision recorded
+   only in an issue *comment* is invisible to every downstream mode — they read the body through
+   the marker and never read comments — so a comment is for provenance, never for the constraint.
+
+9. **Write the spec** to the `spec-template.md` structure. Run the **readiness checklist**.
    Fix failures inline. Show the user the spec (goal, criteria+checks, tier, what-we're-NOT-
    doing) and get confirmation before filing.
 
-9. **File or update the issue.**
+10. **File or update the issue.**
    - *New:* `gh issue create` with body = `<!-- agent-session:spec -->` + spec; title from
      the Goal (<70 chars); apply the tier label (`--label`); add to the board's Ready
      column if configured.
@@ -81,7 +96,7 @@ and stop; don't re-interview.
      spec sections, apply the tier label. **Preserve the original author's text**; augment,
      don't overwrite intent.
 
-10. **Report** the issue URL, the tier + reason, and the resume command.
+11. **Report** the issue URL, the tier + reason, and the resume command.
 
 ## Escalation — stop and surface when
 
