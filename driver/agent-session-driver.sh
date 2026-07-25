@@ -31,6 +31,7 @@ STATE_DIR="./.driver-state"
 BOARD=""
 DRY_RUN=0
 RETRY=""
+CLASSIFY_ONLY=""
 MODEL=""
 
 # `dontAsk` denies non-allowlisted mutating commands but auto-allows commands it
@@ -69,6 +70,9 @@ agent-session-driver.sh --repo <owner/name> --skill-dir <path> --repo-path <path
   --model <name>          optional; passed to claude
   --dry-run               selection only; no claude invocation
   --retry <n>             un-park issue n for this invocation
+  --classify-only <n>     classify + record issue n from live PR state; no
+                          claude invocation. Recovers the outcome of a run whose
+                          driver died after the run itself finished.
   -h, --help              this text
 EOF
 }
@@ -86,6 +90,7 @@ while [ $# -gt 0 ]; do
     --board)          BOARD="${2:?}"; shift 2 ;;
     --model)          MODEL="${2:?}"; shift 2 ;;
     --retry)          RETRY="${2:?}"; shift 2 ;;
+    --classify-only)  CLASSIFY_ONLY="${2:?}"; shift 2 ;;
     --dry-run)        DRY_RUN=1; shift ;;
     -h|--help)        usage; exit 0 ;;
     *)                die "unknown argument: $1 (try --help)" ;;
@@ -93,7 +98,9 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$REPO" ] || die "--repo is required"
-if [ "$DRY_RUN" -eq 0 ]; then
+# --dry-run and --classify-only never invoke claude, so they need neither the
+# skill nor a checkout.
+if [ "$DRY_RUN" -eq 0 ] && [ -z "$CLASSIFY_ONLY" ]; then
   [ -n "$SKILL_DIR" ] || die "--skill-dir is required (omit only with --dry-run)"
   [ -n "$REPO_PATH" ] || die "--repo-path is required (omit only with --dry-run)"
   [ -d "$SKILL_DIR" ] || die "--skill-dir does not exist: $SKILL_DIR"
@@ -344,6 +351,15 @@ run_issue() { # $1 = issue number
   say "  budget   \$$MAX_BUDGET   timeout ${RUN_TIMEOUT}s"
   say "  run dir  $rundir"
 
+  # In-flight marker, written BEFORE the invocation and removed after the
+  # outcome is recorded. If the driver itself dies mid-run -- killed, laptop
+  # slept, SIGTERM -- this file is the only evidence the run happened, because
+  # everything else is written after classification. Observed the hard way: a
+  # killed driver left a $9.44 completed run, an open PR, and an empty runs.jsonl.
+  jq -n -c --arg issue "$n" --arg ts "$ts" --arg rundir "$rundir" --arg url "$url" \
+    '{issue:($issue|tonumber), started:$ts, run_dir:$rundir, url:$url}' \
+    > "$STATE_DIR/inflight.json"
+
   # The prompt goes in on STDIN, never as a positional argument.
   # --allowedTools, --disallowedTools and --add-dir are all variadic
   # (<tools...>, <directories...>), so a trailing positional prompt is silently
@@ -404,6 +420,15 @@ run_issue() { # $1 = issue number
   local outcome reason prline prnum prurl gate
   if [ "$rc" -eq 124 ]; then
     outcome="failed"; reason="timed out after ${RUN_TIMEOUT}s"
+  elif [ "$rc" -ne 0 ] && [ -z "$session" ] && [ "${cost:-0}" = "0" ]; then
+    # No session id and no spend means the invocation never reached the model, so
+    # this is the DRIVER being broken, not the run failing. Worth separating: a
+    # driver fault is fixed by editing this script, an escalation is not, and the
+    # first #585 attempt spent $0 dying on a bad path while looking like a normal
+    # failed run. Never park it -- parking would hide the driver's own bug behind
+    # a skip reason on a perfectly good issue.
+    outcome="driver-fault"
+    reason="claude exited $rc before starting (no session, no spend) -- see $rundir/stderr.txt"
   elif [ "$rc" -ne 0 ]; then
     outcome="failed"; reason="claude exited $rc"
   else
@@ -445,15 +470,18 @@ EOF
       ;;
   esac
 
+  # The outcome is recorded, so the in-flight marker has done its job.
+  rm -f "$STATE_DIR/inflight.json"
+
   TOTAL_COST="$(awk -v a="$TOTAL_COST" -v b="${cost:-0}" 'BEGIN{printf "%.4f", a+b}')"
   ATTEMPTED=$((ATTEMPTED + 1))
   printf '%s|%s|%s|%s\n' "$n" "$outcome" "$reason" "${prurl:-}" >> "$SUMMARY_TMP"
 
   # A run that produced nothing classifiable means the driver's own assumptions
   # are off. Stop rather than spend the next budget on the same misunderstanding.
-  if [ "$outcome" = "failed" ]; then
+  if [ "$outcome" = "failed" ] || [ "$outcome" = "driver-fault" ]; then
     say ""
-    say "stopping the loop: a failed run means an assumption is wrong, and retrying spends money on it."
+    say "stopping the loop: $outcome means an assumption is wrong, and retrying spends money on it."
     return 1
   fi
   return 0
@@ -465,6 +493,78 @@ TOTAL_COST=0
 ATTEMPTED=0
 SUMMARY_TMP="$(mktemp)"
 trap 'rm -f "$SUMMARY_TMP"' EXIT
+
+# A leftover in-flight marker means a previous driver died between invoking and
+# recording. Say so loudly: the run may have completed and cost real money, and
+# nothing about runs.jsonl would reveal it.
+if [ -f "$STATE_DIR/inflight.json" ]; then
+  say "WARNING: a previous run died before recording its outcome:"
+  jq -r '"  issue #\(.issue)  started \(.started)  run dir \(.run_dir)"' "$STATE_DIR/inflight.json" 2>/dev/null || true
+  say "  recover it with:  --classify-only $(jq -r '.issue' "$STATE_DIR/inflight.json" 2>/dev/null)"
+  say ""
+fi
+
+# --classify-only: recover an outcome from live state, no invocation. The run dir
+# (if one is findable) supplies cost and session id; the PR supplies the verdict.
+if [ -n "$CLASSIFY_ONLY" ]; then
+  n="$CLASSIFY_ONLY"
+  say "== classify-only #$n =="
+  rundir="$(ls -td "$STATE_DIR/runs/$n-"* 2>/dev/null | head -1 || true)"
+  cost=0; session=""; rc=0; ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  if [ -n "$rundir" ] && [ -f "$rundir/stream.jsonl" ]; then
+    say "  run dir  $rundir"
+    result="$(jq -c 'select(.type=="result")' "$rundir/stream.jsonl" 2>/dev/null | tail -1 || true)"
+    cost="$(printf '%s' "$result"    | jq -r '.total_cost_usd // 0' 2>/dev/null || echo 0)"
+    session="$(printf '%s' "$result" | jq -r '.session_id // ""' 2>/dev/null || true)"
+    ts="$(basename "$rundir" | sed "s/^$n-//")"
+    say "  recovered from stream: cost \$$cost  session ${session:-none}"
+  else
+    say "  no run dir found for #$n; classifying from the PR alone"
+    rundir="(none)"
+  fi
+
+  prline="$(pr_for_issue "$n" "$(fetch_open_prs)")"
+  if [ -z "$prline" ]; then
+    outcome="parked"; reason="no open PR found for #$n"
+    prurl=""
+  else
+    prnum="$(printf '%s' "$prline" | cut -f1)"
+    prurl="$(printf '%s' "$prline" | cut -f2)"
+    gate="$(gh pr view "$prnum" --repo "$REPO" --json body -q .body 2>/dev/null | extract_gate || true)"
+    [ "$rundir" != "(none)" ] && printf '%s\n' "$gate" > "$rundir/gate.yaml"
+    IFS="$(printf '\t')" read -r outcome reason <<EOF
+$(classify_outcome "$gate")
+EOF
+  fi
+
+  say "  outcome  $outcome"
+  say "  reason   $reason"
+  [ -n "$prurl" ] && say "  pr       $prurl"
+
+  jq -n -c \
+    --arg issue "$n" --arg repo "$REPO" --arg ts "$ts" \
+    --arg outcome "$outcome" --arg reason "$reason" \
+    --arg pr "$prurl" --arg session "$session" \
+    --arg rundir "$rundir" --argjson rc "$rc" --argjson cost "${cost:-0}" \
+    '{issue:($issue|tonumber), repo:$repo, started:$ts, exit:$rc, cost_usd:$cost,
+      session_id:$session, outcome:$outcome, reason:$reason, pr:$pr, run_dir:$rundir,
+      recovered:true}' \
+    >> "$RUNS_LOG"
+
+  case "$outcome" in
+    parked|failed|incomplete|no-gate)
+      jq -n -c --arg issue "$n" --arg ts "$ts" --arg outcome "$outcome" --arg reason "$reason" \
+        '{issue:($issue|tonumber), parked_at:$ts, outcome:$outcome, reason:$reason}' \
+        >> "$PARKED_LOG"
+      say "  parked -- excluded from future selection unless --retry $n"
+      ;;
+  esac
+
+  rm -f "$STATE_DIR/inflight.json"
+  say ""
+  say "recorded to $RUNS_LOG. Nothing was merged."
+  exit 0
+fi
 
 if [ -n "$ISSUE" ]; then
   say "== select (single issue: #$ISSUE) =="
