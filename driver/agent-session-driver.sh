@@ -329,6 +329,12 @@ run_issue() { # $1 = issue number
   say "  budget   \$$MAX_BUDGET   timeout ${RUN_TIMEOUT}s"
   say "  run dir  $rundir"
 
+  # The prompt goes in on STDIN, never as a positional argument.
+  # --allowedTools, --disallowedTools and --add-dir are all variadic
+  # (<tools...>, <directories...>), so a trailing positional prompt is silently
+  # consumed as another value for whichever variadic option came last, and the
+  # run dies with "Input must be provided either through stdin or as a prompt
+  # argument". Measured, not theorised.
   local -a cmd
   cmd=(claude -p
        --output-format stream-json --verbose
@@ -338,17 +344,17 @@ run_issue() { # $1 = issue number
        --max-budget-usd "$MAX_BUDGET"
        --add-dir "$SKILL_DIR")
   [ -n "$MODEL" ] && cmd+=(--model "$MODEL")
-  cmd+=("$prompt")
 
   local main_before
   main_before="$(git -C "$REPO_PATH" rev-parse main 2>/dev/null || echo unknown)"
 
   set +e
   if [ -n "$TIMEOUT_CMD" ]; then
-    ( cd "$REPO_PATH" && "$TIMEOUT_CMD" "$RUN_TIMEOUT" "${cmd[@]}" ) > "$raw" 2>"$rundir/stderr.txt"
+    ( cd "$REPO_PATH" && "$TIMEOUT_CMD" "$RUN_TIMEOUT" "${cmd[@]}" < "$rundir/prompt.txt" ) \
+      > "$raw" 2>"$rundir/stderr.txt"
   else
     say "  NOTE: no timeout/gtimeout found; running unbounded (budget still caps cost)"
-    ( cd "$REPO_PATH" && "${cmd[@]}" ) > "$raw" 2>"$rundir/stderr.txt"
+    ( cd "$REPO_PATH" && "${cmd[@]}" < "$rundir/prompt.txt" ) > "$raw" 2>"$rundir/stderr.txt"
   fi
   rc=$?
   set -e
