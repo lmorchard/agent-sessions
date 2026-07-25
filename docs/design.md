@@ -875,6 +875,15 @@ check written minutes after re-reading that warning.
   issue** — the loop, cross-issue cost accumulation, and the between-issue stop conditions are all
   untested. Same input unblocks a real multi-phase `execute` run. Needs an `intake` pass on something
   substantial, plus decisions on #625 / #566.
+- **Running the project gates dirties decafclaw's tree.** `make install-js` — a `make check`
+  dependency — rewrites `src/decafclaw/web/static/package-lock.json` every time. Reproduced from a
+  clean tree. Two consequences for the skill: the tamper check's *"no collateral edits"* substitute
+  would read that lockfile as a collateral edit, and `pr.md` step 4's `git diff origin/main..HEAD`
+  runs against a tree the gates themselves modified. The #585 run survived it, so the exposure isn't
+  understood yet — worth establishing before an unwatched host runs the gates and then judges the
+  diff. (Found by making the mistake myself: `make check` dirtied the lockfile, a blanket `git add -A`
+  swept it up, and it reached decafclaw's `main` before being reverted. The skill itself contains no
+  `git add`, so the skill does not carry that specific hazard — verified by grep.)
 - A `PreToolUse` merge-block hook, before any unwatched host.
 - The GHA host (Q1), and a durable park mechanism that survives a host change (the park list is
   per-machine).
