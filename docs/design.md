@@ -524,6 +524,71 @@ cuts against finding 4's direction. Measure before touching.
 real implementer subagents. #586 was two greps on a 4-line diff, so it tested the *chain*, not the
 *work* — a vehicle for the latter needs its own `intake` pass on something larger.
 
+### `needs-review` branch exercised — decafclaw #649 → PR #686 (2026-07-24, move 2b)
+
+Ran `intake` then `express` on the heartbeat shell bypass, after Les decided the remediation
+(constrain unattended turns to the same allowlist as interactive users). [PR
+#686](https://github.com/lmorchard/decafclaw/pull/686), verdict **`human-merge-required`** — six of
+eight gate rows true, two false *by design*: tier is `needs-review` and the diff is an authorization
+path. Every criterion, all seven guards, and `make check` pass. **The `needs-review` branch behaved
+as specified**: it ran the work to completion rather than refusing, and surfaced exactly once, at the
+risk-gated diff, before the PR opened. Also the first run with a real check *file*, so the tamper
+diff was a genuine mechanical clean rather than `clean-by-substitute`.
+
+**The verifier caught its author for the second time — and again on a claim I'd have signed off.** I
+told it the last change was a comment-only edit; it reported that task unanswerable because there was
+no separate commit to diff. Correct: **the review fix was uncommitted, so the pushed PR didn't
+contain it**, and I had run every check against a working tree that didn't match the remote. The
+lesson generalizes past this instance: *"I ran the checks" is a claim about a tree, and the tree you
+ran them on is not necessarily the one you pushed.*
+
+**`pr.md` step 4 caught a live near-miss.** `git diff origin/main..HEAD` showed ~500 lines of
+deletions I never made (`test_skills.py` −182, `evals/skill-authoring.yaml` −67). Stale base, not
+corruption — main had advanced. Squashing against it would have put those deletions in the PR
+silently. That hazard was written from reasoning in move 1; it is now confirmed live.
+
+**Main moved three times mid-run**, each forcing a rebase + freeze-sha re-anchor + full re-verify,
+and one of them (`5ecf3fc`) touched `skill_tools.py`, the function under change. The re-anchoring
+machinery held across all three. Operational finding for the board-driver: **on an active repo a long
+run pays a re-verification tax per upstream landing**, and the freeze sha is invalidated every time.
+
+**The relative guard invariant earned itself twice** — G6 130→140 and the suite 3425→3436 as upstream
+tests landed. Pinned absolutes would have tripped on both, as they did on #638.
+
+Fixes landed from this run:
+
+1. **Board hooks reported instead of skipped silently**, after Les expected #649 to move and got no
+   signal. My first diagnosis was wrong and the correction is the interesting part: decafclaw *did*
+   declare its board (prose, under `## Project board`), and the skill skipped it because
+   `github-projects.md` demanded a bespoke `## GitHub Project` schema. **A skill that requires its own
+   config shape silently no-ops on every project that documented the same facts differently** — worse
+   than no integration, because it looks identical to working. Now: find the declaration by content,
+   read column names from `gh project field-list` (real casing was `In progress`, not `In Progress`),
+   and say `board: not configured` when it genuinely isn't.
+2. **Exit 5 is a failed check.** `no tests ran` bit twice in one session — a nonexistent file, then a
+   mangled shell loop. Both times the *command* was wrong, not the code, and `tail -1` hid it. pytest
+   exits 5 on empty collection, so this is a mechanical detector rather than an exhortation — the form
+   this project's evidence says works.
+3. **`intake` gained a withheld-decision re-entry path and a home for decisions.** #649 carried the
+   marker and was still unspecifiable (`needs-review` *because* it withheld a decision), so intake's
+   "already specified — stop" check refused the one pass that could produce criteria. And `intake.md`
+   mentioned "decision" zero times while `spec-template.md` had a `Design decisions` section nothing
+   filled. The rule that matters: **a decision recorded in an issue comment is invisible to every
+   downstream mode** — they read the body through the marker. Comments are provenance; the body is the
+   constraint.
+
+**Deferred, verified before filing:** [#685](https://github.com/lmorchard/decafclaw/issues/685) — a
+child agent delegated from an unattended turn still stalls 60s. `delegate` passes the parent's
+`user_id` and `kind=CHILD_AGENT`, so `task_mode` is `child_agent` and the child isn't `is_unattended`.
+Reproduced. Records something the PR *improves*: because the old check was on `user_id`, such a child
+used to be auto-approved for any command. Not fixed in-run — that would be the implementer widening
+its own frozen spec.
+
+**A gate limit worth knowing:** `gh` writes post as the repo owner's account, so PR #686 shows a
+"review by lmorchard" that is the agent's own thread reply. Any gate row of the form "a human
+reviewed this" is self-satisfiable in this setup. Doesn't affect #686's verdict; does constrain what a
+board-driver can infer.
+
 **Move 2 is done.** The brief at [handoff-express.md](handoff-express.md) is now a record of that
 run rather than a task. Its central bet paid off: fresh context *was* load-bearing, not hygiene —
 running `express` cold through the marker is what surfaced findings 1, 2, and 6, none of which the
@@ -537,6 +602,23 @@ fixes above are mechanical corrections rather than tested wording, which is the 
 broken commands but means they carry no behavioural evidence.
 
 Queue: #585 (`auto-ok`) remains ready for a second cheap `auto-ok` data point.
+
+**All four routing paths are now exercised** — `auto-ok` straight through to
+`eligible-for-auto-merge` (#586), and `needs-review` running to completion with a single risk-gated
+surfacing to `human-merge-required` (#649). The amendment path is the last untested branch, and it
+resists deliberate testing: it only fires when a frozen check is genuinely wrong, which is a bug you
+don't get to schedule. #649 came close — the frozen check constrained the denial message to
+`"was denied by user"`, and complying rather than amending was the right call, so the path stayed
+unexercised for the right reason.
+
+**Standing evidence gap, now larger.** Two runs added roughly a dozen rules and only three of the
+skill's rules have measurements behind them (the read-only rule, the gameability rule, the grammar).
+Everything from these two days is mechanical correction — broken commands, unsatisfiable rows, missing
+vocabulary — which is the right treatment for a wrong command and *no evidence at all* about wording
+that shapes behaviour. The one addition with real over-trigger risk is intake's withheld-decision
+exception: it converts a stop into a proceed, so it could plausibly cause re-intake of issues that are
+genuinely already specified. That is cheap to measure and worth measuring before the rule count grows
+again.
 
 Testing calibration (agreed, still holds): workflow/reference skill derived from a proven
 one — scaffold structurally without pressure-scenario TDD; micro-test only novel
