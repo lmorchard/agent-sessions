@@ -163,6 +163,31 @@ check "tier heading naming neither -> unparsed"            "unparsed"     "$(tie
 check "no marker -> not a candidate at all"                ""             "$(tier_of "## Tier: \`auto-ok\`
 No marker here.")"
 
+# --- paths survive the cd into the target repo -----------------------------
+
+echo "abspath: relative paths are resolved before the invoke subshell cd's away"
+
+abspath() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *)  printf '%s\n' "$PWD/${1#./}" ;;
+  esac
+}
+
+check "absolute stays absolute"        "/a/b"           "$(abspath /a/b)"
+check "./rel becomes absolute"         "$PWD/x"         "$(abspath ./x)"
+check "bare rel becomes absolute"      "$PWD/x/y"       "$(abspath x/y)"
+check "default state dir resolves"     "$PWD/.driver-state" "$(abspath ./.driver-state)"
+
+# The regression this guards: the invoke stage runs `cd "$REPO_PATH"` in a
+# subshell, so a relative --state-dir resolved at startup points somewhere else
+# by the time the prompt file is read. That killed the first real run.
+if grep -q 'STATE_DIR="$(abspath "$STATE_DIR")"' "$DRIVER"; then
+  ok "driver resolves STATE_DIR to an absolute path"
+else
+  bad "driver resolves STATE_DIR" "abspath call present" "absent"
+fi
+
 # --- C1: no merge path in the driver ---------------------------------------
 
 echo "guard: the driver contains no merge path"

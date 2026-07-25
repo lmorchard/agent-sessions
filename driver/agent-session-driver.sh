@@ -105,6 +105,21 @@ for c in gh jq git; do
   command -v "$c" >/dev/null || die "required command not found: $c"
 done
 
+# Every path must be absolute before we go any further. The invoke stage runs in
+# a subshell that cd's to --repo-path, so a relative path resolved at startup
+# silently points somewhere else by the time it is used -- which is exactly how
+# the first real run died ("prompt.txt: No such file or directory"). Does not
+# require the path to exist, so it works for --state-dir before mkdir.
+abspath() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *)  printf '%s\n' "$PWD/${1#./}" ;;
+  esac
+}
+STATE_DIR="$(abspath "$STATE_DIR")"
+[ -n "$SKILL_DIR" ] && SKILL_DIR="$(abspath "$SKILL_DIR")"
+[ -n "$REPO_PATH" ] && REPO_PATH="$(abspath "$REPO_PATH")"
+
 TIMEOUT_CMD=""
 if command -v timeout >/dev/null; then TIMEOUT_CMD="timeout"
 elif command -v gtimeout >/dev/null; then TIMEOUT_CMD="gtimeout"
