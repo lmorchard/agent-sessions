@@ -127,6 +127,18 @@ STATE_DIR="$(abspath "$STATE_DIR")"
 [ -n "$SKILL_DIR" ] && SKILL_DIR="$(abspath "$SKILL_DIR")"
 [ -n "$REPO_PATH" ] && REPO_PATH="$(abspath "$REPO_PATH")"
 
+# The hosted run may READ the skill but must never WRITE it. --add-dir grants
+# access to the skill directory, which would otherwise let the run edit the very
+# instructions grading it -- the implementer authoring its own oracle, which is
+# the one thing this whole system exists to prevent.
+#
+# Absolute paths in permission rules take a `//` prefix, so a leading slash is
+# added to the already-absolute SKILL_DIR. Measured: `Edit(/tmp/x/**)` does NOT
+# block, `Edit(//tmp/x/**)` does, and the file was verified unchanged on disk.
+if [ -n "$SKILL_DIR" ]; then
+  DENIED_TOOLS="$DENIED_TOOLS,Edit(/$SKILL_DIR/**),Write(/$SKILL_DIR/**),NotebookEdit(/$SKILL_DIR/**)"
+fi
+
 TIMEOUT_CMD=""
 if command -v timeout >/dev/null; then TIMEOUT_CMD="timeout"
 elif command -v gtimeout >/dev/null; then TIMEOUT_CMD="gtimeout"
@@ -404,10 +416,14 @@ run_issue() { # $1 = issue number
   session="$(printf '%s' "$result"| jq -r '.session_id // ""' 2>/dev/null || true)"
   printf '%s' "$final" > "$rundir/final.txt"
 
-  # Denials are greppable. Both messages measured in Phase 0: the rule-specific
-  # "with command <cmd> has been denied" and the generic don't-ask-mode form.
+  # Denials are greppable, in three measured phrasings: the rule-specific
+  # "with command <cmd> has been denied", the generic don't-ask-mode form, and the
+  # path-rule form ("denied by your permission settings") that Edit/Write deny
+  # rules produce. A PreToolUse hook would add a fourth -- if that lands, teach
+  # this pattern its wording, or the count silently undercounts.
   local denials
-  denials="$(grep -o 'Permission to use [^"]*has been denied[^"]*' "$raw" 2>/dev/null | sort -u || true)"
+  denials="$(grep -oE '(Permission to use [^"]*has been denied[^"]*|[^"]*denied by your permission settings[^"]*)' \
+             "$raw" 2>/dev/null | sort -u || true)"
   if [ -n "$denials" ]; then
     printf '%s\n' "$denials" > "$rundir/denials.txt"
     say "  DENIALS ($(printf '%s\n' "$denials" | grep -c .)) -- see $rundir/denials.txt"

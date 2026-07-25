@@ -140,7 +140,8 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
     | Every human-judgment criterion: graded by a human | `checks.md` evidence + an actual human answer |
     | Every guard still `pass` | The verifier's report — a pass→fail flip is a regression you caused |
     | Tamper diff clean, or every difference logged as an amendment | The verdict recorded at step 5 (pre-squash) — `clean-by-substitute` counts, bare `clean` on an empty `Check files` list does not |
-    | Project gates green | `make check` on the pushed head |
+    | Local project gates green | `make check` in the worktree |
+    | CI checks on the pushed head all pass | `gh pr checks` — the query below. A local `make check` is **not** a substitute |
     | No unresolved review threads | The GraphQL query below — there is no `--json reviewThreads` field |
     | Tier is `auto-ok` (and not downgraded by an amendment) | `spec.md` Tier section |
     | PR touches no risk-gated path | The diff vs. `acceptance-criteria.md`'s risk list |
@@ -158,6 +159,33 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
     Note that a bot review carrying **no** inline comments produces zero threads while still
     registering as a review — so check the review itself landed (`gh pr view <n> --json reviews`)
     rather than reading `0 unresolved` as proof a reviewer ran.
+
+    CI checks, verified working. **Read `bucket`, never `state`** — `state` is GitHub's raw value
+    (`SUCCESS`), while `bucket` is the normalised `pass | fail | pending | skipping | cancel`. A
+    filter written against `.state != "pass"` counts *passing* checks as failures and makes every
+    green PR ineligible:
+
+    ```bash
+    gh pr checks <n> --json name,bucket \
+      --jq '{total: length, bad: [.[]|select(.bucket!="pass" and .bucket!="skipping")]}'
+    ```
+
+    Three things this row must not do:
+
+    - **Don't use `--required`.** On a repo with no required checks it prints `no required checks
+      reported` and exits 1 — so the row either errors or passes vacuously depending on how you read
+      it. Grade *all* checks.
+    - **Report `total`.** A repo with no CI at all yields an empty list, and "nothing failed" is not
+      "everything passed". Zero checks is a fact for the gate block to state, not a green light.
+    - **Don't substitute the local `make check`.** It is a different machine, a different
+      environment, and it is the row above. This row exists because a run once reached
+      `eligible-for-auto-merge` with `lint-and-test` still `pending`.
+
+    **Pending CI is transient, and that makes it the one row you wait on** rather than fail. Checks
+    take minutes; the other rows are already settled. Wait for them to finish (`gh pr checks <n>
+    --watch`, bounded — don't poll forever), then grade. If they still haven't settled, the verdict is
+    **`pending`**, not `eligible-for-auto-merge` and not `human-merge-required`: nothing is wrong, it
+    just isn't derivable yet, and `pending` is the value a machine reader already knows not to act on.
 
     **All true → `eligible-for-auto-merge`. Any false → `human-merge-required`**, with the
     failing row as the reason. Write the verdict into the gate block and report it.

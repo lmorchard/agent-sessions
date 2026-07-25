@@ -815,9 +815,66 @@ hit but was verifying the freeze-sha re-anchor after a rebase — manifest integ
 amendment. Gate block confirms `amendments: none`. Five runs in, it has never fired, exactly as
 predicted.
 
+### Move 4a — the CI/gate hole closed (2026-07-25)
+
+PR #699 merged, #585 closed. First item off move 3's pending list, and the fix was mechanical — a
+wrong/missing command rather than behaviour-shaping wording, which is the treatment this project's
+evidence prescribes for that distinction (no micro-test).
+
+**The fix.** `project-gates` split into two rows: `Local project gates green` (`make check` in the
+worktree) and **`CI checks on the pushed head all pass`** (`gh pr checks`). New `ci:` field in the
+gate block — added *alongside* `project-gates` rather than redefining it, so the driver's existing
+parse stays valid and no driver change was needed.
+
+**Pending CI resolves to `verdict: pending`, not `human-merge-required`.** It is the one row that is
+*transient* — the others are settled by the time the gate runs. So the rule is: wait for checks to
+settle (bounded), then grade; if they won't settle, nothing is wrong and no human is needed, the work
+simply isn't gradeable yet. `pending` is already the value a machine reader knows not to act on.
+
+**Three verification findings, and two of them would have shipped bugs:**
+
+1. **`gh pr checks --json state` returns `SUCCESS`, not `pass`.** The normalised
+   `pass|fail|pending|skipping|cancel` lives in **`bucket`**. My first candidate query filtered on
+   `.state != "pass"` and returned **2 non-passing checks on a fully green PR** — it would have made
+   every green PR ineligible. Exactly the `reviewThreads` class from move 2: a plausible field name
+   that reads fine and is wrong. `pr.md` now says *read `bucket`, never `state`* and says why.
+2. **`--required` is a trap on this repo.** decafclaw has no required checks, so
+   `gh pr checks --required` prints `no required checks reported` and **exits 1**. A row built on it
+   either errors or passes vacuously. Grade *all* checks.
+3. **Zero checks must be stated, not passed.** An empty check list means nothing failed, which is not
+   everything passing — so the row reports `total` and the gate block has a `no checks configured`
+   value. Third time this project has had to write down the same shape (`clean` vs
+   `clean-by-substitute`, truncated board reads, now this): **a null must never render as a positive.**
+
+**Guard swap, stated plainly because removing a check to pass your own change is a bad pattern.**
+Editing `skills/` broke move 3's `make skill-untouched`, which pinned `skills/` to a snapshot. That
+guard's claim — *the driver needed no skill change* — is verified and permanently recorded, so the
+snapshot is **obsolete rather than inconvenient**. But the boundary it protected is still live, so it
+was replaced by `make skill-readonly`, asserting the ongoing invariant instead of the frozen fact:
+
+**The hosted run may read the skill but never write it.** `--add-dir` grants the run access to the
+skill directory, so without a deny rule it could edit the instructions grading it — the implementer
+authoring its own oracle, which is the single failure this whole system exists to prevent. The driver
+now denies `Edit`/`Write`/`NotebookEdit` on the skill dir.
+
+Measured, because the syntax is not guessable: **`Edit(/abs/path/**)` does NOT block; `Edit(//abs/path/**)`
+does.** Absolute paths in permission rules take a `//` prefix. Verified with the file's contents on
+disk as the oracle, not the model's report — the first form let the edit through and the file changed.
+
+**And the new guard was briefly worthless.** Its first version couldn't fail: `grep` for `Edit(...)`
+matches inside `NotebookEdit(...)`, so deleting the standalone `Edit` rule still passed. Now anchored
+on the comma delimiter and verified discriminating by deleting each of the three rules in turn and
+confirming a matching failure. Its first version also false-positived on an `Edit(//tmp/x/**)` example
+inside a *comment* — the same inert-content trap `pr.md` already warns about for tamper rules, in a
+check written minutes after re-reading that warning.
+
 #### Pending after move 3
 
-- **The CI-vs-gate hole in `pr.md`** — blocking for phase 3.
+- ~~**The CI-vs-gate hole in `pr.md`** — blocking for phase 3.~~ → **closed in move 4a** (above).
+- **Queue depth.** `make dry-run` reports `eligible: 0`, so the driver has **never run more than one
+  issue** — the loop, cross-issue cost accumulation, and the between-issue stop conditions are all
+  untested. Same input unblocks a real multi-phase `execute` run. Needs an `intake` pass on something
+  substantial, plus decisions on #625 / #566.
 - A `PreToolUse` merge-block hook, before any unwatched host.
 - The GHA host (Q1), and a durable park mechanism that survives a host change (the park list is
   per-machine).

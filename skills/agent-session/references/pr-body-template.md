@@ -37,6 +37,7 @@ guards: G1 pass · G2 pass
 tamper: clean
 freeze: a1b2c3d
 project-gates: make check green
+ci: 2/2 pass (lint-and-test, js-test)
 threads: 0 unresolved
 risk-paths: none
 amendments: none
@@ -62,7 +63,8 @@ Field values, so the block stays parseable:
 | `guards` | `Gn pass` \| `Gn REGRESSED`, `·`-separated; `none` if the spec listed no guards |
 | `tamper` | `clean` \| `clean-by-substitute — <basis>` \| `amended (see amendments)` \| `DIRTY — unexplained diff in <path>` |
 | `freeze` | the freeze commit sha |
-| `project-gates` | `make check green` \| `red: <what failed>` |
+| `project-gates` | `make check green` \| `red: <what failed>` — the **local** run only |
+| `ci` | `N/N pass` \| `N/M pass — pending: <names>` \| `N/M pass — FAILING: <names>` \| `no checks configured` |
 | `threads` | `N unresolved` |
 | `risk-paths` | `none` \| the risk-gated paths this PR touches |
 | `amendments` | `none` \| `Cn: <old> → <new>` |
@@ -78,6 +80,17 @@ integrity, byte-equality against the issue, no collateral edits) per
 `pending` is what the block says from PR-open until step 14 derives the verdict. Unresolved
 threads and the post-review verifier report don't exist before then, so an earlier verdict is a
 guess — and this block is machine-readable, so a guess is one a driver can act on.
+
+`pending` is **also** the verdict when CI hasn't settled. Nothing is wrong in that case and no human
+is needed, so `human-merge-required` would be a lie in the other direction; the work simply isn't
+gradeable yet.
+
+`ci` and `project-gates` are separate rows on purpose, and `project-gates` alone is why they had to
+be. A run reached `eligible-for-auto-merge` on a PR whose `lint-and-test` was still `pending`,
+because `project-gates: make check green` described the author's laptop and sounded like it covered
+the project's gates. `no checks configured` exists so that a repo with no CI states the fact rather
+than passing by omission — an empty check list means nothing failed, which is not the same as
+everything passing.
 
 **The block reports; it does not act.** Nothing in this skill merges a PR or enables
 auto-merge — `eligible-for-auto-merge` means a human or the board-driver *may* merge, and both
