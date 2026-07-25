@@ -70,12 +70,40 @@ issues into autonomy tiers for free.
 
 ## The capability ladder (Claude Code, verified against docs 2026-07-23)
 
-1. **Headless CLI** — `claude -p --bare --allowedTools "..." --output-format json`.
-   `--bare` skips CLAUDE.md/hooks/MCP autodiscovery for reproducible CI (slated to become
-   the `-p` default). `--permission-mode dontAsk` = locked-down mode (denies anything
-   outside allow-rules). JSON output carries `total_cost_usd` + `session_id`;
-   `--continue`/`--resume` chain sessions.
-   [docs](https://code.claude.com/docs/en/headless)
+1. **Headless CLI** — `claude -p --allowedTools "..." --output-format json`.
+   JSON output carries `total_cost_usd` + `session_id`; `--continue`/`--resume` chain
+   sessions. [docs](https://code.claude.com/docs/en/headless)
+
+   **Three corrections from move 3, all measured against `claude --help` 2.1.220 and live
+   runs — this entry was wrong in ways that would have produced a broken driver:**
+
+   - **`--bare` is unusable on this machine.** Under `--bare`, *"Anthropic auth is strictly
+     `ANTHROPIC_API_KEY` or `apiKeyHelper` via `--settings` (OAuth and keychain are never
+     read)."* No key is set here, so it fails to authenticate rather than running
+     reproducibly. It also skips CLAUDE.md discovery, which `express.md` declares as an
+     input — so a keyed GHA runner using `--bare` would lose the project context the skill
+     needs. The reproducibility win is not free on either host.
+   - **`--max-budget-usd <amount>`** (`-p` only) is a real CLI-enforced per-run cost
+     ceiling. Reading `total_cost_usd` afterwards tells you what you spent; this stops you
+     spending it. Use both.
+   - **`--permission-mode dontAsk` denies unlisted *mutations*, not unlisted commands.**
+     Measured with the filesystem as the oracle: `touch` outside the allowlist was denied,
+     but `ls` was allowed with an allowlist of only `Bash(echo:*)`. Commands classified
+     read-only are auto-allowed. The floor is real — it had never been tested here — but
+     narrower than "denies anything outside allow-rules".
+
+   Also established: **deny rules take precedence over allow rules and match multi-word
+   command prefixes.** `--disallowedTools 'Bash(gh pr merge:*)'` blocks the merge even with
+   `Bash(gh:*)` broadly allowed. That is what makes "nothing merges" a mechanism rather than
+   an exhortation. Not airtight — prefix-matched, so `gh api` remains reachable — so a
+   `PreToolUse` hook (item 4) is a precondition for any *unwatched* host.
+
+   And the surprise that matters most operationally: **`--allowedTools`,
+   `--disallowedTools` and `--add-dir` are all variadic** (`<tools...>`,
+   `<directories...>`), so a trailing positional prompt is swallowed as another value and
+   the run dies with *"Input must be provided either through stdin or as a prompt
+   argument."* Pass the prompt on **stdin**. A flag list that works is not evidence the flag
+   list is right when one of the flags is variadic.
 2. **GitHub Actions** (`anthropics/claude-code-action@v1`) — the "runs without my laptop"
    unlock. Auto-detects `@claude` mention mode vs `prompt:` automation mode; the prompt
    form runs on *any* event including `schedule:` cron. Vertex via Workload Identity
@@ -673,6 +701,132 @@ behavior-shaping wording against a no-guidance control (5+ reps, read every matc
 don't add nuance clauses to a winning recipe; dogfood after building. Full pressure
 scenarios deferred until there's something worth hardening.
 
+### Move 3 — the board-driver, built and run (2026-07-25)
+
+Session artifacts: [dev-sessions/2026-07-25-0926-board-driver/](dev-sessions/2026-07-25-0926-board-driver/)
+(`spec.md` answers the four questions, `notes.md` has the run account).
+
+**Built:** `driver/agent-session-driver.sh` — five stages (`select` → `invoke` → `classify` →
+`record` → `report`), plus `driver/test-driver.sh` and a `Makefile`. `make check` = 21 fixture tests
++ the merge-path guard + G1.
+
+**The boundary held.** `skills/agent-session/` was not touched, and that is enforced rather than
+asserted: `make skill-untouched` fails if `git diff` against the session's base commit shows anything
+under `skills/`. The driver needed no skill change to work.
+
+**Run:** decafclaw #585 → [PR #699](https://github.com/lmorchard/decafclaw/pull/699), verdict
+**`eligible-for-auto-merge`**, nothing merged. ~$15.2 across three attempts; the two failures were
+worth more than the success.
+
+#### The four questions, answered
+
+1. **Local `claude -p` vs scheduled GHA** — a category error. The driver is a script; local vs GHA is
+   a *host*. Local is host #1, GHA gets no code of its own, and it is deliberately not built: the
+   re-verification tax wants watchable runs, a runner must provision decafclaw's whole toolchain, and
+   `--bare` makes the port non-trivial regardless (see the corrected ladder entry). The script stays
+   portable by construction — no `$HOME` assumptions, every path a flag, all state under one
+   `--state-dir`.
+2. **Queue** — **marker + anchored `^## Tier: auto-ok` gates; the board column is advisory.** Forced
+   by measurement: the `Ready` column and the marker set have an **empty intersection** on decafclaw
+   today (#450/#667/#668 carry no marker; #585 was in *Backlog*). The column answers *does a human
+   want this*, the marker answers *can this be attempted unattended*, and gating on the intersection
+   would report zero work forever. Disagreements are reported, not resolved.
+3. **Verdicts never control flow.** Both terminal verdicts mean *park the PR and move on*; only
+   budgets and failures stop the loop. `--max-issues` defaults to 1.
+4. **The exit code is not the oracle — the gate block is.** `claude -p` exits 0 both when `express`
+   finishes and when it stops for a designed escalation. Park, never retry: a designed stop is
+   information, and retrying a readiness failure reproduces it at cost.
+
+#### Findings
+
+**The gate can say `eligible-for-auto-merge` while GitHub's CI is pending. This is the one that
+matters.** The gate's `project-gates` row records a *local* `make check`; it cites **no GitHub check
+runs**. On #699, `lint-and-test` was `pending` and `mergeStateStatus` was `UNSTABLE` when the verdict
+was derived. Same defect class as move 2's two gate holes — a row satisfied by evidence adjacent to
+what the row names. **Left unfixed deliberately**: it is a `pr.md` bug, not a driver bug, and fixing
+it would exceed a remit that was explicitly *don't edit the skill* while breaking G1, the evidence
+that the boundary held. It must land, with `gh pr checks` as the cited command, **before phase 3
+turns that verdict into an action.**
+
+**A driver that dies between invoking and classifying leaves no record of the run.** Observed, not
+imagined: the second attempt completed (98 turns, 19 min, **$9.44**) and opened #699, then the driver
+process was killed before classifying. Result: real money spent, a PR open, and an empty
+`runs.jsonl`. Everything the driver writes, it writes *after* the work — so the failure mode is
+invisible by construction. Fixed with an `inflight.json` marker written *before* the invocation, and
+`--classify-only <n>` to recover an outcome from live state.
+
+**The accident validated the `pending` rule for free.** Recovery on the killed run returned
+`incomplete`, because #699's gate block honestly read `verdict: pending / reason: review cycle has not
+run yet`. `pr-body-template.md`'s rule that `pending` is not actionable is exactly what stops a driver
+reading a killed run as a success — and the killed-mid-review-cycle case is the one shape that
+couldn't be manufactured.
+
+**`failed` had to split into `failed` and `driver-fault`.** The first attempt died on a relative
+state-dir path (the invoke stage `cd`s to the target repo, so the path resolved elsewhere). It parked
+#585 — hiding the driver's own bug behind a skip reason on a perfectly good issue. `driver-fault` is
+now discriminated by *no session id and no spend*, meaning the invocation never reached the model, and
+is never parked.
+
+**16 permission denials, and the pattern is shell syntax rather than command names.** Every one
+involves an output redirect (`>`, `>>`, `2>&1`) or control flow (`for`, `while`, a leading variable
+assignment); none involves an un-allowlisted command. A compound with pipes and `&&`/`;` and no
+redirect passes. So the allowlist cannot be fixed by adding names. The run **absorbed** them by
+rephrasing rather than stalling — so the `dontAsk` stall risk did not materialise, but it was replaced
+by a turn-and-token tax. One had a semantic effect (a blocked `.env` append) and the run reported it
+as a named deviation. Note the detector greps the permission layer's phrasing only: a `PreToolUse`
+hook block would go uncounted.
+
+**An interim measurement is not a measurement.** I checked denials mid-run, got zero, and reported
+zero; the finished streams carry 16. Same shape as the discarded micro-test fixtures in move 1 — a
+number is only evidence once the thing that produces it has finished.
+
+**Guard G2 failed, and the guard was right.** `express` fast-forwarded the *host checkout's* `main`
+(`git pull -q --ff-only`), not only its worktree. Benign here — `--ff-only` cannot lose work — but on
+a host whose `main` carries unpushed commits that pull *fails*, so setup could break for a reason
+unrelated to the issue and be recorded as a park with a misleading reason. And G2 is itself a
+**brittle absolute encoding a relative invariant** — it pinned a sha where the real invariant is
+"`main` is only ever fast-forwarded, never rewritten." Third occurrence of that pattern after #638's
+G1 and #649's G6; first one that was mine.
+
+**The re-verification tax is structural, not bad luck.** `origin/main` moved twice more during these
+attempts and again before the resume — four consecutive runs paying it, after #649's three landings.
+Every landing invalidates the freeze sha and forces rebase + re-anchor + re-verify. The machinery
+held every time; the wall-clock cost is the planning input.
+
+**`gh project item-list` silently truncates at 30.** On a 185-item board the first queue read returned
+one Ready item; `--limit 500` returns three. No error — it simply described a smaller board. The
+driver now passes an explicit limit everywhere *and prints the count it read*, so truncation is
+visible rather than inferred from an empty queue. Another null rendered as a negative.
+
+**The hosted run is not hermetic.** A `SessionStart` hook fired and injected this machine's global
+context. That is the price of not using `--bare`, and it bounds what a local run proves about a GHA
+run — the same caveat already recorded for micro-tests, now applying to the driver.
+
+**One prompt addition, checked against the added-then-measured-away pattern.** The driver's prompt
+tells the run that no human is watching and that a parked issue is a normal outcome. `express.md`
+already says *"In every case: stop and surface. Asking is cheap"* — so the concept is reachable, which
+is the tell that caught the goal-ambiguity trigger and the withheld-decision exception. Kept anyway,
+because **the premise changes**: "asking is cheap" is false when nobody is there, and the failure mode
+is proceeding *because* asking is impossible. It is also driver wording, not skill wording, so it is
+outside the micro-test rule's scope.
+
+**Still unexercised: the amendment path.** A subagent labelled "Verify amended manifest" looked like a
+hit but was verifying the freeze-sha re-anchor after a rebase — manifest integrity, not a criterion
+amendment. Gate block confirms `amendments: none`. Five runs in, it has never fired, exactly as
+predicted.
+
+#### Pending after move 3
+
+- **The CI-vs-gate hole in `pr.md`** — blocking for phase 3.
+- A `PreToolUse` merge-block hook, before any unwatched host.
+- The GHA host (Q1), and a durable park mechanism that survives a host change (the park list is
+  per-machine).
+- Whether the driver should resume its own interrupted runs. Deliberately out of scope: it needs a
+  staleness policy for continuing against a moved `main`, and there is no evidence for one yet.
+- A larger `intake` vehicle so multi-phase `execute` gets a real run — #585 was a 4-line deletion, so
+  it tested the *driver*, not the *work*.
+- The standing evidence gap: still only three of the skill's rules have measurements behind them.
+
 ## Resolved (was open)
 
 - Criteria grammar → **EARS + Given-When-Then** (not invented); see `criteria-grammar.md`.
@@ -682,12 +836,16 @@ scenarios deferred until there's something worth hardening.
 
 ## Open questions (for the pending work)
 
-- **Board-driver (later):** local `claude -p` loop vs. scheduled GHA; how it reads/filters
-  the Ready queue by tier. Stays *above* the skill. It can now read the PR body's
-  `<!-- agent-session:gate -->` block rather than re-deriving the gate.
+- ~~**Board-driver (later):** local `claude -p` loop vs. scheduled GHA; how it reads/filters
+  the Ready queue by tier.~~ → **Resolved in move 3.** Built as a host-agnostic script (local
+  is host #1, GHA deferred); filters on marker + anchored tier, board column advisory; reads
+  the `<!-- agent-session:gate -->` block rather than re-deriving the gate.
 - **Does the discriminate rule need micro-testing?** It was written from a dogfood failure, not
   tested as *wording*. The intake-side analogue (oracle-must-exist) needed a micro-test to
   land, so this one plausibly does too.
+- **Should the merge gate read GitHub's check runs?** Move 3 showed `eligible-for-auto-merge`
+  is reachable with required CI `pending`. Almost certainly yes, via `gh pr checks` — the open
+  part is whether a pending check makes the verdict `pending` or `human-merge-required`.
 
 ## Resolved in move 1 (were open)
 

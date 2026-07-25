@@ -232,13 +232,90 @@ paying the tax**. Every landing invalidates the freeze sha and forces a rebase +
 re-verify. The re-anchoring machinery held every time, which is the good news; the wall-clock cost is
 structural on an active repo, which is the planning input.
 
-### Zero permission denials
+### 16 permission denials — and the pattern is shell syntax, not command names
 
-Across ~700 stream lines of real work — git, gh, make, uv, pytest, subagent dispatch, PR creation —
-the scoped allowlist produced **no denials at all**. The `dontAsk` stall I flagged as the main
-operational risk did not materialise. Notably, compound commands pass: `git fetch origin -q && git
-log --oneline main..origin/main | head -20; echo ...` was allowed, so the layer evaluates the
-constituent commands rather than rejecting any line containing an operator.
+**Correcting an earlier claim of mine.** I checked denials mid-run and reported zero. The finished
+streams carry **16**: 15 in attempt 2, 1 in the resume. A mid-run count is not a count.
 
-That is a better result than I expected and it lowers the cost of the safety floor considerably —
-though it is one repo's toolchain, so the allowlist is validated, not proven.
+The useful part is *what* was denied. Every one of the 16 involves **output redirection** (`>`, `>>`,
+`2>&1`, `2>/dev/null`) or **shell control flow** (`for`, `while`, a leading variable assignment) —
+never an un-allowlisted command name. Examples:
+
+```
+make test >/tmp/mt.log 2>&1; echo "MAKE_TEST_EXIT=$?"
+printf '\nHTTP_PORT=18885\n' >> .../.env && echo ok
+for i in $(seq 1 20); do c=$(gh api .../comments --jq 'length') ...
+uv run --directory ... pytest tests/test_attachments.py -q 2>&1 | ...
+```
+
+Meanwhile a compound command with pipes and `&&`/`;` and no redirect **passed**:
+`git fetch origin -q && git log --oneline main..origin/main | head -20; echo "---status---"; git status`.
+
+So the boundary is: **pipes and `&&`/`;` chaining are fine; redirects and control flow are not.**
+
+Three consequences:
+
+1. **The allowlist cannot be fixed by adding command names.** These denials are about shell
+   *syntax*, and `make`, `printf`, `uv`, `gh` were all already allowed. Nothing in
+   `--allowedTools` addresses them.
+2. **The run absorbed them rather than stalling.** It rephrased and continued — which is why it
+   finished successfully. The `dontAsk` stall I flagged as the top operational risk did not
+   materialise, but it was replaced by a quieter **turn-and-token tax**: 16 retries of work that
+   would otherwise have been one command each.
+3. **One had a semantic effect and the run reported it honestly** — the blocked
+   `HTTP_PORT` append to the worktree's `.env`, surfaced as a named deviation rather than buried.
+   My initial suspicion that the run had misattributed its own denial was wrong; I had grepped the
+   resume's stream for something that happened in attempt 2's.
+
+Also worth recording: **the driver's denial detection only catches the permission layer's phrasing.**
+It greps for `has been denied`. A `PreToolUse` hook block, which `design.md`'s ladder names as the
+hardening mechanism for an unwatched host, would produce different text and go uncounted. If the hook
+lands, the detector needs to learn its phrasing.
+
+### THE FINDING: `eligible-for-auto-merge` was reached with GitHub's CI still pending
+
+The gate block reads `project-gates: make check green`. That is a **local** `make check`. At the
+moment the verdict was derived — and still, afterwards — GitHub's own checks read:
+
+```
+lint-and-test   pending
+js-test         pass
+mergeStateStatus = UNSTABLE
+```
+
+**The gate cites no GitHub check runs at all.** So `verdict: eligible-for-auto-merge` is reachable on
+a PR whose required CI has not passed, and a driver acting on that verdict in phase 3 would merge
+into pending — or failing — CI.
+
+This is the same defect class move 2 found twice: a gate row satisfied by evidence adjacent to what
+the row means. There, `tamper: clean` hid an absent diff, and `reviewThreads` cited a command that
+does not exist. Here, `project-gates` sounds like it covers the project's gates and covers only the
+ones runnable on the local machine.
+
+**Not fixed in this session, deliberately.** It is a `pr.md` gate bug rather than a driver bug, and
+fixing it would (a) exceed a remit that was explicitly *build the driver, don't edit the skill*, and
+(b) break guard G1, which is currently the mechanical evidence that the boundary held. It wants its
+own change, with `gh pr checks` as the cited command. **Recorded as the top item for the next move**,
+and it must land before phase 3 turns `eligible-for-auto-merge` into an action.
+
+### Final outcome
+
+| | |
+|---|---|
+| PR | [#699](https://github.com/lmorchard/decafclaw/pull/699), OPEN, `mergedAt: null` |
+| Verdict | `eligible-for-auto-merge` — the driver recorded `gate-eligible` |
+| Cost | $9.44 (attempt 2) + $5.25 (resume) + ~$0.50 (permission probes) ≈ **$15.2** |
+| Turns / time | 98 + 28 turns, 19 + 10 minutes |
+| Merged | **nothing** |
+
+Two caveats the run raised about its own verdict, unprompted, both worth keeping:
+
+1. **The `risk-paths: none` row was a judgment, not a mechanical read.** The removed function called
+   `shutil.rmtree`, and "data deletion" is on the risk-gated list. It scored `none` because the
+   function was unreachable from production so the diff cannot change what gets deleted. Stating that
+   in the gate block rather than silently writing `none` is the right behaviour — it makes the
+   judgment cheap to overrule.
+2. **A provenance gap on the last hop.** The independent verifier graded the code at `339a7b6`; a
+   rebase and two markdown edits followed, and the post-rebase re-run of the checks was the
+   implementer's own. Code byte-identical, but *"a re-run by the graded party is weaker evidence"* —
+   which is the verifier-independence principle applied by the run to itself, unprompted.

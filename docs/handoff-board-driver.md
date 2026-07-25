@@ -1,4 +1,30 @@
-# Handoff: build the board-driver (move 3)
+# Handoff: build the board-driver (move 3) — DONE, kept as a record
+
+> **Move 3 is complete.** This brief is now a record of what it asked for, not a task. The driver is
+> at `driver/agent-session-driver.sh`; the outcome is in
+> [design.md](design.md)'s move-3 section and
+> [dev-sessions/2026-07-25-0926-board-driver/](dev-sessions/2026-07-25-0926-board-driver/).
+>
+> **How the brief held up.** Its central bet paid off again: fresh context was load-bearing, and for
+> the reason it claimed. Four of its five "don't rediscover these" constraints were confirmed live
+> (the re-verification tax, the 1-in-8 conversion, the gate block as interface, squash unreachability
+> stayed untested). Two of its premises were **wrong in ways that mattered**, and both were caught by
+> checking rather than trusting:
+>
+> - **"#585 — the remaining `auto-ok` issue, already… ready"** meant *spec*-ready. On the board #585
+>   was in **Backlog**, and the `Ready` column's three issues carry no marker at all. That empty
+>   intersection is what forced Q2's answer.
+> - **`design.md`'s capability ladder was wrong about `--bare`** (unusable without an API key, and it
+>   drops the CLAUDE.md `express` needs) and **incomplete about `dontAsk`** (denies unlisted
+>   *mutations*; auto-allows read-only commands). It also missed `--max-budget-usd` entirely.
+>
+> The brief's guardrails all held: nothing merged, no phase file was edited (mechanically enforced by
+> `make skill-untouched`), and the one new rule was checked against the added-then-measured-away
+> pattern before being kept.
+>
+> **The finding it could not have anticipated**, and the top item for move 4: the merge gate can
+> report `eligible-for-auto-merge` while GitHub's required CI is still `pending`, because
+> `project-gates` records a local `make check` and cites no check runs.
 
 Task brief for a fresh context. Read `CLAUDE.md` and `docs/design.md` first — especially the build
 status from the bottom up (the micro-test, move 2b, move 2, the consolidation pass). This doc is the
