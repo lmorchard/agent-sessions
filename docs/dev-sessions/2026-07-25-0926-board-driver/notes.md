@@ -163,4 +163,82 @@ touched at all (guard G1, enforced by `make skill-untouched`).
 
 ## The real run against #585
 
-*(filled in below once the run completes)*
+Three attempts, and the two failures were worth more than the success.
+
+### Attempt 1 — driver fault, $0
+
+Died instantly: `prompt.txt: No such file or directory`. The state dir defaulted to the relative
+`./.driver-state`, and the invoke stage runs in a subshell that `cd`s to `--repo-path` first, so the
+path pointed somewhere else by the time it was read.
+
+The driver's own handling was correct — exit 1 → `failed` → parked → stop the loop rather than
+retry. But it exposed something: **`failed` could not distinguish "the run failed" from "the driver
+is broken."** Both park the issue, and parking hides a driver bug behind a skip reason on a perfectly
+good issue. Now a separate `driver-fault` outcome, discriminated by *no session id and no spend*,
+which means the invocation never reached the model. It is never parked.
+
+### Attempt 2 — the run completed, the driver was killed, and $9.44 vanished from the record
+
+98 turns, 19 minutes, **$9.44**, and it got all the way to opening
+[PR #699](https://github.com/lmorchard/decafclaw/pull/699). Then the driver process was killed
+during the review cycle. Cause unattributed — the kill surfaced *inside* the run as
+`[Request interrupted by user for tool use]`, which is how a SIGTERM to the host process appears to
+`claude -p`, so the inner run's account of why it stopped is not reliable evidence about the cause.
+
+The damage was entirely in the records: a completed run, real money spent, an open PR, and an
+**empty `runs.jsonl`**. Everything the driver writes, it writes *after* classification, so a driver
+that dies before classifying leaves no trace of a run that happened.
+
+Three fixes, all from the accident rather than from imagination:
+
+1. **`inflight.json`**, written before the invocation and removed after recording. A leftover one is
+   reported loudly on the next startup, with the recovery command.
+2. **`--classify-only <n>`** — recover an outcome from live state with no invocation: cost and
+   session id from the saved stream, verdict from the PR. This is the by-hand recovery the accident
+   forced, made repeatable.
+3. The `driver-fault` outcome above.
+
+**What the accident validated for free:** running the recovery gave outcome `incomplete`, because
+#699's gate block honestly reads `verdict: pending / reason: review cycle has not run yet`. The
+design rule that **`pending` is not actionable** is exactly what stops a driver reading a killed run
+as a success. That was a fixture test five minutes earlier; now it has a real case, and the real case
+is the one shape I could not have manufactured.
+
+### Guard G2 FAILED — and the guard was right
+
+G2 said decafclaw's local `main` would be unchanged, on the reasoning that express works in a
+worktree. It moved: `4f9a426` → `e81f1ba`. Reflog shows `git pull -q --ff-only origin main` at
+09:43:36, inside the run.
+
+Not reframing this to pass. Two honest readings, both worth keeping:
+
+- **The risk is low.** It was `--ff-only`, which refuses rather than rewriting when history has
+  diverged, and `4f9a426` is an ancestor of `e81f1ba`, so nothing was lost.
+- **The guard was still correct to fire**, because the finding is real: **express mutates the host
+  checkout, not only its worktree.** On a host whose `main` carries unpushed local commits,
+  `--ff-only` *fails* — so express's setup could break for a reason having nothing to do with the
+  issue, and the driver would record that as a park with a misleading reason.
+
+And G2 is itself an instance of the defect class `design.md` already names twice — G1's `3234 passed`
+and G6's `130→140`: **a brittle absolute encoding a relative invariant.** The real invariant is
+"`main` is only ever fast-forwarded, never rewritten," which held. I pinned a sha instead. Third
+occurrence of the pattern, first one that was mine.
+
+### The re-verification tax is the norm, not bad luck
+
+`origin/main` moved **twice more** during these attempts, and the branch was one commit behind again
+before the resume even started. Combined with #649's three landings, that is **four consecutive runs
+paying the tax**. Every landing invalidates the freeze sha and forces a rebase + re-anchor +
+re-verify. The re-anchoring machinery held every time, which is the good news; the wall-clock cost is
+structural on an active repo, which is the planning input.
+
+### Zero permission denials
+
+Across ~700 stream lines of real work — git, gh, make, uv, pytest, subagent dispatch, PR creation —
+the scoped allowlist produced **no denials at all**. The `dontAsk` stall I flagged as the main
+operational risk did not materialise. Notably, compound commands pass: `git fetch origin -q && git
+log --oneline main..origin/main | head -20; echo ...` was allowed, so the layer evaluates the
+constituent commands rather than rejecting any line containing an operator.
+
+That is a better result than I expected and it lowers the cost of the safety floor considerably —
+though it is one repo's toolchain, so the allowlist is validated, not proven.
