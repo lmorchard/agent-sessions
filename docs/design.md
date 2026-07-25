@@ -601,7 +601,12 @@ and the standing evidence gap — the skill has accumulated rules faster than me
 fixes above are mechanical corrections rather than tested wording, which is the right treatment for
 broken commands but means they carry no behavioural evidence.
 
-Queue: #585 (`auto-ok`) remains ready for a second cheap `auto-ok` data point.
+Queue: #585 (`auto-ok`) remains ready — now earmarked as the board-driver's first vehicle.
+
+**Next session: the board-driver (move 3).** Brief at [handoff-board-driver.md](handoff-board-driver.md).
+Fresh context is load-bearing again, for a sharper reason than last time: the driver's job is to decide
+what to trust about the skill *from outside it*, and the context that built the skill knows which rules
+are load-bearing by memory rather than by evidence — the exact bias the driver must not inherit.
 
 **All four routing paths are now exercised** — `auto-ok` straight through to
 `eligible-for-auto-merge` (#586), and `needs-review` running to completion with a single risk-gated
