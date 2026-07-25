@@ -253,3 +253,14 @@ green, and only a guard notices.
 Aggregate green is not the gate. `make test` passing tells you nothing about whether C2's
 check ran; a skipped test, a collection error, or a test that never got written all look like
 green in the aggregate. Run each criterion's check by name and read its output.
+
+**Confirm the check collected something.** A check that ran zero tests is the most dangerous
+output in this file: `no tests ran` is what a nonexistent file, a typo'd node name, a stale `-k`
+expression, and a mangled shell invocation all produce, and it reads as absence-of-failure. Under
+`tail -1` it is easy to skim as fine. Prefer a mechanical signal over care: **`pytest` exits `5`
+when it collects nothing**, distinctly from `0` (passed) and `1` (failed), so treat exit 5 as a
+failed check. Record the collected/passed count in `AT FREEZE` and in each guard's evidence so a
+later reader can see the check had teeth.
+
+The same trap catches the *command* rather than the code, which is why re-running a check that
+"passed" with a corrected invocation is worth the two seconds.

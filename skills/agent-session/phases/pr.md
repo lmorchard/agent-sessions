@@ -85,8 +85,8 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
    window where an automated reader can act on a verdict nobody derived. Step 14 writes the real
    one.
 
-7. **Board hook.** If a board is configured, move each `Closes #N` issue to `in_review`. Skip
-   silently otherwise.
+7. **Board hook.** If a board is configured, move each `Closes #N` issue to `in_review`.
+   Otherwise report `board: not configured` with the verdict — not a silent skip.
 
 ## Review cycle
 

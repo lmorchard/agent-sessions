@@ -66,7 +66,9 @@ and a drifted worktree path means a run that tests the wrong branch.
    `checks.md` at the freeze.
 
 9. **Project board hook.** If a board is configured (`references/github-projects.md`), move
-   the issue to `in_progress`. Skip silently if not configured.
+   the issue to `in_progress`. If not, report `board: not configured` in step 10 rather than
+   skipping silently — an operator who expects the issue to move can't otherwise tell "no board"
+   from "the transition failed."
 
 10. **Report** the worktree path, session directory, and the tier + its reason.
 

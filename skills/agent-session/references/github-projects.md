@@ -27,8 +27,23 @@ Add a section like this to the project's `CLAUDE.md`:
 The skill reads these as declarative names and resolves the underlying GraphQL IDs at runtime
 — don't hand-write IDs into `CLAUDE.md`, they're noisy and tied to the field schema.
 
-If any of `Owner`, `Number`, `Status field`, or the four `Columns` entries are missing, treat
-the integration as not configured and skip all transitions.
+**Locate the declaration by content, not by heading.** Projects document their board under
+whatever heading they already use (`## Project board`, `## Workflow`, a line in `## Conventions`).
+Requiring one exact heading means silently no-opping on a project that documented the same facts
+somewhere else — which is worse than having no integration, because it looks identical to working.
+Search for a `github.com/users/<owner>/projects/<n>` or `github.com/orgs/...` URL and the column
+names near it, not for a fixed section title.
+
+If the owner, number, status field, or column names genuinely can't be determined, treat the
+integration as not configured — but **say so once** in the run's report (`board: not configured`).
+A silent skip is indistinguishable from a failed transition, so an operator expecting the issue to
+move has no way to tell which happened. That confusion is not hypothetical: it's how this gap was
+found.
+
+**Read column names from the board, not from the doc.** `gh project field-list` is authoritative;
+a hand-written doc drifts. Casing matters — a real board's options were `In progress` / `In review`
+where the schema example below reads `In Progress` / `In Review`, and an exact-match transition
+would have failed on it.
 
 ## ID resolution (once per session)
 
@@ -73,7 +88,8 @@ gh project item-edit \
 
 ## When to skip
 
-- No `## GitHub Project` section in `CLAUDE.md` — silent skip, no warning.
+- No board declaration findable in `CLAUDE.md` — skip, and report `board: not configured` once.
+  Not a *silent* skip: see "Locate the declaration by content" above.
 - `gh` CLI lacks the `project` scope — surface once with the fix (`gh auth refresh -s
   project`), then skip subsequent transitions this session rather than re-prompting.
 - Issue is already at the target column — no-op.
