@@ -939,6 +939,108 @@ first proposed wiring would have granted shell access while leaving all three ex
 exercise multi-phase `execute` (the `needs-review` branch runs to completion, per #649). **The
 auto-ok loop still has no vehicle.**
 
+### Move 4c — the multi-issue loop, and four things it broke (2026-07-27)
+
+First `--max-issues 2` run, over #710 and #656. **The loop transition itself worked** — the thing the
+run existed to test: `inflight.json` written before the invocation, removed after recording, rewritten
+for the second issue, cost accumulated across both. Everything else it touched broke, which is the
+point of running it.
+
+**#710 → [PR #714](https://github.com/lmorchard/decafclaw/pull/714)**, `incomplete`. **#656** orphaned
+by a host crash and later discarded.
+
+#### I fabricated a fixture, and the run caught me
+
+I told Les I had found a factual error in #710's own measurement table. **The error was mine.** I
+built a "realistic" loop-breaker note by hand — 90 chars — and measured the sentinel landing inside
+the 300-char window. The express run read the actual code and reported the claim unreproducible:
+
+- `loop_breaker.last_signal()`, the method my measurement named, **does not exist**; only `offense()`
+  does. I used a name from the pre-#711 code.
+- `_finalize_loop_break` appends an **unconditional** 196-char handoff paragraph, flooring the note at
+  **269 chars**. The 90-char note is a length the code cannot produce.
+- With the real note the sentinel lands at index 336 → `False`. **The issue's original table was
+  right**, for the structural reason my "correction" talked itself out of.
+
+C1 and the tier were unaffected — both marker halves still fail at freeze — so the run logged it as a
+clarification rather than an amendment, correctly. But the wrong correction is still in the issue body
+and needs removing.
+
+The lesson is one this project has already written down twice and I broke anyway: **construct fixtures
+from the code, never from plausibility.** It is the same failure as the un-sealed micro-test fixture in
+move 2b, one level up: there, a subagent detected a synthetic fixture; here, a subagent detected a
+synthetic *measurement*. The verifier-catches-author pattern now has four instances, and this is the
+first where what it caught was a claim I had already reported as fact.
+
+#### My own 4a gate row was unsatisfiable by the driver that has to satisfy it
+
+4a added "wait for CI to settle" to `pr.md`. The run tried a `sleep` poll loop, a backgrounded shell,
+and the `Monitor` tool — **all three denied under `dontAsk`** — burned its whole $12 budget, and
+stopped at `verdict: pending` on a PR whose CI went green minutes later.
+
+Fix: **`gh pr checks <n> --watch`**, a single `gh` invocation already covered by the existing
+allow-rule, one turn instead of one per poll. `pr.md` now names it as the only mechanism and says why
+the others fail. Validated on a real 11m34s wait.
+
+Generalisable, and the sharper version of 4a's own lesson: **a gate row is only as good as the
+permission floor of the thing that must satisfy it.** Two artifacts I built in one session were in
+direct conflict, and only a real unattended run could surface it — neither reading nor review would
+have.
+
+#### Budget exhaustion was invisible
+
+`subtype=success`, `is_error=false`, `exit 0`, no gate verdict. #710 spent **$11.87 of $12** and
+reported success. The driver could not distinguish "ran out of money" from "stopped for a designed
+escalation" — both landed as `incomplete` → parked.
+
+Now reclassified as **`budget-exhausted`** at ≥95% spend with no verdict. Never parked (parking hides
+a recoverable config problem behind a skip on a good issue — same reasoning as `driver-fault`), and it
+**stops the loop**, because the next issue inherits the same too-small ceiling. That is not
+hypothetical: after #710 exhausted $12, #656 started with $12 and also never reached a gate.
+
+#### A host crash orphaned the child, unsupervised and still spending
+
+VSCode died, took the driver with it, and `claude -p` was **reparented to init (PPID 1)** — still
+running, still spending, still mutating the repo. It survived for another ~15 minutes and got as far
+as a freeze commit, a plan, and a Phase 1 implementation before being killed.
+
+Fixes: the child now runs backgrounded with its pid held, an `EXIT`/`INT`/`TERM` trap terminates it,
+and the pid is written to the run dir. Because **no trap can fire on SIGKILL or a host crash**,
+startup also detects a still-live orphan and *refuses* to start a second run against the same repo —
+verified against the real live orphan, exit 2. The two states need opposite actions (a finished
+orphan wants `--classify-only`; a live one wants killing or waiting), so conflating them was the
+actual bug.
+
+#### And a guard of mine could not fail
+
+The `skill-readonly` guard added in 4a grepped for `Edit(...)` — which matches inside
+`NotebookEdit(...)`. Deleting the standalone `Edit` deny rule still passed. Now anchored on the comma
+delimiter and verified discriminating by deleting each of the three rules in turn. Written minutes
+after re-reading the warning about inert-content false positives, and it *also* false-positived on an
+example inside a comment.
+
+**"I wrote a guard" is not evidence.** Mutate the thing it guards and watch it fail, or it is
+decoration. Third instance this session, after the anchored-tier test and C4's conjunctive assertion.
+
+#### The tooling could not run clean — decafclaw #716 → #717 (merged)
+
+`make check` was **unpassable in any decafclaw worktree**, and had been for as long as #709's guard
+existed. Root cause was a version split, not a corrupt lockfile: **npm 11 prunes 27 nested optional
+`@esbuild/*` platform entries that npm 10 records**, so `npm install` rewrote `package-lock.json`
+deterministically (a 512-line deletion) and the guard fired every run. Local node 26 / npm 11.12.1 vs
+CI node 22 / npm 10; `.nvmrc` pins 22 and was not being honored.
+
+#709's guard was not wrong — `npm install` really did rewrite the lockfile. The bug was that a
+*verification* target ran a command whose job is to mutate. Fixed with **`npm ci`**, which cannot
+write the lockfile and is *stricter* besides (it fails when `package.json` and the lockfile disagree,
+which is the drift #706 was about).
+
+**Why it mattered to this project:** three independent unattended runs hit it, and each worked around
+it by running `check`'s four steps natively and reporting `project-gates` as satisfied **by
+substitute**. A merge-gate row routinely satisfied by a substitute is measurably weaker than one that
+runs its cited command — the same erosion 4a fixed for CI, arriving through a different door. I also
+hit it myself and pushed a bad lockfile commit to decafclaw's main before reverting it.
+
 #### Pending after move 3
 
 - ~~**The CI-vs-gate hole in `pr.md`** — blocking for phase 3.~~ → **closed in move 4a** (above).
