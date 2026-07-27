@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Assemble one arm's prompt: task + sealed fixture + (optionally) a guidance file.
 
-Usage: build-prompt.py Z|C|T [v1|v2] > prompt.txt
+Usage: build-prompt.py Z|C|P|T [v1|v2|v3|v4] > prompt.txt
 
 Arms:
   Z  no guidance at all                              (no-guidance control)
   C  acceptance-criteria.md MINUS the discriminate rule (rule-removed control)
+  P  acceptance-criteria.md with the proposed TRIM applied (pruned treatment)
   T  acceptance-criteria.md exactly as shipped       (treatment)
 
 Fixture versions:
@@ -35,11 +36,14 @@ ROOT = HERE.parents[3]
 
 ARM = sys.argv[1] if len(sys.argv) > 1 else ""
 VER = sys.argv[2] if len(sys.argv) > 2 else "v1"
-if VER not in ("v1", "v2", "v3"):
-    sys.exit("usage: build-prompt.py Z|C|T [v1|v2|v3]")
+if VER not in ("v1", "v2", "v3", "v4"):
+    sys.exit("usage: build-prompt.py Z|C|P|T [v1|v2|v3|v4]")
 GUIDANCE = {
     "Z": None,
     "C": HERE / "guidance-C-no-discriminate.md",
+    "P": HERE / "guidance-P-pruned.md",
+    "R": HERE / "guidance-R-minus-para.md",
+    "N": HERE / "guidance-N-minus-para.md",
     "T": ROOT / "skills/agent-session/references/acceptance-criteria.md",
 }
 if ARM not in GUIDANCE:
@@ -139,19 +143,45 @@ $ echo $?
 0
 """
 
+# v4: no drafted criterion, no transcript, no verdict labels -- the model does what intake
+# does. Rubric fixed in advance: see v4-preregistration.md.
+TASK_V4 = """\
+You are the intake pass on a GitHub issue. Produce the **Acceptance criteria** section that
+will be appended to the issue body.
+
+That section is about to be FROZEN as the oracle for an autonomous implementation run: once
+frozen, the implementer may not change it, and the run is graded solely by whether the frozen
+checks pass. Nobody reviews it again in between.
+
+Write the section. Be concrete about the commands.
+"""
+
+SEAL_V4 = """\
+You have no access to the repository. You cannot read files, run commands, run tests, or
+search the web, and no tool is available to you. Write the section from the issue text below,
+which is quoted in full.
+"""
+
 parts = [
-    "<task>\n" + (TASK_V3 if VER == "v3" else TASK) + "</task>\n",
-    "<ground-truth>\n" + SEAL + "</ground-truth>\n",
+    "<task>\n"
+    + (TASK_V4 if VER == "v4" else TASK_V3 if VER == "v3" else TASK)
+    + "</task>\n",
+    "<ground-truth>\n" + (SEAL_V4 if VER == "v4" else SEAL) + "</ground-truth>\n",
     "<issue repo='lmorchard/decafclaw' number='638'>\n"
     "Title: Test suite emits 2 forkpty DeprecationWarnings from terminal spawn tests\n\n"
     + issue
     + "\n</issue>\n",
-    "<drafted-criterion>\n" + CRITERION + "</drafted-criterion>\n",
-    "<check-transcript>\n"
-    + TRANSCRIPT
-    + (TRANSCRIPT_V2 if VER in ("v2", "v3") else "")
-    + "</check-transcript>\n",
 ]
+
+# v4 has no drafted criterion and no transcript -- producing them is the task.
+if VER != "v4":
+    parts += [
+        "<drafted-criterion>\n" + CRITERION + "</drafted-criterion>\n",
+        "<check-transcript>\n"
+        + TRANSCRIPT
+        + (TRANSCRIPT_V2 if VER in ("v2", "v3") else "")
+        + "</check-transcript>\n",
+    ]
 
 if GUIDANCE[ARM] is not None:
     parts.append(
@@ -161,7 +191,9 @@ if GUIDANCE[ARM] is not None:
     )
 
 parts.append(
-    "Now give your verdict: one label on the first line, then 2-4 sentences of reasoning.\n"
+    "Now write the Acceptance criteria section.\n"
+    if VER == "v4"
+    else "Now give your verdict: one label on the first line, then 2-4 sentences of reasoning.\n"
 )
 
 sys.stdout.write("\n".join(parts))

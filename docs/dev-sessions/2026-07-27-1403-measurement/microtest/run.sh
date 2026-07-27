@@ -12,7 +12,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ARM="${1:?usage: run.sh <Z|C|T> [reps] [v1|v2|v3]}"
+ARM="${1:?usage: run.sh <Z|C|P|T> [reps] [v1|v2|v3]}"
 REPS="${2:-5}"
 VER="${3:-v1}"
 NEUTRAL_CWD="/tmp/mt-cwd"
