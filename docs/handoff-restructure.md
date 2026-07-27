@@ -241,6 +241,50 @@ the guard is worthless unless removing it makes a named test fail.
 Phase 3 auto-merge. decafclaw's `.nvmrc` drift (#716/#717). Merging #719 or #722 — those are Les's
 calls, and `eligible-for-auto-merge` is a finding, not an instruction.
 
+## Addendum — unmeasured observations (relayed to the move-6 agent in chat)
+
+Kept here so they survive the clipboard. Committed *after* the launcher prompt was written,
+so a session started from that prompt will not have seen them unless pasted.
+
+Read the label first. Everything below is one context's judgment at the end of a long session.
+None of it is measured. This project just spent a session establishing that confident reasoning
+about its own work is unreliable — the edit that looked obviously safe measured worst of nine arms
+— so weight these as hypotheses about where to look, not as conclusions to act on. Do not let them
+expand the scope of move 6.
+
+**Two are directly in scope for `findings.md`:**
+
+1. **The recurring defect class is not converging.** Eight instances now of "a gate row satisfied
+   by evidence adjacent to what it names," and they are still being found one unattended run at a
+   time — move 5 hit two, one of which was the same bug move 4c had fixed one field over, hours
+   earlier. No systematic sweep has ever been done: enumerate every gate row, and for each ask
+   "what could satisfy this that isn't the thing it names?" Write this up as an **open, actionable
+   gap**, not a retrospective list of war stories. It is the flagship entry.
+
+2. **The oracle problem has turned on the project itself.** The governing principle is that an
+   agent is only as autonomous as its verifier is trustworthy — and for skill-wording work the
+   trustworthy verifier costs roughly $50 and half a session. About six of the skill's rules remain
+   unmeasured. Either measurement gets cheaper or they stay unmeasured indefinitely. Record it as a
+   **standing limit**, not a backlog item that implies it will get done. This is exactly the kind of
+   durable constraint that has nowhere to live today, which is the argument for `findings.md`
+   existing at all.
+
+**Two are Les's calls. Surface them; do not resolve them:**
+
+3. **Phase 3's gate list grows by about one per session** — first the CI hole, then the merge-block
+   hook, now the amendment policy too. Each gate has been a correct call, but eight PRs have reached
+   `eligible-for-auto-merge` and none has merged, and a burndown loop that never lands anything is
+   the thing this was built to avoid. A finite exit condition would be better than a growing list.
+   **Do not rewrite the phased rollout.** Note it in the roadmap as an open decision.
+
+4. **The framing may be stale, and move 6 is where that would show.** The skill needed zero changes
+   to support the driver, and move 5 *deleted* part of it; the substantive work of the last several
+   sessions has been driver, docs, and measurement. This may now be an autonomous-development
+   harness with `agent-session` as one component, while the docs still describe it as skill
+   authoring. You are deciding what `design.md` is *about*, so you will feel this if it is true.
+   **If the split makes the current framing feel wrong, say so in your report — do not rename the
+   project or restructure around a new frame on your own.**
+
 ## Launcher prompt
 
 > Continuing the `agent-session` skill in this repo (`~/devel/agent-sessions`). Read `CLAUDE.md`,
