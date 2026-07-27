@@ -1041,7 +1041,7 @@ substitute**. A merge-gate row routinely satisfied by a substitute is measurably
 runs its cited command — the same erosion 4a fixed for CI, arriving through a different door. I also
 hit it myself and pushed a bad lockfile commit to decafclaw's main before reverting it.
 
-**Next session: measurement (move 5).** Brief at [handoff-measurement.md](handoff-measurement.md).
+**Next session was measurement (move 5)** — see below. Brief was at [handoff-measurement.md](handoff-measurement.md).
 Fresh context is load-bearing for a sharper reason than before: this session's context got four things
 wrong while confident about all of them — a fabricated measurement reported as fact, a guard that could
 not fail, a gate row its own driver could not satisfy, and a bad commit pushed to another repo's
@@ -1291,3 +1291,13 @@ nothing was lost.
 - **Amendment policy** → amend is allowed but costly: stop, human-confirm, log in `checks.md`,
   and downgrade the run to `needs-review`. Keeps the loop unstuck on a typo'd check while making
   an amended oracle forfeit the autonomy it can no longer support.
+
+---
+
+**Next session: split these docs (move 6).** Brief at [handoff-restructure.md](handoff-restructure.md).
+This file is ~1300 lines and has become a dev diary — Les called it, and the diagnosis is that each
+move's *durable lessons* are interleaved with its *chronology*, so what a new session needs is buried
+in narrative it doesn't. Proposed three-way split: `design.md` (the design), `build-log.md` (the
+chronology), `findings.md` (the still-governing lessons). The third file is the one that fixes it —
+the diary grows because a lesson has nowhere else to live. Second task: **resolve the
+amendment-policy ambiguity** above, which is a phase-3 blocker and a tier-policy call.
