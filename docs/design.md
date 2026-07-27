@@ -1307,3 +1307,9 @@ in narrative it doesn't. Proposed three-way split: `design.md` (the design), `bu
 chronology), `findings.md` (the still-governing lessons). The third file is the one that fixes it —
 the diary grows because a lesson has nowhere else to live. Second task: **resolve the
 amendment-policy ambiguity** above, which is a phase-3 blocker and a tier-policy call.
+
+**Move 7 is briefed in the same doc:** put this roadmap on a GitHub board and dogfood the skill's
+front half on it. Board yes, board-driver **not yet** — `make skill-readonly` makes this the one
+repo the driver must not run in, because here the implementer's work product *is* the skill. The
+partition is already available through trigger 2: mark `skills/` risk-gated in `CLAUDE.md` and
+skill issues tier themselves `needs-review` without touching a skill file.
