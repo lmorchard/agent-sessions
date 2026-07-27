@@ -123,3 +123,17 @@ for name, para in (("R", RECORD_PARA), ("N", NEAR_MISS_PARA)):
     out = pathlib.Path(__file__).resolve().parent / f"guidance-{name}-minus-para.md"
     out.write_text(variant)
     print(f"wrote {out}  ({len(SRC.read_text().splitlines())} -> {len(variant.splitlines())} lines)")
+
+
+# --- arm M: section 2 reduced to its procedural sentence ---------------------------------
+#
+# The decision C forces is a cross-file edit (SKILL.md and intake.md both say "the three
+# tests"). M is the smaller edit that keeps that structure: heading plus the one sentence,
+# both elaborating paragraphs gone. If M matches C, ship M. Built from the P variant, which
+# already has the branch enumeration removed.
+m = OUT_P.read_text()
+m = sub(m, RECORD_PARA, "")
+m = sub(m, NEAR_MISS_PARA, "")
+out_m = pathlib.Path(__file__).resolve().parent / "guidance-M-minimal.md"
+out_m.write_text(m)
+print(f"wrote {out_m}  ({len(SRC.read_text().splitlines())} -> {len(m.splitlines())} lines)")

@@ -43,6 +43,7 @@ GUIDANCE = {
     "C": HERE / "guidance-C-no-discriminate.md",
     "P": HERE / "guidance-P-pruned.md",
     "R": HERE / "guidance-R-minus-para.md",
+    "M": HERE / "guidance-M-minimal.md",
     "N": HERE / "guidance-N-minus-para.md",
     "T": ROOT / "skills/agent-session/references/acceptance-criteria.md",
 }
