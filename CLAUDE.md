@@ -4,9 +4,13 @@ A sequel to the `dev-session` skill, up-leveled for autonomy. `dev-session` stru
 *building one thing*; `agent-session` front-loads the inputs an autonomous loop needs so the
 middle can run unattended, with a human only at the ends where judgment lives.
 
-**Read [docs/design.md](docs/design.md) first** — it's the source of truth for state
-(build status, decisions, open questions). [docs/prior-art.md](docs/prior-art.md) has the
-external survey. This file is conventions + gotchas only.
+**Read [docs/design.md](docs/design.md) first** — the design, current state, and roadmap. Then
+**[docs/findings.md](docs/findings.md)** — the durable lessons: recurring defect classes, the
+evidence ledger, the instrument rules, and the verified command gotchas. **Read the gotchas before
+writing any flag list, gate row or `gh` query**; several are the opposite of what the flag names
+suggest. [docs/build-log.md](docs/build-log.md) is the chronology — provenance only, nothing reads
+it to decide. [docs/prior-art.md](docs/prior-art.md) has the external survey. This file is
+conventions + gotchas only.
 
 ## What this is (and isn't)
 

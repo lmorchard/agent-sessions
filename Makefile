@@ -35,7 +35,7 @@ driver-test:
 
 # Replaces move 3's `skill-untouched` guard, which pinned skills/ to a snapshot to
 # prove the driver needed no skill edit. That claim is now verified and permanently
-# recorded (git history + design.md), so the snapshot is obsolete rather than
+# recorded (git history + docs/build-log.md), so the snapshot is obsolete rather than
 # inconvenient -- but the boundary it protected is still live, so this asserts the
 # ongoing invariant instead of the frozen fact.
 #

@@ -50,15 +50,15 @@ The genuinely new, high-leverage parts:
 
 ## Status
 
-Scaffolding the **`agent-session`** skill (`skills/agent-session/`) — one skill, multi-mode
-dispatcher (dev-session lineage), shared in-dir reference "engine," heavy modes fan out to
-subagents, board-driver lives above as orchestration.
+Two artifacts live here: the **`agent-session` skill** (`skills/agent-session/`) — one skill,
+multi-mode dispatcher, shared in-dir reference "engine," heavy modes fan out to subagents — and the
+**board-driver** (`driver/`), the unattended burndown loop that sits *above* the skill and invokes
+it. The skill is complete with real-run evidence on all four routing paths; the driver runs,
+including a multi-issue loop. Nothing merges by machine.
 
-- **Built + validated:** `intake` (spec a new/existing issue → verifiable criteria + tier) —
-  micro-tested *and* dogfooded end-to-end on a real issue. `triage` (batch-augment via
-  subagent fan-out) — built, not yet dogfooded. Shared engine: `acceptance-criteria.md`,
-  `criteria-grammar.md`, `spec-template.md`, `documentarian-prompt.md`.
-- **Pending:** execution modes (`plan`/`execute`/`express`/`pr`, adapted from dev-session)
-  + tiered merge gate, then the board-driver.
+State is not duplicated here, because it rots. See:
 
-See [docs/design.md](docs/design.md) (design + build log) and [docs/prior-art.md](docs/prior-art.md).
+- [docs/design.md](docs/design.md) — design, current state, roadmap.
+- [docs/findings.md](docs/findings.md) — durable lessons and verified gotchas.
+- [docs/build-log.md](docs/build-log.md) — the chronology.
+- [docs/prior-art.md](docs/prior-art.md) — external survey.
