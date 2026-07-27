@@ -1041,6 +1041,13 @@ substitute**. A merge-gate row routinely satisfied by a substitute is measurably
 runs its cited command — the same erosion 4a fixed for CI, arriving through a different door. I also
 hit it myself and pushed a bad lockfile commit to decafclaw's main before reverting it.
 
+**Next session: measurement (move 5).** Brief at [handoff-measurement.md](handoff-measurement.md).
+Fresh context is load-bearing for a sharper reason than before: this session's context got four things
+wrong while confident about all of them — a fabricated measurement reported as fact, a guard that could
+not fail, a gate row its own driver could not satisfy, and a bad commit pushed to another repo's
+`main`. Every one was caught by *running* something. So the bias to distrust is the project's
+confidence-to-correctness calibration, and measurement is the instrument that catches it.
+
 #### Pending after move 3
 
 - ~~**The CI-vs-gate hole in `pr.md`** — blocking for phase 3.~~ → **closed in move 4a** (above).
