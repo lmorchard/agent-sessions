@@ -13,9 +13,7 @@ Entries are frozen as written on the day. Where a later move resolved something 
 open, the resolution is annotated inline or lives in `design.md`'s roadmap — the entry itself is
 not rewritten.
 
-## Move 1 — the front half, dogfooded (2026-07-24)
-
-### Dogfood of move 1 — starnet #129
+### Move 1 dogfood — starnet #129, stopped at Phase 0 (2026-07-24)
 
 Dogfood of move 1 (starnet #129) — **stopped at Phase 0, correctly.** AC1 ("SHALL produce zero
 `tick-cap` runs", checked by a census invocation) **already passes on current code**:
@@ -53,8 +51,9 @@ Three findings, all from *running* things rather than reading them:
    spawns twice; it's actually two different files, one spawn each — which changes the mechanism
    (two marks in two files, not two in one). Verified counts: `make test` → 3234 passed, 2
    skipped, 2 warnings, 69s.
-3. **Criteria vs. guards** (see below). #638 honestly reduces to **one criterion + three guards**,
-   and there was nowhere to put guards.
+3. **Criteria vs. guards** — #638 honestly reduces to **one criterion + three guards**, and there
+   was nowhere to put guards. The split this produced is now part of the contract in
+   [design.md](design.md#criteria-vs-regression-guards).
 
 Also noted: the chosen mechanism (per-test marks) is what *keeps* the issue `auto-ok` — the
 `pyproject.toml` alternative touches build/CI config, which the risk-gated list pulls toward

@@ -210,6 +210,54 @@ self-modification configuration, and today it is reachable by typo. A startup ch
 (or at minimum warns loudly) is small, mechanical, and belongs with this work. Mutation-test it:
 the guard is worthless unless removing it makes a named test fail.
 
+### Also in move 7: extract the gate parser (and the language question)
+
+This lands here rather than in its own move because it touches **only `driver/`** — which is
+exactly the half of this repo that move 7 establishes as drivable once `skills/` is risk-gated. It
+is the natural first real issue for the board.
+
+**First, the reason NOT to do the obvious thing.** The tempting move is "rewrite the driver in
+Python, look how many bugs the bash produced." That does not survive inspection. `Edit(` matching
+inside `NotebookEdit(`, the `@`-anchored sha regex, `head -1` on a leading blank line — those are
+**under-specified pattern matching, and they recur in Python**. The variadic-flag swallowing was
+the `claude` CLI. `jq` handled the double-`result` stream correctly. Rewriting for bug-proneness
+would be treating a symptom, and it would spend a session on the one component gating everything
+at a moment when phase 3 has already receded three times. **Do not rewrite the driver.**
+
+**Now the real reason, which is measured rather than felt.** `driver/test-driver.sh` defines 11
+helpers, and the ones mirroring driver logic are **hand-copies of it** — every one except
+`has_success_result`, which move 5 extracted with `sed` at test time precisely because copying
+felt wrong. They have **already diverged**:
+
+| | driver | test copy |
+|---|---|---|
+| `classify_outcome` | 53 lines | 15 lines |
+| knows about `ci-stale` | yes (4 refs) | **no (0 refs)** |
+
+**The suite tests a replica of the classifier, not the classifier.** That is this project's own
+recurring defect class — evidence adjacent to the thing it names — sitting inside the mechanism
+that is supposed to detect it. And it is bash-shaped: you cannot import a function from a script
+that runs `main` at the bottom, so copying is the path of least resistance.
+
+**The fix is extraction, not rewriting.** Two small pieces:
+
+1. **Move gate-block parsing into a Python module** that emits normalised JSON, called once from
+   bash. The gate block is YAML being parsed with `grep`/`sed`, and it has produced **two of the
+   eight** defect-class instances. Small, well-bounded surface.
+2. **Its tests import it.** No replica, no drift, and the divergence above becomes unrepresentable
+   rather than merely discouraged.
+
+**Decision rule for everything after:** *bash for orchestration* — flags, process control,
+invoking `gh`/`git`/`claude` — *Python for parsing and classification.* That seam sits where the
+bugs actually are, keeps the GHA portability the driver's header claims, and preserves the 47
+fixture tests that already pass.
+
+**Hazard, check before relying on it:** bash reads a script incrementally as it executes, so a
+driver run that edits `driver/agent-session-driver.sh` **while that same file is executing** can
+corrupt the run mid-flight. If the extraction becomes a driver-consumed issue rather than a
+hand-run one, verify this first — and if it holds, either keep driver-editing work human-run or
+have the driver `exec` from a snapshot copy.
+
 ### Sequencing
 
 1. Finish the split (move 6). The reconciled roadmap is the input.
@@ -217,7 +265,9 @@ the guard is worthless unless removing it makes a named test fail.
 3. Create the board; file the roadmap as issues **from the reconciled list only**.
 4. `triage` pass — the second corpus.
 5. `make dry-run` against this repo/board. Selection only, no invocation.
-6. Reconsider the driver here **only after** the amendment policy (§2) is settled.
+6. Extract the gate parser (above). **Hand-run, not driver-run**, until the
+   editing-a-running-script hazard is checked.
+7. Reconsider the driver here **only after** the amendment policy (§2) is settled.
 
 ## Method — the instrument rules, updated
 
@@ -284,6 +334,14 @@ expand the scope of move 6.
    authoring. You are deciding what `design.md` is *about*, so you will feel this if it is true.
    **If the split makes the current framing feel wrong, say so in your report — do not rename the
    project or restructure around a new frame on your own.**
+
+   *Refined after this was written, and it lowers the stakes:* the answer is probably **two
+   products in one repo**, not a misnamed one. ~1,880 lines of skill markdown and ~1,100 of
+   harness bash, with different audiences and different correctness regimes — the skill is the
+   reusable artifact tested by micro-tests and dogfooding, the harness is this repo's autonomy
+   infrastructure tested by fixtures and mutation. `CLAUDE.md` already separates them and
+   `skill-readonly` enforces the boundary. So this is **a paragraph in `design.md`, not a
+   rename.** See move 7's gate-parser section for the engineering consequence.
 
 ## Launcher prompt
 
