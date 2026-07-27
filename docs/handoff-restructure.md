@@ -104,6 +104,32 @@ made it adjudicable is that **the criterion prose was independent of the check's
 the intake pass that wrote it nearly destroyed that independence by specifying mechanics in the
 check.
 
+### 2b. The roadmap is the third thing `design.md` must keep — and the easiest to lose
+
+**Do not treat this as a detail of the split. It is the part most likely to go wrong.**
+
+Chronology is safe to move: it is delimited by `### Move N` headings. Findings are identifiable.
+**Forward-looking material is neither** — it is fragments embedded in narrative, and a faithful
+mechanical split migrates them into `build-log.md` where nothing will ever read them again.
+
+Where the fragments currently live:
+
+| Location | What is there |
+|---|---|
+| `## Open questions (for the pending work)` | 3 entries, 2 already struck |
+| `#### Pending after move 3` | 8 entries, 4 now struck |
+| inside `### Move 4b` | the auto-ok-vehicle note (now annotated as resolved) |
+| inside `### Move 5` | the amendment-policy blocker, deliberately left open |
+| `## Resolved (was open)` / `## Resolved in move 1` | closed, but the *reasoning* is still load-bearing |
+| this handoff | the backlog in §3 below |
+
+**Five entries were reconciled just before this handoff was written** because they read as open and
+were not: queue depth, the decafclaw lockfile churn, the three-rules-measured counter, move 4b's
+"the auto-ok loop still has no vehicle", and "should the merge gate read GitHub's check runs".
+That is a 5-out-of-11 stale rate in the forward-looking material — assume the same rot has
+continued and **re-verify each surviving item against the repo before carrying it across**, rather
+than copying it. Do not trust this table either; it was accurate when written.
+
 ### 3. Then the remaining backlog
 
 - The `PreToolUse` merge-block hook — a hard precondition for any *unwatched* host.
