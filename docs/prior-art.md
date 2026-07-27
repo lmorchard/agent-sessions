@@ -149,7 +149,8 @@ not findings.
 
 Supply-chain attestation formats exist to make a claim *bound to the digest of the thing it
 describes*, on the theory that an unbound claim is merely a nearby assertion. **That is the
-eight-instance defect class** — `tamper: clean` hiding an absent diff, `ci: 2/2 pass` describing a
+adjacent-evidence defect class** ([findings.md § 1](findings.md#1-a-row-satisfied-by-evidence-adjacent-to-what-it-names--open-gap),
+nine instances as of move 6) — `tamper: clean` hiding an absent diff, `ci: 2/2 pass` describing a
 commit that no longer ships. `ci: … @ <sha>` is a hand-rolled mini-attestation, and
 "make the value carry what it describes" was independently rediscovered here.
 
