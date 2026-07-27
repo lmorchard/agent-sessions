@@ -26,17 +26,20 @@ The dominant defect class, and the one the merge gate exists to prevent. A gate 
 check cites a specific mechanism; something *near* that mechanism supplies the answer; the row
 reports true. Nothing lies, and the row means nothing.
 
-**This is an open, actionable gap — not a retrospective.** Eight instances, and the class is **not
+**This is an open, actionable gap — not a retrospective.** Nine instances, and the class is **not
 converging**: they are still being found one unattended run at a time, and move 5 alone produced
 two. Worse, move 5's exit-code defect was *the same bug move 4c had fixed one field over, hours
 earlier* — the fix was applied to the cost field and never generalised to the exit code. Fixing
 instances one at a time is losing to the rate at which they arrive.
 
 **The sweep that has never been done:** enumerate every gate row, guard and manifest check, and for
-each one ask *"what could satisfy this that is not the thing it names?"* Every instance below was
-found by an unattended run stumbling into it; none was found by looking. Until that sweep happens,
-the honest position is that the gate has an unknown number of these left, and phase 3 turns each
-remaining one into an automatic merge.
+each one ask *"what could satisfy this that is not the thing it names?"* Instances 1–8 below were
+each found by an unattended run stumbling into it; **none was found by looking.** Until that sweep
+happens, the honest position is that the gate has an unknown number of these left, and phase 3
+turns each remaining one into an automatic merge.
+
+**Instance 9 is the one to sit with**, because it is the defect class *inside the mechanism meant
+to catch it* — and it was found by looking, which is the argument for the sweep.
 
 | # | Instance | Where |
 |---|---|---|
@@ -48,6 +51,7 @@ remaining one into an automatic merge.
 | 6 | Import-boundary guard G3 stays green while the boundary it protects is gone — a capability that arrives as an *object* imports nothing. C4 was added to assert what G3 structurally cannot see. | move 4b (#625) |
 | 7 | Three independent unattended runs reported `project-gates` satisfied **by substitute**, having run `make check`'s four steps natively because `make check` itself was unpassable. | move 4c |
 | 8 | `amendments: none` was true only under one of two readings of the amendment policy. | move 5 (#668) |
+| 9 | **The driver's test suite tests a replica of the classifier, not the classifier.** `test-driver.sh` hand-copies driver logic — one helper is annotated *"Mirrors the driver's extraction + comparison exactly"* with nothing enforcing that — and it has **already diverged**: `classify_outcome` is 53 lines in the driver and 15 in the copy, with **zero `ci-stale` awareness** in the copy. | verified 2026-07-27 |
 
 **The tell:** the row names a command, and the evidence offered is not that command's output.
 **The fix, every time:** make the row cite a command that is actually run, and make its failure
@@ -116,6 +120,10 @@ A guard is decoration until you mutate the thing it guards and watch it fail.
   yields "current", so the obvious test would have been the non-discriminating one.
 - Two micro-test fixtures in move 1 were discarded as non-discriminating. *"Control passed 5/5" is
   only evidence about wording when the fixture can actually fail.*
+- **Two live `ci-stale` assertions are `grep -q "<string>" "$DRIVER"`** — they pass if the string
+  appears anywhere, including inside a comment. That is the same inert-content trap the
+  `skill-readonly` guard fell into twice, still shipping in `test-driver.sh` (verified
+  2026-07-27). A test that greps its subject for a literal is a spelling check, not a test.
 
 Mutation-testing caught a non-discriminating test in move 5 that review did not.
 
@@ -254,7 +262,7 @@ trimmed, and one measured a fix. Every arm was read by hand.
 | Intake's criteria gate | control vs treatment, 5/arm | control 0/5 checkable, treatment 5/5 | **keep** — load-bearing |
 | Oracle-must-already-exist | after a 4:1 tier-split surfaced the gap | 5/5 after the fix | **keep** |
 | `frozen-checks.md` read-only rule + amendment path | fixture: frozen check contradicts its own criterion, implementation already correct | control **4/5 edited the frozen check inline**; treatment 0/5 edited, 5/5 stopped with the prescribed statement, no over-trigger | **keep** — load-bearing |
-| "Run each check by name / aggregate green is not the gate" | 20 reps, two fixtures | both arms 10/10 — the `checks.md` manifest naming the exact command is the mechanism | **trim** to one sentence |
+| "Run each check by name / aggregate green is not the gate" | 20 reps, two fixtures — including one where the implementation *looks* done: an idiomatic dict dedup keeping the **last** occurrence where the criterion wants the **first**, with `make check` green | both arms 10/10 — the `checks.md` manifest naming the exact command is the mechanism; the exhortation adds nothing | **trim** to one sentence |
 | Gameability (satisfiable-without-the-work) | control vs treatment, 5/arm | control 0/5 on the test-as-oracle case, treatment 5/5 | **keep** |
 | Goal-ambiguity tier trigger | control vs treatment, 5/arm | control 5/5 without it | **cut** |
 | `criteria-grammar.md` | four requirement shapes | control 1/5, 1/5, 2/5, 5/5; treatment 5/5 on all four | **keep** |
@@ -373,6 +381,15 @@ the entries most likely to be silently re-broken.**
 |---|---|
 | **pytest exits 5 on empty collection.** `no tests ran` is a *failed check*, not a pass — a mechanical detector, not an exhortation. It bit twice in one session (a nonexistent file, then a mangled shell loop) and `tail -1` hid it both times. | move 2b |
 | **npm 11 prunes 27 nested optional `@esbuild/*` platform entries that npm 10 records**, so `npm install` rewrites `package-lock.json` deterministically. A *verification* target must not run a command whose job is to mutate — use **`npm ci`**, which cannot write the lockfile and additionally fails when `package.json` and the lockfile disagree. | decafclaw #716 → #717 |
+
+**A live hazard this closed for decafclaw but not in general: when the project gates dirty the
+tree, two things downstream read the mess as signal.** The tamper check's *"no collateral edits"*
+substitute would score a gate-rewritten lockfile as a collateral edit, and `pr.md` step 4's
+`git diff origin/main..HEAD` runs against a tree the gates themselves modified. The #585 run
+survived it, so **the exposure is not understood** — worth establishing before an unwatched host
+runs the gates and then judges the diff. The skill itself contains no `git add` (verified by grep),
+so it does not carry the specific hazard that bit us: `make check` dirtied the lockfile, a blanket
+`git add -A` swept it up, and it reached decafclaw's `main` before being reverted.
 | **A hard line-wrap inside a code fence misleads readers.** It is what misled Copilot into a wrong review comment on #638. Test commands in their line-wrapped form. | move 2 |
 
 ### Operational figures

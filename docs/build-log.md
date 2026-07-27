@@ -15,6 +15,11 @@ not rewritten.
 
 ### Move 1 dogfood — starnet #129, stopped at Phase 0 (2026-07-24)
 
+`intake` was dogfooded end-to-end on starnet #129 first, via the **augment path** — criteria and an
+`auto-ok` tier filed back to the issue. That run surfaced and fixed two skill gaps: a missing
+`documentarian-prompt.md` reference, and a missing oracle-verification step. Then the back half ran
+against the same issue:
+
 Dogfood of move 1 (starnet #129) — **stopped at Phase 0, correctly.** AC1 ("SHALL produce zero
 `tick-cap` runs", checked by a census invocation) **already passes on current code**:
 `{"trace": 20}` at both grade A and S. `census.js` has no placement flag, so the issue's
