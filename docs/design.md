@@ -341,11 +341,59 @@ is at the end, because "this was checked and closed" is the part that rots invis
 
 ### Blocking phase 3 (conditional auto-merge)
 
-1. **The amendment-policy ambiguity — a tier-policy call, Les's.** `frozen-checks.md:204` says
-   *"re-run every criterion and guard under both the old and the new wording. If any verdict
-   changes, it's an amendment."* **It does not say against which tree**, and on #668 the two
-   readings gave opposite answers. This is a live route to `eligible-for-auto-merge` with a swapped
-   oracle. Options are written up for decision; nothing merged, so nothing was lost.
+1. **The amendment-policy ambiguity — a tier-policy call, Les's. UNRESOLVED.**
+   `frozen-checks.md:204` says *"re-run every criterion and guard under both the old and the new
+   wording. If any verdict changes, it's an amendment."* **It does not say against which tree**,
+   and on #668 the two readings gave opposite answers:
+
+   | | at the freeze commit `1add3f0` | against the shipped implementation |
+   |---|---|---|
+   | **original** frozen check | fails | **fails** |
+   | **clarified** check | fails | passes |
+
+   **The freeze-tree reading is close to vacuous, and that is the finding that should drive the
+   decision.** At the freeze commit the work does not exist, so *almost any* non-vacuous check
+   fails there — including a replacement deliberately shaped to fit the implementation. "Both fail
+   at freeze" is therefore evidence *adjacent* to "the swap didn't matter," which is this project's
+   own recurring defect class ([findings.md § 1](findings.md#1-a-row-satisfied-by-evidence-adjacent-to-what-it-names--open-gap)).
+   It is also the reading the #668 run published.
+
+   The two trees answer genuinely different questions, and only one of them is the question the
+   tier downgrade exists to ask:
+
+   - **Freeze tree** → *does the replacement still have teeth?* Guards against swapping in a
+     vacuous check. Necessary, and nearly always satisfied.
+   - **Implementation tree** → *does swapping the check change whether this PR passes?* Guards
+     against the implementer influencing its own oracle. **This is the failure the whole system
+     exists to prevent, and the freeze tree structurally cannot detect it.**
+
+   Options, none free:
+
+   1. **Implementation tree only.** Amendment iff old and new disagree against the shipped tree.
+      Catches the verdict-flip exactly. Cost: downgrades on a genuine typo too.
+   2. **Both trees.** Amendment if the verdict changes at *either*. Strictest; same downgrade cost
+      as (1) plus a vacuity check that (1) lacks.
+   3. **Freeze tree only** — the status quo as run. Cheap, mechanical, and nearly always returns
+      "clarification." Documents the current behaviour rather than fixing it.
+   4. **Two-part test:** the new check must still fail at freeze (teeth) **and** must not flip the
+      verdict against the implementation (independence) — with a narrow exception when the original
+      check is *broken* rather than wrong (nonexistent symbol, syntax error, wrong file), which the
+      human must name explicitly. #668 sits exactly on that exception's edge.
+   5. **Any mid-run oracle edit forfeits `auto-ok`.** No ambiguity at all. The run still completes;
+      it just surfaces to a human.
+
+   **Empirical input:** the path has fired **twice in eight runs** (#638's mis-stated tamper rule,
+   #668's C2), both adjudicated clarification. At that rate the *"false positives train the
+   operator to wave the mechanism through"* objection — the reason the cheap path exists — is
+   weaker here than it reads in the abstract.
+
+   **The unresolved tension worth naming:** `frozen-checks.md` promises the line is *"mechanical,
+   not rhetorical."* Move 5's own conclusion was that what made #668 adjudicable is that the
+   **criterion prose was independent of the check's mechanics** — but "does the new check still
+   satisfy the frozen prose?" is a human judgment, not a mechanical one. Any option above that is
+   fully mechanical gives up that appeal; any option that keeps it gives up the promise.
+
+   Nothing merged, so nothing was lost.
 2. **The `PreToolUse` merge-block hook.** Verified absent — the driver only *references* it
    (`agent-session-driver.sh:47`, `:488`). A hard precondition for any **unwatched** host, because
    deny rules are prefix-matched and `gh api` stays reachable. Rider: the denial detector greps the
