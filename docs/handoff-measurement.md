@@ -146,3 +146,27 @@ it describes*, so substitution or staleness is mechanically visible (`clean-by-s
   the hook is a hard precondition for any *unwatched* host.
 - Phase 3 auto-merge. Needs the hook plus at least one clean loop as evidence.
 - decafclaw's `.nvmrc` drift (pins node 22; local runs 26). Filed context lives in #716/#717.
+
+## Launcher prompt
+
+> Continuing the `agent-session` skill in this repo (`~/devel/agent-sessions`). Read `CLAUDE.md`,
+> `docs/design.md`, and `docs/handoff-measurement.md` — start with the handoff's **"Corrections to
+> inherit"** section, because five things a naive read of the repo would pick up were asserted and
+> later found false, including a fabricated measurement that reached a GitHub issue.
+>
+> The task is **move 5: measure the skill's unmeasured rules rather than adding more.** Only three of
+> them have measurements behind them, and this project has twice added a rule from a real failure and
+> then measured it away as redundant. Start with the **discriminate rule** in
+> `references/acceptance-criteria.md`: micro-test it against a no-guidance control, 5+ reps per arm,
+> and act on the result — including cutting it if it doesn't earn its place. Before adding any rule of
+> your own, grep the skill for the concept first; that check has a 2-for-2 record.
+>
+> Two concrete side tasks. **decafclaw #656** is `auto-ok` and eligible — run the driver on it to
+> validate the fixed driver end to end (`--max-budget-usd 25`; $12 is demonstrably too low). And the
+> **two-issue loop has still never run**, because it needs two eligible `auto-ok` issues at once, which
+> needs an `intake` pass on something new.
+>
+> **Nothing merges.** `eligible-for-auto-merge` is a finding the gate reports, not an action the driver
+> takes. Follow the skill-authoring calibration in `CLAUDE.md`, and respect the handoff's instrument
+> rules: seal any fixture, name verdict labels after actions rather than intents, and prove a fixture
+> can produce the wrong answer before trusting the right one.
