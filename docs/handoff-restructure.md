@@ -139,6 +139,86 @@ than copying it. Do not trust this table either; it was accurate when written.
   `parked.jsonl` is append-only with no un-park record. Moot in practice today (it has an open PR,
   so selection skips it anyway), but the state file now lies.
 
+Once move 7 lands, **this list should not exist** — it is the last prose backlog, and it becomes
+issues like everything else.
+
+## Move 7 (brief): put the roadmap on a board, and dogfood the front half only
+
+Decided in conversation at the end of move 5. **Recorded as a brief, not started.** Do it after
+the split, because the split is what produces the reconciled roadmap that becomes the issues —
+migrating the current fragments would just move the rot into a nicer container.
+
+### The answer splits: yes to the board, not yet to the driver
+
+**Yes to issues + a project board.** This repo's backlog is prose in a diary — precisely the
+under-specified-wishlist state the skill exists to fix, which is an awkward thing for *this* repo
+to be. Issues are discrete, queryable and carry state; the 5-of-11 stale rate found while prepping
+move 6 is a symptom of prose being unable to track state.
+
+**Not yet to the board-driver, and the blocker is structural.** `make skill-readonly` exists
+because a hosted run must never edit the instructions grading it — the single failure this whole
+system exists to prevent. Point the driver at this repo and **the implementer's work product *is*
+the skill.** Running the dogfood would mean disabling that guard. That is not a config wrinkle;
+it is walking directly into the thing.
+
+### The existing deny rule already partitions the backlog, and trigger 2 formalises it
+
+A run here could edit `driver/`, `docs/` and `Makefile`, and would be blocked only on `skills/`.
+So driver bugs, doc work and Makefile targets are drivable **today**; skill-wording work is not.
+
+That partition needs **no new mechanism**. `acceptance-criteria.md`'s trigger 2 is explicitly
+project-configurable — *"anything the project's CLAUDE.md marks off-limits."* So:
+
+**First concrete step: add `skills/` to this repo's risk-gated paths in `CLAUDE.md`.** Intake then
+tiers every skill-editing issue `needs-review` mechanically, and no skill file is touched to
+achieve it. Verify it works the way every other tier claim gets verified — run `intake` on one
+skill-touching issue and confirm the tier falls out rather than being argued into place.
+
+### The honest problem: this backlog has no cheap oracles
+
+Most interesting work here is skill wording, and the oracle for skill wording is a micro-test.
+"Does the discriminate rule earn its place?" took **170 reps, ~$50 and most of a session.** That
+is a research programme, not an `auto-ok` criterion. **Expect this backlog to skew heavily
+`needs-review`** — which means the *board* pays off (tracking, triage evidence) well before the
+*driver* does, and possibly regardless of whether the driver ever runs here.
+
+Do not fudge criteria to make skill issues look `auto-ok`. An honest `needs-review` beats a
+checkable-looking proxy; that rule is already in the skill and this is exactly the repo that would
+be tempted.
+
+### What would make this worth doing rather than ceremony
+
+Dogfooding your own tooling repo can generate busywork. The test is whether it produces evidence
+the project does not otherwise have. Two candidates, both real:
+
+1. **`triage`'s second corpus.** It has one dogfood, over 8 decafclaw issues — the thinnest
+   real-run evidence of any mode. A reconciled roadmap of ~10 items is a genuine second sample.
+   Note the standing constraint: `triage` step 2 fans out to subagents, and the operator's standing
+   instruction forbids the Agent tool unless asked. That deviation has now been taken twice
+   (moves 4b and 5); decide it deliberately this time rather than discovering it mid-run.
+2. **The host-agnosticism claim.** `agent-session-driver.sh`'s header asserts *"deliberately
+   host-agnostic: no `$HOME` assumptions, every path a flag"* and **nothing has ever checked it** —
+   it has only ever run against one repo with one board. Even `make dry-run --repo lmorchard/agent-sessions`
+   against a second board tests the selection path for free, with no invocation and no cost.
+
+If neither of those is being served, the board is filing cabinets and should be treated as such.
+
+### Also worth doing while in here
+
+**The driver has no guard against `--repo-path` containing `--skill-dir`.** That is precisely the
+self-modification configuration, and today it is reachable by typo. A startup check that refuses
+(or at minimum warns loudly) is small, mechanical, and belongs with this work. Mutation-test it:
+the guard is worthless unless removing it makes a named test fail.
+
+### Sequencing
+
+1. Finish the split (move 6). The reconciled roadmap is the input.
+2. Add `skills/` to CLAUDE.md's risk-gated paths; verify with one `intake`.
+3. Create the board; file the roadmap as issues **from the reconciled list only**.
+4. `triage` pass — the second corpus.
+5. `make dry-run` against this repo/board. Selection only, no invocation.
+6. Reconsider the driver here **only after** the amendment policy (§2) is settled.
+
 ## Method — the instrument rules, updated
 
 - **Control vs treatment, 5+ reps per arm, read every rep by hand.** A tally-only reading of move
