@@ -1178,6 +1178,51 @@ subagent; the operator's standing instruction forbids the Agent tool unless aske
 inline and the token-heavy reading landed in the main context. Twice now — this is a standing
 property of how the skill runs here, not an incident.
 
+#### The amendment path fired on its own — and the policy that judges it is ambiguous
+
+The handoff said the amendment path was unexercised after six runs and *"do not manufacture a
+case; it only fires when a frozen check is genuinely wrong."* It fired unprompted on #668, and the
+check that was wrong was **one I wrote**. C2 specified the test's *mechanics* — "mutates
+`_rawText`" — rather than only its assertion. The shipped fix tracks a `_rawDirty` flag set by the
+textarea's `@input` handler, which direct state mutation never sets, so the frozen test did not
+exercise the criterion it named. The run logged it as a **clarification**, published
+`amendments: none`, and reached `verdict: eligible-for-auto-merge`.
+
+**Verified by running both wordings against both trees, rather than trusting the run's label:**
+
+| | at the freeze commit `1add3f0` | against the shipped implementation |
+|---|---|---|
+| **original** frozen check | fails | **fails** |
+| **clarified** check | fails | passes |
+
+`frozen-checks.md`'s line is *"re-run every criterion and guard under both the old and the new
+wording. If any verdict changes, it's an amendment."* **It does not say at which tree**, and the
+two readings give opposite answers:
+
+- **At the freeze commit** — both fail, no verdict changes → **clarification**, the run was right,
+  and the clarified check demonstrably still discriminates.
+- **Against the implementation** — old fails, new passes → **amendment**, which costs a tier
+  downgrade to `needs-review`, and the run was wrong.
+
+So a run published `eligible-for-auto-merge` on a PR whose frozen check was replaced by one that
+fits the implementation and whose *original* frozen check the implementation does not pass. Same
+recurring defect class as the other six: **a gate row satisfied by evidence adjacent to what it
+names** — `amendments: none` is true only under one reading of the policy.
+
+Being fair to the run: it is not a cheat. The criterion's *prose* always said "the user types more
+into the textarea", so dispatching an input event matches the criterion and my step (c) never did.
+The clarified check still fails at freeze, which is the substantive protection. **What made that
+adjudicable at all is that the criterion prose was independent of the check's mechanics** — and
+C2 nearly destroyed that independence by writing mechanics into the check. State the assertion in
+the check; let the criterion prose carry the scenario.
+
+**Deliberately not fixed here.** Disambiguating that line changes *when runs get downgraded*,
+which is a tier-policy call and therefore a human one — and this session already produced one
+worked example of my judgment picking the harmful edit (arm M). It is also a **hard precondition
+for phase 3**: it is a live route to `eligible-for-auto-merge` with a swapped oracle, so it
+belongs with the `PreToolUse` merge-block hook on the auto-merge blocker list. Nothing merged, so
+nothing was lost.
+
 ## Resolved (was open)
 
 - Criteria grammar → **EARS + Given-When-Then** (not invented); see `criteria-grammar.md`.
