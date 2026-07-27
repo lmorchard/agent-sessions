@@ -188,6 +188,65 @@ else
   bad "driver resolves STATE_DIR" "abspath call present" "absent"
 fi
 
+# --- budget exhaustion is distinguishable from a designed stop -------------
+
+echo "budget: >=95% spend without a gate is a config problem, not an escalation"
+
+# Mirrors the driver's threshold expression exactly.
+budget_reclass() { # $1 = outcome, $2 = cost, $3 = budget -> outcome
+  local outcome="$1" cost="$2" budget="$3"
+  case "$outcome" in
+    incomplete|parked|no-gate)
+      if awk -v c="$cost" -v b="$budget" 'BEGIN{exit !(b>0 && c >= b*0.95)}'; then
+        printf 'budget-exhausted\n'; return 0
+      fi ;;
+  esac
+  printf '%s\n' "$outcome"
+}
+
+check "the real #710 case reclassifies"        "budget-exhausted" "$(budget_reclass incomplete 11.872277 12)"
+check "exactly at the 95% line reclassifies"   "budget-exhausted" "$(budget_reclass incomplete 11.4 12)"
+check "well under budget stays incomplete"     "incomplete"       "$(budget_reclass incomplete 3.10 12)"
+check "a real gate verdict is never touched"   "gate-eligible"    "$(budget_reclass gate-eligible 11.99 12)"
+check "human-merge-required is never touched"  "gate-human"       "$(budget_reclass gate-human 11.99 12)"
+check "no budget set -> no reclassification"   "incomplete"       "$(budget_reclass incomplete 11.9 0)"
+
+# budget-exhausted must NOT be parked -- parking hides a recoverable config
+# problem behind a skip reason on a perfectly good issue.
+if grep -qE '^ *parked\|failed\|incomplete\|no-gate\)' "$DRIVER" && \
+   ! grep -qE '^ *parked\|failed\|incomplete\|no-gate\|budget-exhausted\)' "$DRIVER"; then
+  ok "budget-exhausted is excluded from the park list"
+else
+  bad "budget-exhausted park status" "excluded from park list" "included (would hide a config problem)"
+fi
+
+# --- the driver takes its child down with it -------------------------------
+
+echo "orphan: the in-flight child must not outlive its driver"
+
+if grep -q 'trap cleanup EXIT INT TERM' "$DRIVER"; then
+  ok "cleanup trap installed on EXIT/INT/TERM"
+else
+  bad "cleanup trap" "trap cleanup EXIT INT TERM" "absent"
+fi
+if grep -q 'kill -TERM "\$CHILD_PID"' "$DRIVER"; then
+  ok "cleanup terminates the in-flight child"
+else
+  bad "cleanup kills child" "kill -TERM \$CHILD_PID" "absent"
+fi
+# The trap cannot fire on SIGKILL or a host crash, so startup must detect a
+# still-live orphan and refuse -- otherwise two runs mutate one repo at once.
+if grep -q 'refusing to start a second run while an orphan is live' "$DRIVER"; then
+  ok "startup refuses to run alongside a live orphan"
+else
+  bad "live-orphan guard" "startup refuses" "absent"
+fi
+if grep -q 'child.pid' "$DRIVER"; then
+  ok "child pid is recorded for post-crash orphan detection"
+else
+  bad "child.pid recorded" "written to the run dir" "absent"
+fi
+
 # --- C1: no merge path in the driver ---------------------------------------
 
 echo "guard: the driver contains no merge path"

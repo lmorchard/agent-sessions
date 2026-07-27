@@ -182,10 +182,22 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
       `eligible-for-auto-merge` with `lint-and-test` still `pending`.
 
     **Pending CI is transient, and that makes it the one row you wait on** rather than fail. Checks
-    take minutes; the other rows are already settled. Wait for them to finish (`gh pr checks <n>
-    --watch`, bounded — don't poll forever), then grade. If they still haven't settled, the verdict is
-    **`pending`**, not `eligible-for-auto-merge` and not `human-merge-required`: nothing is wrong, it
-    just isn't derivable yet, and `pending` is the value a machine reader already knows not to act on.
+    take minutes; the other rows are already settled. Wait with **exactly this**:
+
+    ```bash
+    gh pr checks <n> --watch
+    ```
+
+    One blocking command that returns when the checks finish. **Do not build a wait out of anything
+    else** — a `sleep` poll loop, a backgrounded shell, and the `Monitor` tool are all *denied* under
+    the `--permission-mode dontAsk` floor an unattended run uses. Measured: a run burned its entire
+    budget trying all three, never tried `--watch`, and ended at `verdict: pending` on a PR whose CI
+    went green minutes later. `--watch` is a single `gh` invocation, so it is covered by the same
+    allow-rule as every other `gh` call, and it costs one turn instead of one turn per poll.
+
+    If the checks genuinely never settle, the verdict is **`pending`** — not
+    `eligible-for-auto-merge` and not `human-merge-required`: nothing is wrong, it just isn't
+    derivable yet, and `pending` is the value a machine reader already knows not to act on.
 
     **All true → `eligible-for-auto-merge`. Any false → `human-merge-required`**, with the
     failing row as the reason. Write the verdict into the gate block and report it.

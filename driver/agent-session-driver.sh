@@ -391,15 +391,23 @@ run_issue() { # $1 = issue number
   local main_before
   main_before="$(git -C "$REPO_PATH" rev-parse main 2>/dev/null || echo unknown)"
 
+  # Run in the background and hold the pid, so the EXIT trap can kill the child.
+  # Without this the child outlives its driver: a VSCode crash took the driver
+  # down and `claude -p` was reparented to init (PPID 1), still spending and
+  # still mutating the repo with nothing supervising it. Observed, not theorised.
   set +e
   if [ -n "$TIMEOUT_CMD" ]; then
-    ( cd "$REPO_PATH" && "$TIMEOUT_CMD" "$RUN_TIMEOUT" "${cmd[@]}" < "$rundir/prompt.txt" ) \
-      > "$raw" 2>"$rundir/stderr.txt"
+    ( cd "$REPO_PATH" && exec "$TIMEOUT_CMD" "$RUN_TIMEOUT" "${cmd[@]}" < "$rundir/prompt.txt" ) \
+      > "$raw" 2>"$rundir/stderr.txt" &
   else
     say "  NOTE: no timeout/gtimeout found; running unbounded (budget still caps cost)"
-    ( cd "$REPO_PATH" && "${cmd[@]}" < "$rundir/prompt.txt" ) > "$raw" 2>"$rundir/stderr.txt"
+    ( cd "$REPO_PATH" && exec "${cmd[@]}" < "$rundir/prompt.txt" ) > "$raw" 2>"$rundir/stderr.txt" &
   fi
+  CHILD_PID=$!
+  printf '%s\n' "$CHILD_PID" > "$rundir/child.pid"
+  wait "$CHILD_PID"
   rc=$?
+  CHILD_PID=""
   set -e
 
   local main_after
@@ -463,6 +471,18 @@ EOF
     fi
   fi
 
+  # Budget exhaustion exits 0 with subtype=success and is_error=false, so it is
+  # otherwise indistinguishable from a designed escalation stop -- both land as
+  # `incomplete` with no gate verdict. They need opposite responses: a designed
+  # stop wants a human, an exhausted budget wants more budget. Measured: #710
+  # spent $11.87 of $12 and stopped mid-review-cycle reporting success.
+  if [ "$outcome" = "incomplete" ] || [ "$outcome" = "parked" ] || [ "$outcome" = "no-gate" ]; then
+    if awk -v c="${cost:-0}" -v b="$MAX_BUDGET" 'BEGIN{exit !(b>0 && c >= b*0.95)}'; then
+      outcome="budget-exhausted"
+      reason="spent \$$cost of \$$MAX_BUDGET (>=95%) and never reached the gate -- raise --max-budget-usd and re-run, this is not an escalation"
+    fi
+  fi
+
   say "  outcome  $outcome"
   say "  reason   $reason"
   [ -n "${prurl:-}" ] && say "  pr       $prurl"
@@ -495,9 +515,12 @@ EOF
 
   # A run that produced nothing classifiable means the driver's own assumptions
   # are off. Stop rather than spend the next budget on the same misunderstanding.
-  if [ "$outcome" = "failed" ] || [ "$outcome" = "driver-fault" ]; then
+  if [ "$outcome" = "failed" ] || [ "$outcome" = "driver-fault" ] || [ "$outcome" = "budget-exhausted" ]; then
     say ""
     say "stopping the loop: $outcome means an assumption is wrong, and retrying spends money on it."
+    say "  (budget-exhausted is a config problem, not an escalation -- the next issue would"
+    say "   get the same too-small ceiling. Observed: #710 exhausted \$12, then #656 started"
+    say "   with \$12 and also never reached its gate.)"
     return 1
   fi
   return 0
@@ -507,8 +530,21 @@ EOF
 
 TOTAL_COST=0
 ATTEMPTED=0
+CHILD_PID=""
 SUMMARY_TMP="$(mktemp)"
-trap 'rm -f "$SUMMARY_TMP"' EXIT
+
+# Take the in-flight run down with us. `timeout` forwards TERM to claude, so a
+# TERM to the timeout pid is enough for the graceful cases (Ctrl-C, SIGTERM,
+# normal exit). It is NOT enough for a SIGKILL of the driver or a host crash --
+# no trap runs then -- which is why startup also checks for a live orphan.
+cleanup() {
+  if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
+    say "cleanup: terminating in-flight run (pid $CHILD_PID)"
+    kill -TERM "$CHILD_PID" 2>/dev/null || true
+  fi
+  rm -f "$SUMMARY_TMP"
+}
+trap cleanup EXIT INT TERM
 
 # A leftover in-flight marker means a previous driver died between invoking and
 # recording. Say so loudly: the run may have completed and cost real money, and
@@ -516,6 +552,16 @@ trap 'rm -f "$SUMMARY_TMP"' EXIT
 if [ -f "$STATE_DIR/inflight.json" ]; then
   say "WARNING: a previous run died before recording its outcome:"
   jq -r '"  issue #\(.issue)  started \(.started)  run dir \(.run_dir)"' "$STATE_DIR/inflight.json" 2>/dev/null || true
+  # The trap cannot fire on SIGKILL or a host crash, so the child may STILL BE
+  # RUNNING -- reparented to init, unsupervised, and spending. Distinguish that
+  # from a finished-but-unrecorded run: they need opposite actions.
+  _ipid="$(cat "$(jq -r '.run_dir' "$STATE_DIR/inflight.json" 2>/dev/null)/child.pid" 2>/dev/null || true)"
+  if [ -n "$_ipid" ] && kill -0 "$_ipid" 2>/dev/null; then
+    say "  ORPHAN STILL RUNNING (pid $_ipid, reparented) -- it is unsupervised and still spending."
+    say "  Let it finish, then:  --classify-only $(jq -r '.issue' "$STATE_DIR/inflight.json" 2>/dev/null)"
+    say "  Or kill it:           kill -TERM $_ipid"
+    die "refusing to start a second run while an orphan is live"
+  fi
   say "  recover it with:  --classify-only $(jq -r '.issue' "$STATE_DIR/inflight.json" 2>/dev/null)"
   say ""
 fi
