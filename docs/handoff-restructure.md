@@ -1,5 +1,20 @@
 # Handoff: split the docs, then the amendment policy (move 6)
 
+> **STATUS: move 6 is DONE (2026-07-27). Both tasks are complete — do not redo them.**
+>
+> - **The split shipped**: `design.md` (design + current state + reconciled roadmap),
+>   `build-log.md` (chronology), `findings.md` (durable lessons). Verified by content inventory.
+> - **The amendment policy is SETTLED**: both trees — freeze commit *and* current implementation —
+>   and it governs tamper rules too. Written into `frozen-checks.md`; rationale in `design.md`'s
+>   Resolved decisions. §2 below describes the ambiguity as open; that is now history.
+> - **Two premises this doc rests on are stale.** Six of the seven PRs are **merged** (all by Les,
+>   by hand), not "eight PRs, nothing merged." And the forward-looking inventory in §2b was
+>   reconciled — four more entries were found stale on top of the five it names. **Use
+>   `design.md`'s roadmap, not §2b's table.**
+>
+> **Still live in this doc: the move 7 brief** (board yes, driver not yet) and the gate-parser
+> extraction. That is the reason to keep reading.
+
 Task brief for a fresh context. Read `CLAUDE.md` and `docs/design.md`. This doc is the task plus
 the things that are in nobody's head anymore.
 

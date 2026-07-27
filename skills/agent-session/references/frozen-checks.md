@@ -201,13 +201,38 @@ depending on what actually changes:
 - **Amendment** — it changes what a criterion or guard *asserts*. Follow the five steps below,
   ending in a tier downgrade.
 
-The line is mechanical, not rhetorical: **re-run every criterion and guard under both the old and
-the new wording. If any verdict changes, it's an amendment.** A clarification can't change what
-passes — that's what makes it a clarification. Both paths need a human to adjudicate and put the
-verifier's finding on the record; only the amendment path costs the tier.
+The line is mechanical, not rhetorical: **re-run the old and the new wording against BOTH trees —
+the freeze commit AND the current implementation. If any verdict changes at either tree, it's an
+amendment.** A clarification can't change what passes — that's what makes it a clarification.
+Both paths need a human to adjudicate and put the verifier's finding on the record; only the
+amendment path costs the tier.
+
+**Naming both trees is load-bearing; a single tree is not enough.**
+
+- **At the freeze commit** you learn only *whether the replacement still has teeth.* This is
+  necessary and nearly worthless on its own: at freeze the work does not exist, so **almost any
+  non-vacuous check fails there — including a replacement deliberately shaped to fit the
+  implementation.** "Both fail at freeze" is evidence *adjacent* to "the swap didn't matter."
+- **Against the current implementation** you learn whether swapping the check *changes whether
+  this PR passes.* That is the question the downgrade exists to ask, and the freeze tree
+  structurally cannot answer it.
+
+So the four cells look like this, and only the top-left is a clarification:
+
+| | verdict same at freeze | verdict differs at freeze |
+|---|---|---|
+| **verdict same vs. implementation** | clarification | amendment |
+| **verdict differs vs. implementation** | **amendment** | amendment |
 
 The reason the cheap path exists at all: downgrading a run over a typo is a false positive, and
-false positives train the operator to wave the mechanism through.
+false positives train the operator to wave the mechanism through. A purely cosmetic rewording
+changes no verdict at either tree, so it still costs nothing.
+
+**Scope: this governs tamper rules too, not only criteria and guards.** A tamper rule is an oracle
+— it decides whether the frozen set was respected — so restating one mid-run is the same act and
+gets the same test. State tamper rules as invariants over *what a check asserts*, never as
+whitelists of allowed line forms; a rule that fires on inert changes (comments, sanctioned
+appends) is a false positive, and rewriting it mid-run is now an amendment.
 
 The amendment path is deliberately visible and costly:
 

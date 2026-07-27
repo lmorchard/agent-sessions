@@ -50,7 +50,7 @@ to catch it* — and it was found by looking, which is the argument for the swee
 | 5 | `gh pr checks --required` on a repo with no required checks: a row built on it either errors or passes vacuously. | move 4a |
 | 6 | Import-boundary guard G3 stays green while the boundary it protects is gone — a capability that arrives as an *object* imports nothing. C4 was added to assert what G3 structurally cannot see. | move 4b (#625) |
 | 7 | Three independent unattended runs reported `project-gates` satisfied **by substitute**, having run `make check`'s four steps natively because `make check` itself was unpassable. | move 4c |
-| 8 | `amendments: none` was true only under one of two readings of the amendment policy. | move 5 (#668) |
+| 8 | `amendments: none` was true only under one of two readings of the amendment policy. **Closed 2026-07-27** — the policy now names both trees, and under it #668 was an amendment. | move 5 (#668) |
 | 9 | **The driver's test suite tests a replica of the classifier, not the classifier.** `test-driver.sh` hand-copies driver logic — one helper is annotated *"Mirrors the driver's extraction + comparison exactly"* with nothing enforcing that — and it has **already diverged**: `classify_outcome` is 53 lines in the driver and 15 in the copy, with **zero `ci-stale` awareness** in the copy. | verified 2026-07-27 |
 
 **The tell:** the row names a command, and the evidence offered is not that command's output.
@@ -177,8 +177,11 @@ inert.
 
 **Amendment vs. clarification.** An amendment changes what a check *asserts* → stop, human-confirm,
 log, downgrade the run to `needs-review`. A clarification fixes wording that never matched its own
-intent → logged, human-adjudicated, no downgrade. *Which tree the re-run happens against is
-currently ambiguous* — see [design.md's roadmap](design.md#roadmap).
+intent → logged, human-adjudicated, no downgrade. **Settled 2026-07-27: re-run both wordings
+against BOTH trees — the freeze commit and the current implementation — and any verdict change at
+either is an amendment.** The freeze tree alone is near-vacuous: at freeze the work does not exist,
+so almost any non-vacuous check fails there, *including a replacement shaped to fit the
+implementation*. **Applies to tamper rules too.**
 
 **A decision recorded in an issue comment is invisible to every downstream mode.** They read the
 body through the marker. **Comments are provenance; the body is the constraint.**
