@@ -314,8 +314,22 @@ classify_outcome() {
   # the block still refers to the PR in front of us. Observed: a run graded CI, then
   # force-pushed amended docs, and published eligible-for-auto-merge on a head whose
   # lint-and-test was pending.
+  # Anchoring the sha on a literal `@` made this silently un-runnable. #722's run
+  # wrote `ci: 2/2 pass (js-test, lint-and-test) on f42c0f1` -- a correct sha behind
+  # the word "on" instead of "@" -- so nothing matched, `_cisha` came out empty, and
+  # the staleness check was skipped without a word. The sha was right that time; the
+  # mechanism that verifies it was off, which is the same "a null renders as a
+  # positive" shape as `clean` hiding an absent diff. Match a bare 7+ hex token
+  # anywhere in the row instead of a delimiter the template cannot enforce, and when
+  # there is genuinely no sha, SAY so rather than reading it as current.
   if [ -n "$GATE_HEAD_SHA" ]; then
-    _cisha="$(printf '%s\n' "$gate" | gate_field ci | sed -n 's/.*@[[:space:]]*\([0-9a-f]\{7,\}\).*/\1/p')"
+    _cirow="$(printf '%s\n' "$gate" | gate_field ci)"
+    _cisha="$(printf '%s\n' "$_cirow" | grep -oE '\b[0-9a-f]{7,40}\b' | head -1)"
+    if [ -z "$_cisha" ] && [ -n "$(printf '%s' "$_cirow" | tr -d '[:space:]')" ] \
+       && [ "$_cirow" != "no checks configured" ]; then
+      say "  WARNING: ci row carries no parseable sha ('$_cirow') -- staleness"
+      say "           UNCHECKED, not verified current. pr-body-template.md requires it."
+    fi
     if [ -n "$_cisha" ] && [ "${GATE_HEAD_SHA#"$_cisha"}" = "$GATE_HEAD_SHA" ]; then
       printf 'ci-stale\tgate ci row was graded at %s but the head is now %s -- verdict "%s" rests on a commit that no longer ships\n' \
         "$_cisha" "${GATE_HEAD_SHA:0:8}" "$verdict"
@@ -348,6 +362,22 @@ pick_result() { # $1 = stream.jsonl path
   jq -sc '[.[] | select(.type=="result")]
           | if length == 0 then empty
             else (max_by(.total_cost_usd // 0)) end' "$1" 2>/dev/null || true
+}
+
+# The same spurious trailing record ALSO poisons the exit code, and the fix above
+# only covered cost. Observed on #656: `subtype=success` with the full merge-gate
+# verdict, then `error_during_execution`, and `claude -p` exited 1 -- so a run that
+# had opened a PR and published `eligible-for-auto-merge` was recorded `failed`,
+# parked, and stopped the loop.
+#
+# Deciding "did the run finish?" from the exit code contradicts this file's own
+# doctrine two stanzas down: THE EXIT CODE IS NOT THE ORACLE, the gate block is.
+# That comment only ever described the rc=0 case; the rc!=0 branch bypassed the
+# oracle entirely. So: if the stream carries a successful result at all, the run
+# reached an end state and the gate gets to speak, whatever the exit code says.
+has_success_result() { # $1 = stream.jsonl path
+  jq -se 'any(.[]; .type=="result" and .subtype=="success" and (.is_error != true))' \
+     "$1" >/dev/null 2>&1
 }
 
 # --- stage: invoke ---------------------------------------------------------
@@ -481,9 +511,16 @@ run_issue() { # $1 = issue number
     # a skip reason on a perfectly good issue.
     outcome="driver-fault"
     reason="claude exited $rc before starting (no session, no spend) -- see $rundir/stderr.txt"
-  elif [ "$rc" -ne 0 ]; then
+  elif [ "$rc" -ne 0 ] && ! has_success_result "$raw"; then
     outcome="failed"; reason="claude exited $rc"
   else
+    # rc != 0 with a successful result in the stream is the spurious-trailing-record
+    # case. Say so out loud rather than swallowing it -- the exit code is still a real
+    # signal that something went wrong after the run finished.
+    if [ "$rc" -ne 0 ]; then
+      say "  NOTE: claude exited $rc but the stream carries a successful result;"
+      say "        classifying from the gate block, not the exit code."
+    fi
     prline="$(pr_for_issue "$n" "$(fetch_open_prs)")"
     if [ -z "$prline" ]; then
       outcome="parked"

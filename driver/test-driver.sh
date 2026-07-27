@@ -168,7 +168,7 @@ No marker here.")"
 echo "ci-stale: a gate ci row is a claim about a commit"
 
 # Mirrors the driver's extraction + comparison exactly.
-ci_sha_of() { printf '%s\n' "$1" | gate_field ci | sed -n 's/.*@[[:space:]]*\([0-9a-f]\{7,\}\).*/\1/p'; }
+ci_sha_of() { printf '%s\n' "$1" | gate_field ci | grep -oE '\b[0-9a-f]{7,40}\b' | head -1; }
 is_stale() { # $1 = ci row value, $2 = current head
   local cisha; cisha="$(ci_sha_of "ci: $1")"
   if [ -n "$cisha" ] && [ "${2#"$cisha"}" = "$2" ]; then printf 'stale\n'; else printf 'current\n'; fi
@@ -181,6 +181,23 @@ check "sha with trailing detail still parses" "stale"   "$(is_stale "1/2 pass @ 
 
 # The real #714 case: graded at 0d08b2d, head force-pushed to e8f03389.
 check "the real #714 stale case"              "stale"   "$(is_stale "2/2 pass @ 0d08b2d" "e8f03389")"
+
+# The real #722 case. pr-body-template.md mandates `@ <sha>`; this run wrote the
+# sha behind the word "on", and anchoring on the `@` meant the staleness check was
+# skipped in silence on a PR that was about to be called eligible. The sha happened
+# to be current -- the point is that nothing checked.
+check "sha behind 'on' rather than '@' is found" "current" \
+  "$(is_stale "2/2 pass (js-test, lint-and-test) on f42c0f1" "f42c0f1aa422e3282c647f2a32947b76904abfb2")"
+check "  and is judged stale when it should be"  "stale" \
+  "$(is_stale "2/2 pass (js-test, lint-and-test) on f42c0f1" "e8f03389abcdef")"
+check "check names are not mistaken for a sha"   "current" \
+  "$(is_stale "2/2 pass (js-test, lint-and-test)" "e8f03389abcdef")"
+
+if grep -q 'ci row carries no parseable sha' "$DRIVER"; then
+  ok "driver warns when no sha is parseable instead of reading it as current"
+else
+  bad "unparseable sha is reported" "warning present in driver" "absent"
+fi
 
 if grep -q "ci-stale" "$DRIVER"; then
   ok "driver emits a ci-stale outcome"
@@ -286,6 +303,55 @@ if [ -z "$MERGE_HITS" ]; then
   ok "no executable merge call in $(basename "$DRIVER")"
 else
   bad "driver contains a merge path" "no matches" "$MERGE_HITS"
+fi
+
+# --- a nonzero exit does not overrule the gate -----------------------------
+
+echo "trailing error record: the exit code is not the oracle"
+
+# Unlike the helpers above, this evaluates the REAL function out of the driver
+# rather than restating it, so the test cannot drift away from what ships.
+eval "$(sed -n '/^has_success_result()/,/^}/p' "$DRIVER")"
+
+_stream() { # writes a stream fixture to $1
+  local f="$1"; shift
+  : > "$f"
+  for rec in "$@"; do printf '%s\n' "$rec" >> "$f"; done
+}
+
+TMPD="$(mktemp -d)"
+trap 'rm -rf "$TMPD"' EXIT
+
+# The real #656 stream: a successful result carrying the merge-gate verdict,
+# then a spurious error_during_execution with cost 0. claude -p exited 1, and
+# the driver recorded `failed` on a run that had published
+# eligible-for-auto-merge to PR #722.
+_stream "$TMPD/656.jsonl" \
+  '{"type":"assistant","message":{"content":[]}}' \
+  '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":11.195,"num_turns":129}' \
+  '{"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":0,"num_turns":0}'
+
+_stream "$TMPD/genuine-fail.jsonl" \
+  '{"type":"assistant","message":{"content":[]}}' \
+  '{"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":2.5,"num_turns":40}'
+
+_stream "$TMPD/empty.jsonl"
+
+_yn() { has_success_result "$1" && printf 'yes\n' || printf 'no\n'; }
+
+check "the real #656 stream has a successful result" "yes" "$(_yn "$TMPD/656.jsonl")"
+check "an only-error stream does not"                "no"  "$(_yn "$TMPD/genuine-fail.jsonl")"
+check "an empty stream does not"                     "no"  "$(_yn "$TMPD/empty.jsonl")"
+check "a missing stream file does not"               "no"  "$(_yn "$TMPD/nope.jsonl")"
+
+# The guard is worthless if it cannot fail, so assert the branch actually
+# consults it -- deleting the has_success_result call from the classifier must
+# break this, which is how the skill-readonly guard should have been written
+# the first time.
+if grep -q 'rc" -ne 0 \] && ! has_success_result' "$DRIVER"; then
+  ok "the failed branch consults the stream before overruling the gate"
+else
+  bad "failed branch consults the stream" "has_success_result in the rc!=0 guard" "absent"
 fi
 
 # --- syntax ----------------------------------------------------------------
