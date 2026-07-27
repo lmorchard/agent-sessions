@@ -160,10 +160,28 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
     registering as a review — so check the review itself landed (`gh pr view <n> --json reviews`)
     rather than reading `0 unresolved` as proof a reviewer ran.
 
-    CI checks, verified working. **Read `bucket`, never `state`** — `state` is GitHub's raw value
-    (`SUCCESS`), while `bucket` is the normalised `pass | fail | pending | skipping | cancel`. A
-    filter written against `.state != "pass"` counts *passing* checks as failures and makes every
-    green PR ineligible:
+    **The CI row is a claim about a commit, so derive it LAST — after the final push — and record
+    the sha it describes.** Anything that pushes afterwards invalidates it: a force-push to amend
+    session docs starts a new check run, and the row you already wrote now describes a commit that
+    is no longer the head. Measured: a run verified `2/2 pass`, then amended docs and force-pushed,
+    and published `ci: 2/2 pass · verdict: eligible-for-auto-merge` on a head whose `lint-and-test`
+    was `pending` and whose `mergeStateStatus` was `UNSTABLE`.
+
+    So: **the last push happens before the CI wait, not after.** If you must push again, the row is
+    void — re-wait and re-derive, or set `verdict: pending`. Confirm the sha you graded is still the
+    head before writing the verdict:
+
+    ```bash
+    gh pr view <n> --json headRefOid -q .headRefOid      # before and after; must match
+    ```
+
+    This is the same defect as *"the tree you ran the checks on is not the tree you pushed"* from the
+    #649 run, one level up — there it was a working tree, here it is a commit. Both are the gate
+    citing evidence gathered against something other than what ships.
+
+    **Read `bucket`, never `state`** — `state` is GitHub's raw value (`SUCCESS`), while `bucket` is
+    the normalised `pass | fail | pending | skipping | cancel`. A filter written against
+    `.state != "pass"` counts *passing* checks as failures and makes every green PR ineligible:
 
     ```bash
     gh pr checks <n> --json name,bucket \

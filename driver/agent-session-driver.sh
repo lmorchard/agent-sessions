@@ -306,6 +306,23 @@ classify_outcome() {
   fi
   verdict="$(printf '%s\n' "$gate" | gate_field verdict)"
   reason="$(printf '%s\n' "$gate"  | gate_field reason)"
+
+  # A CI result is a claim about a commit, and the gate block outlives the commit.
+  # If the `ci` row records a sha (`ci: 2/2 pass @ <sha>`) and it is not the current
+  # head, the row describes something that no longer ships -- so the verdict resting
+  # on it is void. Checking this is NOT re-deriving the gate: it is asking whether
+  # the block still refers to the PR in front of us. Observed: a run graded CI, then
+  # force-pushed amended docs, and published eligible-for-auto-merge on a head whose
+  # lint-and-test was pending.
+  if [ -n "$GATE_HEAD_SHA" ]; then
+    _cisha="$(printf '%s\n' "$gate" | gate_field ci | sed -n 's/.*@[[:space:]]*\([0-9a-f]\{7,\}\).*/\1/p')"
+    if [ -n "$_cisha" ] && [ "${GATE_HEAD_SHA#"$_cisha"}" = "$GATE_HEAD_SHA" ]; then
+      printf 'ci-stale\tgate ci row was graded at %s but the head is now %s -- verdict "%s" rests on a commit that no longer ships\n' \
+        "$_cisha" "${GATE_HEAD_SHA:0:8}" "$verdict"
+      return 0
+    fi
+  fi
+
   case "$verdict" in
     eligible-for-auto-merge)
       printf 'gate-eligible\t%s\n' "${reason:-all gate rows satisfied}" ;;
@@ -464,6 +481,7 @@ run_issue() { # $1 = issue number
       prnum="$(printf '%s' "$prline" | cut -f1)"
       prurl="$(printf '%s' "$prline" | cut -f2)"
       gate="$(gh pr view "$prnum" --repo "$REPO" --json body -q .body 2>/dev/null | extract_gate || true)"
+      GATE_HEAD_SHA="$(gh pr view "$prnum" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || true)"
       printf '%s\n' "$gate" > "$rundir/gate.yaml"
       IFS="$(printf '\t')" read -r outcome reason <<EOF
 $(classify_outcome "$gate")
@@ -531,6 +549,7 @@ EOF
 TOTAL_COST=0
 ATTEMPTED=0
 CHILD_PID=""
+GATE_HEAD_SHA=""
 SUMMARY_TMP="$(mktemp)"
 
 # Take the in-flight run down with us. `timeout` forwards TERM to claude, so a
@@ -593,6 +612,7 @@ if [ -n "$CLASSIFY_ONLY" ]; then
     prnum="$(printf '%s' "$prline" | cut -f1)"
     prurl="$(printf '%s' "$prline" | cut -f2)"
     gate="$(gh pr view "$prnum" --repo "$REPO" --json body -q .body 2>/dev/null | extract_gate || true)"
+    GATE_HEAD_SHA="$(gh pr view "$prnum" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || true)"
     [ "$rundir" != "(none)" ] && printf '%s\n' "$gate" > "$rundir/gate.yaml"
     IFS="$(printf '\t')" read -r outcome reason <<EOF
 $(classify_outcome "$gate")

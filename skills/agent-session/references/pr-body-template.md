@@ -37,7 +37,7 @@ guards: G1 pass · G2 pass
 tamper: clean
 freeze: a1b2c3d
 project-gates: make check green
-ci: 2/2 pass (lint-and-test, js-test)
+ci: 2/2 pass @ e8f0338
 threads: 0 unresolved
 risk-paths: none
 amendments: none
@@ -64,7 +64,7 @@ Field values, so the block stays parseable:
 | `tamper` | `clean` \| `clean-by-substitute — <basis>` \| `amended (see amendments)` \| `DIRTY — unexplained diff in <path>` |
 | `freeze` | the freeze commit sha |
 | `project-gates` | `make check green` \| `red: <what failed>` — the **local** run only |
-| `ci` | `N/N pass` \| `N/M pass — pending: <names>` \| `N/M pass — FAILING: <names>` \| `no checks configured` |
+| `ci` | `N/N pass @ <sha>` \| `N/M pass @ <sha> — pending: <names>` \| `N/M pass @ <sha> — FAILING: <names>` \| `no checks configured`. **The sha is required** — see below |
 | `threads` | `N unresolved` |
 | `risk-paths` | `none` \| the risk-gated paths this PR touches |
 | `amendments` | `none` \| `Cn: <old> → <new>` |
@@ -84,6 +84,14 @@ guess — and this block is machine-readable, so a guess is one a driver can act
 `pending` is **also** the verdict when CI hasn't settled. Nothing is wrong in that case and no human
 is needed, so `human-merge-required` would be a lie in the other direction; the work simply isn't
 gradeable yet.
+
+**`ci` carries the sha it was graded on, because a CI result is a claim about a commit and the block
+outlives the commit.** A run verified `2/2 pass`, then force-pushed amended session docs, and
+published `ci: 2/2 pass · verdict: eligible-for-auto-merge` against a head whose `lint-and-test` was
+`pending`. With the sha present, that is mechanically detectable — a reader compares it to
+`gh pr view <n> --json headRefOid` and knows the row is stale. Without it, the row reads as current
+forever. Same shape as `clean` vs `clean-by-substitute`: the value alone could not express what it
+was actually describing.
 
 `ci` and `project-gates` are separate rows on purpose, and `project-gates` alone is why they had to
 be. A run reached `eligible-for-auto-merge` on a PR whose `lint-and-test` was still `pending`,

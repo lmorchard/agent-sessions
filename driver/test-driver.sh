@@ -163,6 +163,31 @@ check "tier heading naming neither -> unparsed"            "unparsed"     "$(tie
 check "no marker -> not a candidate at all"                ""             "$(tier_of "## Tier: \`auto-ok\`
 No marker here.")"
 
+# --- a CI row graded on a stale commit must void the verdict ----------------
+
+echo "ci-stale: a gate ci row is a claim about a commit"
+
+# Mirrors the driver's extraction + comparison exactly.
+ci_sha_of() { printf '%s\n' "$1" | gate_field ci | sed -n 's/.*@[[:space:]]*\([0-9a-f]\{7,\}\).*/\1/p'; }
+is_stale() { # $1 = ci row value, $2 = current head
+  local cisha; cisha="$(ci_sha_of "ci: $1")"
+  if [ -n "$cisha" ] && [ "${2#"$cisha"}" = "$2" ]; then printf 'stale\n'; else printf 'current\n'; fi
+}
+
+check "sha matching the head is current"      "current" "$(is_stale "2/2 pass @ e8f0338" "e8f03389abcdef")"
+check "sha not matching the head is stale"    "stale"   "$(is_stale "2/2 pass @ 0d08b2d" "e8f03389abcdef")"
+check "no sha recorded -> cannot judge"       "current" "$(is_stale "2/2 pass" "e8f03389abcdef")"
+check "sha with trailing detail still parses" "stale"   "$(is_stale "1/2 pass @ 0d08b2d — pending: lint" "e8f03389abcdef")"
+
+# The real #714 case: graded at 0d08b2d, head force-pushed to e8f03389.
+check "the real #714 stale case"              "stale"   "$(is_stale "2/2 pass @ 0d08b2d" "e8f03389")"
+
+if grep -q "ci-stale" "$DRIVER"; then
+  ok "driver emits a ci-stale outcome"
+else
+  bad "ci-stale outcome" "present in driver" "absent"
+fi
+
 # --- paths survive the cd into the target repo -----------------------------
 
 echo "abspath: relative paths are resolved before the invoke subshell cd's away"
