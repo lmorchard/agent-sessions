@@ -868,6 +868,77 @@ confirming a matching failure. Its first version also false-positived on an `Edi
 inside a *comment* — the same inert-content trap `pr.md` already warns about for tamper rules, in a
 check written minutes after re-reading that warning.
 
+### Move 4b — `intake` on decafclaw #625 (2026-07-27)
+
+Ran `intake` on the web-terminal PTY issue to resolve its withheld decisions.
+[#625](https://github.com/lmorchard/decafclaw/issues/625) now carries three recorded decisions, four
+criteria, four guards, and tier **`needs-review`**. Original author text byte-identical after the
+edit (`diff` verified).
+
+**The withheld-decision path fired for real, and it validated the cut.** #625 carried the marker *and*
+was `needs-review` for three withheld architecture decisions — exactly the case intake's
+"already specified, stop" check would otherwise refuse. The rule for this was **measured away** in
+move 2b as redundant with `acceptance-criteria.md`'s trigger 1; only a pointer explaining the absence
+remains. Navigating it from the tier rules alone worked, which is real-run evidence for a cut that
+previously rested on 5 micro-test reps.
+
+**A deviation, named: no documentarian subagent.** `intake.md` step 2 says dispatch one; the operator's
+standing instruction forbids the Agent tool unless asked. Research was done inline instead, so the
+token-heavy reading landed in the main context rather than an isolated one — the cost the step exists
+to avoid. Worth knowing that the skill has a step an operator policy can disable.
+
+#### Findings
+
+**An import-boundary guard cannot see a capability that arrives as an object.** G3
+(`test_no_agent_side_imports`) forbids `tools/` from importing `terminals.py`. The wiring I first
+recommended — put `app.state.terminal_registry` on `Context` — imports nothing from `terminals.py`, so
+**G3 stays green while the boundary it exists to protect is gone**. `TerminalRegistry` exposes
+`spawn`, `attach`, `write_input`, `detach`, `shutdown_all`: precisely the capabilities the terminal
+widget's own `widget.json` promises the agent lacks.
+
+Resolved with a façade forwarding only `.get`/`.kill` — which needs no change to `close_tab`, since
+that is exactly the two methods it uses — plus a new criterion C4 asserting the façade lacks every
+PTY-access method. **C4 exists to check the thing G3 structurally cannot.** Same shape as the CI/gate
+hole from 4a: a row satisfied by evidence *adjacent* to what it names.
+
+**I recommended the wrong thing and had to correct it mid-interview.** I proposed handing over the
+registry before auditing its method surface, and the operator ratified that recommendation. Caught it
+only when writing the criteria. The lesson is narrow and worth carrying: **when a decision passes an
+object across a trust boundary, enumerate the object's methods before recommending it** — "it's the
+existing pattern" was true and irrelevant, because the precedent (`ctx.request_confirmation`) passes a
+*single callable*, not a capability-rich object.
+
+Deliberately **not** added as a skill rule. It is one instance, and the two rules this project has
+added-then-measured-away were both written from exactly this feeling. Recorded here; if it recurs,
+that is the signal.
+
+**Triage's C1 check was satisfiable without the work — and triage had run it.** The check was
+`assert canvas.new_tab(..., "terminal", ...).ok is False`. It passes vacuously whenever the widget
+registry is uninitialised, returning `ok=False, error='widget registry not initialized'` with no fix
+applied. Triage recorded "printed `True` today" because *its* probe happened to have the registry
+loaded.
+
+The generalisable part is new: **a check whose outcome depends on unstated test-environment setup is
+not freezable**, because the same command answers differently in different harness states. Running the
+check is not sufficient if the run's preconditions aren't part of the check. This is an *instance* of
+gameability test 3 rather than a new rule, so it goes here and not in the skill. C1 now requires the
+registry be loaded *and* the rejection **reason** asserted.
+
+**C4 needed to be conjunctive for the same reason.** Asserting only that the façade lacks `attach`,
+`spawn`, `write_input` is satisfiable by never building the façade at all — `hasattr(None, "attach")`
+is `False`. It now asserts existence *and* absence.
+
+**Tier is `needs-review` by trigger 2, and was not downgraded.** All four criteria reduce to concrete
+tests and all four were demonstrated failing, so trigger 1 no longer fires — but the diff governs what
+agent-side code may do to human-only PTYs. `acceptance-criteria.md` is explicit that a perfectly-tested
+authorization change still deserves human eyes, and this intake is the argument for that rule: the
+first proposed wiring would have granted shell access while leaving all three existing guards green.
+
+**Consequence, stated rather than fudged:** #625 was chosen partly to exercise the driver's multi-issue
+`auto-ok` loop. At `needs-review` it cannot — `make dry-run` still reports `eligible: 0`. It will
+exercise multi-phase `execute` (the `needs-review` branch runs to completion, per #649). **The
+auto-ok loop still has no vehicle.**
+
 #### Pending after move 3
 
 - ~~**The CI-vs-gate hole in `pr.md`** — blocking for phase 3.~~ → **closed in move 4a** (above).
