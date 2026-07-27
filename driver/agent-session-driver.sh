@@ -339,6 +339,17 @@ classify_outcome() {
   esac
 }
 
+# A stream can carry MORE THAN ONE result message: a successful one, then a
+# spurious `error_during_execution` with cost 0 and turns 0 (seen on a resumed
+# session). `tail -1` therefore picks the wrong record and reports $0 spent --
+# observed recovering #710, whose real cost was $4.41. Cost is cumulative within
+# a session, so the record with the highest total_cost_usd is the true one.
+pick_result() { # $1 = stream.jsonl path
+  jq -sc '[.[] | select(.type=="result")]
+          | if length == 0 then empty
+            else (max_by(.total_cost_usd // 0)) end' "$1" 2>/dev/null || true
+}
+
 # --- stage: invoke ---------------------------------------------------------
 
 build_prompt() { # $1 = issue url
@@ -435,7 +446,7 @@ run_issue() { # $1 = issue number
 
   # The result message carries the final text, cost and session id.
   local result final cost session
-  result="$(jq -c 'select(.type=="result")' "$raw" 2>/dev/null | tail -1 || true)"
+  result="$(pick_result "$raw")"
   final="$(printf '%s' "$result"  | jq -r '.result // ""' 2>/dev/null || true)"
   cost="$(printf '%s' "$result"   | jq -r '.total_cost_usd // 0' 2>/dev/null || echo 0)"
   session="$(printf '%s' "$result"| jq -r '.session_id // ""' 2>/dev/null || true)"
@@ -594,7 +605,7 @@ if [ -n "$CLASSIFY_ONLY" ]; then
   cost=0; session=""; rc=0; ts="$(date -u +%Y%m%dT%H%M%SZ)"
   if [ -n "$rundir" ] && [ -f "$rundir/stream.jsonl" ]; then
     say "  run dir  $rundir"
-    result="$(jq -c 'select(.type=="result")' "$rundir/stream.jsonl" 2>/dev/null | tail -1 || true)"
+    result="$(pick_result "$rundir/stream.jsonl")"
     cost="$(printf '%s' "$result"    | jq -r '.total_cost_usd // 0' 2>/dev/null || echo 0)"
     session="$(printf '%s' "$result" | jq -r '.session_id // ""' 2>/dev/null || true)"
     ts="$(basename "$rundir" | sed "s/^$n-//")"
