@@ -1073,6 +1073,111 @@ confidence-to-correctness calibration, and measurement is the instrument that ca
   it tested the *driver*, not the *work*.
 - The standing evidence gap: still only three of the skill's rules have measurements behind them.
 
+### Move 5 — the discriminate rule, measured and CUT (2026-07-27)
+
+Session artifacts: [dev-sessions/2026-07-27-1403-measurement/](dev-sessions/2026-07-27-1403-measurement/)
+— `microtest/results.md` is the full account, `microtest/results/` the raw per-rep JSON, and every
+variant is *derived* from the shipped file by `build-variants.py` rather than hand-copied.
+
+**170 reps, 9 arms, 4 fixture versions. `acceptance-criteria.md`'s "### 2. Does it discriminate?"
+is deleted.** The shipped file is now byte-identical to the arm that was measured, not a hand-edit
+resembling it. `SKILL.md` and `intake.md` updated from "three tests" to two.
+
+**The headline: the section is worse than its own absence.** On the action a vacuous check should
+trigger, the file *without* § 2 scored **15/15**; the file as shipped **8/15** (Fisher exact,
+p ≈ 0.006). Re-run with `phases/intake.md` also in context — the strongest available confound,
+since intake step 5 states the discriminate procedure *harder* than § 2 did — the numbers were
+**15/15 vs 8/15 again**, unmoved by a single rep.
+
+**And the failure it exists to prevent does not occur.** `FREEZE-AS-WRITTEN` — freeze a check you
+have just watched pass — was chosen **once in 125** forced-choice reps. The no-guidance control
+never chose it. Models supply "a check that already passes proves nothing" unprompted; that
+sentence was telling them something they already do.
+
+**The single `FREEZE` came from a *variant* of the rule, not from its absence.** Arm M reduced § 2
+to its heading plus "Run the check and confirm it fails on current behavior." — the small,
+safe-looking trim, the one I expected to ship, the one that needs no cross-file edits. It measured
+**worst of all nine arms (2/15)** and is the only arm that ever froze a vacuous check. A bare
+instruction to run the check, stripped of its elaboration, appears to license *"I ran it, it's
+green, done."* **The edit I would have made on judgment was the harmful one**, and only the
+measurement caught it — the same shape as move 4c's guards, one level up: reasoning about wording
+is not evidence about wording.
+
+**Attribution failed and is recorded as failed.** Removing § 2's branch enumeration changes
+nothing (8/15), removing its "record the observed failure" paragraph helps slightly (10/15), and
+removing its near-miss paragraph — the one describing this exact case — *hurts* (6/15). No
+sub-paragraph explains the effect. It belongs to the section as a whole and the mechanism is
+unknown. Three independent lines made it actionable anyway: the prevented failure doesn't happen,
+removal measures best twice, and the grep below.
+
+**3 for 3 on the add-then-measure-away tell.** `grep`ping the skill for the concept first — the
+handoff's mandated check, previously 2 for 2 — found it in **seven** places outside § 2, twice at
+the point of use: `intake.md` step 5 (*"Not 'assert that it does' — show it, with a command you
+actually ran"*) and `triage.md` step 2. Same tell as the goal-ambiguity trigger and the
+withheld-decision exception: *the concept was already reachable elsewhere, and the new rule
+restated it closer to where the failure was noticed.*
+
+**No pointer was left in the skill** explaining the absence, unlike the withheld-decision cut. Two
+reasons: the shipped skill is then byte-identical to the measured arm, and this study's own lesson
+is that text in this file has effects that don't follow from reading it. Provenance lives here.
+
+#### The instrument was wrong twice, and that is half the finding
+
+Both failures were the handoff's own "labels must name actions" rule — read at the start of the
+session and violated anyway:
+
+- **v1** supplied only the green transcript. Under-determined, since "the issue is stale" is a
+  defensible read when the seal forbids going to look. 15/15 chose it.
+- **v2** added a second real transcript proving the symptom persists. **14/15 still chose
+  `CLOSE-AS-STALE`**, several while their own reasoning said the opposite — Tv2-4: *"the 2
+  warnings are still present … This means the behavior the issue asks for has already been
+  implemented."*
+- **v3** gave each label an explicit `Asserts:` clause. This is the round everything is measured
+  on, and it still leaks: Tv3-3 ends *"the oracle cannot discriminate 'done' from 'untouched'"* —
+  verbatim the other label's assertion — and answers `CLOSE-AS-STALE`.
+
+**Sharper than the rule as written: naming an action is necessary and not sufficient.**
+`CLOSE-AS-STALE` names an action perfectly well. What fixed it was making the labels **disjoint on
+evidence** — each stating what choosing it *asserts about the world*, so a correct chain of
+reasoning cannot land on two of them.
+
+The v4 round dropped forced choice entirely (write the criteria section, no labels, rubric
+**pre-registered and committed before any rep ran**). Its primary metric turned out unmeasurable
+by my own construction: the seal says "you cannot run commands", which suppresses "run the check".
+Recorded as a null with the cause named rather than a finding.
+
+#### What is still unmeasured, and why no fixture can fix it
+
+The **procedural** half — does the rule make an agent actually *run* the check? — is untestable
+here: the seal that stops a subagent wandering into this repo's docs to check whether the fixture
+is real is the same seal that stops it running anything. Only a dogfood tests it. The #668 intake
+below is one data point.
+
+#### Side task: `intake` on decafclaw #668 → the loop finally has vehicles
+
+Scoped to items 1 and 3; item 2 split to **#718**. Tier `auto-ok`, original author text
+byte-identical after the edit (verified by substring, not by eye). `make dry-run` now reports
+**`eligible: 2`** — the first time the multi-issue loop has had two real vehicles.
+
+Item 2 was split rather than spec'd because its honest criterion is *"a unit test for the extracted
+helper exists"* — the test-coverage hard case where the deliverable **is** the oracle. The
+alternatives were both proxies the gameability test rejects: a line-count threshold or an
+importability grep are each satisfiable by moving code or shipping a stub. #718 records the real
+numbers too — `vault_write` is **166 lines with 16 `return JSONResponse` statements**, not the
+"~140 lines with six" the issue claimed. Third time an issue's own stated facts were wrong in a way
+a criterion would have inherited.
+
+Both criteria were **demonstrated failing**, not asserted: `grep -c "yaml\.safe_load"` returns 1
+today, and a throwaway vitest reproduction of the in-flight keystroke race failed with
+`expected 'a: 2' to contain 'b: 3'` before being deleted. The three guards were run and confirmed
+passing. G1 is the one that makes C1 non-gameable: the cheapest way to drive C1's grep to zero is
+to delete the validation outright, which turns both existing rejection tests from 400 into 200.
+
+**Same deviation as move 4b, named again:** `intake.md` step 2 says dispatch a documentarian
+subagent; the operator's standing instruction forbids the Agent tool unless asked, so research was
+inline and the token-heavy reading landed in the main context. Twice now — this is a standing
+property of how the skill runs here, not an incident.
+
 ## Resolved (was open)
 
 - Criteria grammar → **EARS + Given-When-Then** (not invented); see `criteria-grammar.md`.
@@ -1086,9 +1191,10 @@ confidence-to-correctness calibration, and measurement is the instrument that ca
   the Ready queue by tier.~~ → **Resolved in move 3.** Built as a host-agnostic script (local
   is host #1, GHA deferred); filters on marker + anchored tier, board column advisory; reads
   the `<!-- agent-session:gate -->` block rather than re-deriving the gate.
-- **Does the discriminate rule need micro-testing?** It was written from a dogfood failure, not
-  tested as *wording*. The intake-side analogue (oracle-must-exist) needed a micro-test to
-  land, so this one plausibly does too.
+- ~~**Does the discriminate rule need micro-testing?**~~ → **Resolved in move 5, and the answer
+  was yes.** 170 reps: the section measured *worse than its own absence* (15/15 vs 8/15, twice),
+  the failure it prevents occurred once in 125 reps, and the concept was already stated seven
+  times elsewhere. Cut. The trim I would have shipped on judgment measured worst of nine arms.
 - **Should the merge gate read GitHub's check runs?** Move 3 showed `eligible-for-auto-merge`
   is reachable with required CI `pending`. Almost certainly yes, via `gh pr checks` — the open
   part is whether a pending check makes the verdict `pending` or `human-merge-required`.
