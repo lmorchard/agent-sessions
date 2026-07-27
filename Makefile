@@ -4,7 +4,7 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help check driver-check driver-test dry-run run skill-readonly
+.PHONY: help check driver-check driver-test dry-run run loop skill-readonly
 
 help:
 	@echo "check            run every check (driver-check + driver-test + skill-readonly)"
@@ -13,6 +13,8 @@ help:
 	@echo "skill-readonly   assert the hosted run cannot write to the skill directory"
 	@echo "dry-run          selection only against $(REPO); no claude invocation"
 	@echo "run              one real unattended run (nothing merges)"
+	@echo "loop             burn down up to 2 eligible issues (nothing merges)"
+	@echo "                 ISSUES=n BUDGET=n override queue depth / per-issue ceiling"
 	@echo ""
 	@echo "  REPO=$(REPO)  REPO_PATH=$(REPO_PATH)  BOARD=$(BOARD)"
 
@@ -55,7 +57,18 @@ skill-readonly:
 dry-run:
 	@bash $(DRIVER) --repo $(REPO) --board $(BOARD) --dry-run
 
+# BUDGET is per issue, not per invocation. $12 is measured too low: real runs have
+# cost $4.41-$11.87, #710 exhausted $12 mid-review-cycle, and the two runs in move 5
+# came in at $11.76 and $11.20. $25 leaves headroom for the re-verification tax.
+BUDGET ?= 25
+ISSUES ?= 1
+
 run:
 	@bash $(DRIVER) --repo $(REPO) --board $(BOARD) \
 	  --skill-dir $(SKILL) --repo-path $(REPO_PATH) \
-	  --max-issues 1
+	  --max-issues $(ISSUES) --max-budget-usd $(BUDGET)
+
+# The multi-issue burndown. Same target as `run` with a bigger queue depth --
+# separate only because it was assembled by hand twice and is worth discovering.
+loop:
+	@$(MAKE) run ISSUES=$(or $(ISSUES_OVERRIDE),2)
