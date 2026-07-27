@@ -1216,6 +1216,37 @@ adjudicable at all is that the criterion prose was independent of the check's me
 C2 nearly destroyed that independence by writing mechanics into the check. State the assertion in
 the check; let the criterion prose carry the scenario.
 
+#### The two-issue loop ran — and broke two more things, both the same shape
+
+`--max-issues 2 --max-budget-usd 25` over **#668** and **#656**. Both reached
+`gate-eligible` — [PR #719](https://github.com/lmorchard/decafclaw/pull/719) and
+[PR #722](https://github.com/lmorchard/decafclaw/pull/722) — at **$11.76 and $11.20**, total
+$22.96. Both would have exhausted the old $12 ceiling; $25 is right.
+
+**But the loop was not clean on the first pass, and saying otherwise would be the fabrication
+this handoff warns about.** #656 was recorded `failed` and parked. Recovered with
+`--classify-only` *after* fixing the driver, which is what that flag is for.
+
+**Defect 1 — a nonzero exit overruled the gate.** #656's stream carried
+`subtype=success` with the complete merge-gate verdict, then a spurious
+`error_during_execution`, and `claude -p` exited 1. The classifier's `rc != 0` branch went
+straight to `failed` **without consulting the PR** — contradicting the comment four lines above
+it: *"The exit code is NOT the oracle … the oracle is the PR's gate block."* That comment only
+ever described the `rc = 0` case. **Move 4c fixed this exact spurious record in the cost field
+and did not carry the fix to the exit code** — the same bug, one field over, six hours later.
+
+**Defect 2 — the CI staleness check was off and said nothing.** It extracted the sha by
+anchoring on a literal `@`. #722's run wrote `ci: 2/2 pass (js-test, lint-and-test) on f42c0f1`
+— correct sha, wrong delimiter — so nothing matched and staleness went **unchecked** on a PR
+about to be called eligible. The sha happened to be current; nothing verified that. Fourth time
+this project has written down *a null must never render as a positive*, and the first time it
+was the **verifier itself** that silently became a no-op rather than a value.
+
+Both now fixed and **mutation-tested** — reverting either makes a named test fail, checked by
+actually reverting them. That discipline paid a dividend: of the two new ci-sha cases, only the
+*stale* one discriminates, because an unparseable sha also yields "current". The obvious test
+would have been the non-discriminating one.
+
 **Deliberately not fixed here.** Disambiguating that line changes *when runs get downgraded*,
 which is a tier-policy call and therefore a human one — and this session already produced one
 worked example of my judgment picking the harmful edit (arm M). It is also a **hard precondition

@@ -100,6 +100,31 @@ mechanics in to make it non-gameable, and traded one failure mode for another. N
 skill as a rule: it is one instance, and the last three rules added on exactly this feeling were
 all measured away.
 
+## The two-issue loop: ran, and was not clean
+
+Both issues reached `gate-eligible` (#668 → PR #719 at $11.76, #656 → PR #722 at $11.20). Both
+would have exhausted the old $12 ceiling.
+
+**#656 was recorded `failed` and parked, and it had actually succeeded.** Its stream carried a
+successful result with the full merge-gate verdict, then a spurious `error_during_execution`, so
+`claude -p` exited 1 — and the driver's `rc != 0` branch declared failure without ever looking at
+the PR, four lines below a comment stating that the exit code is not the oracle. Move 4c fixed
+that same spurious record in the *cost* field and did not carry the fix across to the exit code.
+Fixed, mutation-tested, and #656 recovered with `--classify-only`.
+
+The second defect is the more interesting one: the CI staleness check anchored the sha on a
+literal `@`, and #722's run wrote `on f42c0f1`. Correct sha, wrong delimiter, **check silently
+skipped** on a PR about to be called eligible. Everything downstream looked identical to a
+verified-current row. This is the first time the thing that silently became a no-op was the
+*verifier* rather than a value — previously it was `clean` hiding an absent diff or a truncated
+board read.
+
+**A guard I nearly shipped non-discriminating.** For the sha fix I first wrote the obvious test:
+the #722 string parses and is judged *current* against its real head. It passes with the fix and
+**also passes without it** — an unparseable sha yields "current" too. Only the paired
+judged-*stale* case discriminates. Same trap as move 4c's `Edit(...)`-matches-`NotebookEdit`
+guard, caught this time only because the mutation run is now habit.
+
 ## What the next session should not have to rediscover
 
 - **§ 2 is gone and should stay gone.** Before re-adding anything about discrimination, read
