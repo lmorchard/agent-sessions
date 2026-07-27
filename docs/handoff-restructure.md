@@ -245,19 +245,34 @@ calls, and `eligible-for-auto-merge` is a finding, not an instruction.
 
 > Continuing the `agent-session` skill in this repo (`~/devel/agent-sessions`). Read `CLAUDE.md`,
 > `docs/design.md`, and `docs/handoff-restructure.md` — start with the handoff's **"Corrections to
-> inherit"**, which now has nine entries; four are new this round and two of them reverse things a
-> naive read of the repo would conclude.
+> inherit"**, which now has nine entries. Four are new this round and two of them reverse what a
+> naive read of the repo would conclude: the discriminate rule was deliberately *deleted* from
+> `acceptance-criteria.md` because it measured worse than its own absence, and a nonzero `claude -p`
+> exit does not mean the run failed.
 >
-> The task is **move 6: split `docs/design.md`**, which has grown to ~1300 lines and become a dev
-> diary. The handoff proposes a three-way split into `design.md` / `build-log.md` / `findings.md`
-> and explains why the third file is the one that actually fixes the problem. Treat that shape as a
-> proposal, not a decision. Do it first, while context is fresh, and verify by diffing content
-> inventories rather than by eye — the risk is losing content silently.
+> The task is **move 6: split `docs/design.md`**, which has grown to ~1300 lines and turned into a
+> dev diary. The handoff proposes a three-way split — `design.md` (the design), `build-log.md` (the
+> chronology), `findings.md` (the still-governing lessons) — and argues the third file is the one
+> that actually fixes the problem, because the diary grows when a lesson has nowhere else to live.
+> Treat that shape as a proposal, not a decision. Do it first, while context is fresh, and verify by
+> diffing content inventories rather than by eye; the failure mode is losing content silently.
 >
-> Then **resolve the amendment-policy ambiguity** documented in the handoff: `frozen-checks.md`
-> says to re-run both wordings and call it an amendment if any verdict changes, but not against
-> which tree, and the two readings gave opposite answers on a real run. It is a phase-3 blocker and
-> a tier-policy call, so bring me the options rather than picking one.
+> **Read §2b before you start moving anything.** The forward-looking material is the part most likely
+> to go wrong: chronology is delimited by `### Move N` headings and findings are identifiable, but
+> roadmap items are fragments embedded in prose, and a faithful mechanical split buries them in
+> `build-log.md` where nothing will read them again. Five of about eleven were found stale and
+> reconciled just before the handoff was written, so assume the rot continued — re-verify each
+> surviving item against the repo instead of copying it, and don't trust the handoff's own inventory
+> table either.
+>
+> Then **resolve the amendment-policy ambiguity** in §2: `frozen-checks.md` says to re-run every
+> criterion under both the old and new wording and call it an amendment if any verdict changes, but
+> it never says against which tree — and on a real run this session the two readings gave opposite
+> answers. It is a phase-3 blocker and a tier-policy call, so bring me the options rather than
+> picking one.
+>
+> **Move 7 is briefed in the same doc but not started — don't start it.** It depends on move 6's
+> output.
 >
 > **Nothing merges.** PRs #719 and #722 are both sitting at `eligible-for-auto-merge`; that is a
 > finding the gate reports, not an action to take.
