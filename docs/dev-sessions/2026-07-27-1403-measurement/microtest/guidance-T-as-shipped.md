@@ -37,10 +37,10 @@ condition → observable-response shape that maps to an assertion. Full syntax a
    product-call). Not a failure of the spec; it is the criterion *telling you* the issue belongs
    in `needs-review`.
 
-## Two tests every check must pass
+## Three tests every check must pass
 
 "Machine-checkable" is **necessary but not sufficient** — a green check from a bad oracle is
-worse than no check. Before finalizing any criterion, put its check through both.
+worse than no check. Before finalizing any criterion, put its check through all three.
 
 ### 1. Does its oracle exist?
 
@@ -57,7 +57,22 @@ writes it. "A corpus labeled by relevance" needs someone to *decide* what releva
 building it. Ask: **does authoring this check settle a question the criterion left open?** If
 yes, `needs-review`.
 
-### 2. Can it pass without the work being done?
+### 2. Does it discriminate?
+
+**Run the check and confirm it fails on current behavior.** A check that already passes proves
+nothing — it will still pass if the implementer changes nothing at all. Either the behavior is
+already there (the issue is stale) or the check isn't testing the criterion.
+
+Watch the near-miss: the *command* exists and runs, but can't reproduce the condition the
+criterion is about. A benchmark invocation that omits the config where the problem appears will
+report clean forever. The tell is a criterion phrased "SHALL produce zero X" whose command
+produces zero X today.
+
+Record the observed failure. Evidence from a past run — a table in the issue, a number someone
+remembers — is not a substitute for running it: the repo has moved, and the invocation that
+produced that table may not be the one you wrote down.
+
+### 3. Can it pass without the work being done?
 
 A check can discriminate — fail today, pass tomorrow — and still grade nothing:
 
@@ -89,9 +104,9 @@ Not every check worth running is a criterion:
 - A **guard** says what this work must not *break*. It passes now and must keep passing:
   existing suites, golden/equivalence tests, "the test being exempted still runs."
 
-"The full suite stays green" and "output is byte-identical" can never fail at freeze, so as
-*criteria* they're vacuous — as *guards* they're exactly right. Demoting one isn't a downgrade;
-it's filing it where it works.
+Without this split, test 2 would reject legitimate checks. "The full suite stays green" and
+"output is byte-identical" can never fail at freeze, so as *criteria* they're vacuous — as
+*guards* they're exactly right. Demoting one isn't a downgrade; it's filing it where it works.
 
 **Small cleanup and refactor issues are often one criterion and several guards.** If every check
 you've written passes today, you have a list of guards and no criterion yet — go back and ask
@@ -108,8 +123,8 @@ Guards don't affect the tier; they grade nothing new.
 Not a separate judgment — it falls out of the criteria. **`auto-ok`** when neither trigger below
 fires; **`needs-review`** when either does.
 
-**Trigger 1 — any criterion rests on human judgment**, or fails one of the two tests above (no
-oracle, satisfiable without the work).
+**Trigger 1 — any criterion rests on human judgment**, or fails one of the three tests above (no
+oracle, doesn't discriminate, satisfiable without the work).
 
 This covers the issue that *withholds a decision* its criteria depend on — "remove it, or document
 it?", "decide with data first", an architecture call with no existing wiring point. The useful

@@ -58,9 +58,9 @@ exception, and needs no rule here: `acceptance-criteria.md`'s trigger 1 already 
    "The test node doesn't exist yet" (`no tests ran`) is **not** a demonstration — that's the same
    output a typo'd name gives, and it would be satisfied by an empty test body.
 
-   Then apply the three tests in `acceptance-criteria.md` (oracle exists / discriminates / not
-   satisfiable without the work). A criterion that fails any of them is `needs-review`, not
-   `auto-ok` — building a missing oracle can be its own `auto-ok` prerequisite.
+   Then apply the two tests in `acceptance-criteria.md` (oracle exists / not satisfiable without
+   the work). A criterion that fails either is `needs-review`, not `auto-ok` — building a missing
+   oracle can be its own `auto-ok` prerequisite.
 
 6. **Sort criteria from guards.** A check that passes today is a **guard**, not a criterion — file
    it under Regression guards and keep looking for what this work makes newly true. Expect small

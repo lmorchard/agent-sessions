@@ -41,7 +41,7 @@ them only on reaching the relevant step:
 
 | File | What it holds |
 |---|---|
-| `references/acceptance-criteria.md` | The core rules: every criterion names a runnable check; the three tests every check must pass (oracle exists / discriminates / not satisfiable without the work); criteria vs. guards; tier derivation |
+| `references/acceptance-criteria.md` | The core rules: every criterion names a runnable check; the two tests every check must pass (oracle exists / not satisfiable without the work); criteria vs. guards; tier derivation |
 | `references/criteria-grammar.md` | EARS + Given-When-Then syntax reference (patterns, templates, how to pick) |
 | `references/spec-template.md` | Spec skeleton + readiness checklist, gating on verifiability |
 

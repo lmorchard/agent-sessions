@@ -1,3 +1,111 @@
+The `intake` phase you are executing:
+
+# intake
+
+Interview a request into a spec with **verifiable acceptance criteria** and a **tier
+label**, then file (or update) the GitHub issue. This is the human-in-the-loop front end —
+intent capture and criteria judgment are human work; everything downstream trusts what this
+produces.
+
+Reads the shared engine: `references/acceptance-criteria.md`, `references/criteria-grammar.md`,
+`references/spec-template.md`. Dispatches research per `references/documentarian-prompt.md`.
+
+## Two entry modes
+
+Determined by input, like `dev-session` brainstorm's blank-slate/refine split:
+
+- **New request** (a prompt, or an empty/sketch issue) → develop a spec from scratch.
+- **Existing issue** (URL given, issue has a body but no `<!-- agent-session:spec -->`
+  marker, or is under-specified) → *augment* it: read what's there, keep the author's
+  intent, backfill the missing criteria + tier. This is the mode `triage` drives per issue.
+
+If the issue already carries the marker, it's already specified — confirm it still holds
+and stop; don't re-interview. (An issue that went `needs-review` for a *withheld decision* is the
+exception, and needs no rule here: `acceptance-criteria.md`'s trigger 1 already names that case, and
+5/5 control reps navigated it from the tier rules alone — see the micro-test in `docs/design.md`.)
+
+## Process
+
+1. **Read the source thoroughly** (prompt or issue body).
+
+2. **Codebase research substep** (skip only for changes so localized context is obvious).
+   Dispatch a documentarian subagent (`Explore`/`general-purpose`) framed per
+   `references/documentarian-prompt.md` (describe what exists, cite `file:line`, answer only
+   what's asked). Ask 3–5 *neutral* questions about how the relevant area works today —
+   **including, for each thing the requirement will need to check, whether that oracle
+   exists today** (the metric / test / harness / way to reproduce the scenario). This
+   grounds step 4's criteria in reality and its tier in what's actually checkable, and keeps
+   the token-heavy reading in the subagent's context, not here.
+
+3. **Interview — clarify / probe / finish, one question at a time.** Ground every question
+   in the research. **Propose your best answer with its trade-off; ask to confirm or
+   adjust** — never open-ended when you have a recommendation. Multiple-choice preferred.
+   Keep proportional to complexity (2–4 questions for small issues).
+
+4. **Reduce each requirement to a verifiable criterion** per `acceptance-criteria.md`. This
+   is the load-bearing step and the interview's real job: for each thing the user wants,
+   **propose the criterion in EARS/Given-When-Then AND propose its runnable check**, then
+   have them ratify. When a criterion won't reduce to a concrete test, walk the escalation
+   ladder aloud (property? else human-judgment?) so the user sees *why* it lands where it
+   does. The standing follow-up whenever an answer stays vague: *"how would we actually
+   know — what command or test proves that?"*
+
+5. **Demonstrate that each criterion's condition fails today.** Not "assert that it does" — show
+   it, with a command you actually ran, and record the output.
+
+   **You are proving the behavior is absent, not running the final acceptance test.** That test
+   often doesn't exist yet, and by design it isn't written until `plan`'s freeze phase — so use
+   whatever runnable means demonstrates the gap *now*: a throwaway reproduction script, the
+   output of an existing test, a `grep -c` with the wrong count, a one-line interpreter call.
+   "The test node doesn't exist yet" (`no tests ran`) is **not** a demonstration — that's the same
+   output a typo'd name gives, and it would be satisfied by an empty test body.
+
+   Then apply the three tests in `acceptance-criteria.md` (oracle exists / discriminates / not
+   satisfiable without the work). A criterion that fails any of them is `needs-review`, not
+   `auto-ok` — building a missing oracle can be its own `auto-ok` prerequisite.
+
+6. **Sort criteria from guards.** A check that passes today is a **guard**, not a criterion — file
+   it under Regression guards and keep looking for what this work makes newly true. Expect small
+   cleanup and refactor issues to land as one criterion plus several guards; if *everything*
+   passes today, you have no criteria yet. Run the guards too and confirm they pass now — one that
+   already fails is a pre-existing break worth naming before anyone implements against it.
+
+7. **Derive the tier** (`auto-ok` / `needs-review`) mechanically from the criteria + risk
+   paths. State it and its reason; don't editorialize it upward or downward.
+
+8. **Record the decisions the interview settled** in the spec's **Design decisions** section —
+   each as decision / why / what was rejected. Any answer that changed which criteria apply is a
+   decision, not a detail: the criteria below it are unreadable without it, and the next context
+   (or the next `express` run) has no other way to learn why the obvious alternative was passed
+   over. On the augment path this section goes into the **issue body** too. A decision recorded
+   only in an issue *comment* is invisible to every downstream mode — they read the body through
+   the marker and never read comments — so a comment is for provenance, never for the constraint.
+
+9. **Write the spec** to the `spec-template.md` structure. Run the **readiness checklist**.
+   Fix failures inline. Show the user the spec (goal, criteria+checks, tier, what-we're-NOT-
+   doing) and get confirmation before filing.
+
+10. **File or update the issue.**
+   - *New:* `gh issue create` with body = `<!-- agent-session:spec -->` + spec; title from
+     the Goal (<70 chars); apply the tier label (`--label`); add to the board's Ready
+     column if configured.
+   - *Existing (augment):* `gh issue edit <n>` — prepend the marker, replace/append the
+     spec sections, apply the tier label. **Preserve the original author's text**; augment,
+     don't overwrite intent.
+
+11. **Report** the issue URL, the tier + reason, and the resume command.
+
+## Escalation — stop and surface when
+
+- A criterion the user insists on genuinely can't be made checkable → fine, but it forces
+  `needs-review`; say so plainly rather than fudging a weak check to keep `auto-ok`.
+- Research reveals the framing is wrong → re-anchor before writing criteria.
+- The spec is really two specs → offer to split; each gets its own issue.
+
+---
+
+The rules it reads for acceptance criteria:
+
 # Acceptance criteria — the shared requirements engine
 
 Read by `intake` and `triage`. The rules that turn a vague "desired end state" into criteria a
@@ -37,10 +145,10 @@ condition → observable-response shape that maps to an assertion. Full syntax a
    product-call). Not a failure of the spec; it is the criterion *telling you* the issue belongs
    in `needs-review`.
 
-## Two tests every check must pass
+## Three tests every check must pass
 
 "Machine-checkable" is **necessary but not sufficient** — a green check from a bad oracle is
-worse than no check. Before finalizing any criterion, put its check through both.
+worse than no check. Before finalizing any criterion, put its check through all three.
 
 ### 1. Does its oracle exist?
 
@@ -57,7 +165,22 @@ writes it. "A corpus labeled by relevance" needs someone to *decide* what releva
 building it. Ask: **does authoring this check settle a question the criterion left open?** If
 yes, `needs-review`.
 
-### 2. Can it pass without the work being done?
+### 2. Does it discriminate?
+
+**Run the check and confirm it fails on current behavior.** A check that already passes proves
+nothing — it will still pass if the implementer changes nothing at all. Either the behavior is
+already there (the issue is stale) or the check isn't testing the criterion.
+
+Watch the near-miss: the *command* exists and runs, but can't reproduce the condition the
+criterion is about. A benchmark invocation that omits the config where the problem appears will
+report clean forever. The tell is a criterion phrased "SHALL produce zero X" whose command
+produces zero X today.
+
+Record the observed failure. Evidence from a past run — a table in the issue, a number someone
+remembers — is not a substitute for running it: the repo has moved, and the invocation that
+produced that table may not be the one you wrote down.
+
+### 3. Can it pass without the work being done?
 
 A check can discriminate — fail today, pass tomorrow — and still grade nothing:
 
@@ -89,9 +212,9 @@ Not every check worth running is a criterion:
 - A **guard** says what this work must not *break*. It passes now and must keep passing:
   existing suites, golden/equivalence tests, "the test being exempted still runs."
 
-"The full suite stays green" and "output is byte-identical" can never fail at freeze, so as
-*criteria* they're vacuous — as *guards* they're exactly right. Demoting one isn't a downgrade;
-it's filing it where it works.
+Without this split, test 2 would reject legitimate checks. "The full suite stays green" and
+"output is byte-identical" can never fail at freeze, so as *criteria* they're vacuous — as
+*guards* they're exactly right. Demoting one isn't a downgrade; it's filing it where it works.
 
 **Small cleanup and refactor issues are often one criterion and several guards.** If every check
 you've written passes today, you have a list of guards and no criterion yet — go back and ask
@@ -108,8 +231,8 @@ Guards don't affect the tier; they grade nothing new.
 Not a separate judgment — it falls out of the criteria. **`auto-ok`** when neither trigger below
 fires; **`needs-review`** when either does.
 
-**Trigger 1 — any criterion rests on human judgment**, or fails one of the two tests above (no
-oracle, satisfiable without the work).
+**Trigger 1 — any criterion rests on human judgment**, or fails one of the three tests above (no
+oracle, doesn't discriminate, satisfiable without the work).
 
 This covers the issue that *withholds a decision* its criteria depend on — "remove it, or document
 it?", "decide with data first", an architecture call with no existing wiring point. The useful
