@@ -267,7 +267,11 @@ have the driver `exec` from a snapshot copy.
 5. `make dry-run` against this repo/board. Selection only, no invocation.
 6. Extract the gate parser (above). **Hand-run, not driver-run**, until the
    editing-a-running-script hazard is checked.
-7. Reconsider the driver here **only after** the amendment policy (§2) is settled.
+7. Chase leads 1–3 in `prior-art.md`'s **"Leads not yet surveyed"** — all unverified, each paired
+   with a specific unsolved problem here (claim-binding → the defect class; instruction eval →
+   the measurement cost limit; bot-merge policy → phase 3). Verify before relying; the section
+   was written from recall, not fetched.
+8. Reconsider the driver here **only after** the amendment policy (§2) is settled.
 
 ## Method — the instrument rules, updated
 

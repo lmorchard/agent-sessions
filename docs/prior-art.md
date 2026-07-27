@@ -132,7 +132,69 @@ make it machine-checkable — a tier between "concrete test" and "escalate to hu
 Property-Generated Solver: a Tester agent derives properties from the spec, compiles them
 to executable checks, feeds failures back. <https://arxiv.org/abs/2506.18315>
 
+## Leads not yet surveyed (added 2026-07-27, move 5) — ALL UNVERIFIED
+
+Everything above was surveyed when this project was a **skill**. It has since grown a harness, a
+machine-readable merge gate, and a measurement practice, and those have prior art nobody went
+looking for. Each lead below is paired with the **specific unsolved problem** it might answer —
+that pairing is the only reason to chase any of them.
+
+**None of this was fetched.** It is model recall at the end of a long session, in a repo whose
+central lesson is that confident recall is unreliable. The root URLs are high-confidence; the
+*claims about what they contain* are exactly where to expect error. Treat these as search terms,
+not findings.
+
+### 1. Claim-binding — the recurring defect class already has a literature
+**in-toto** <https://in-toto.io/> · **SLSA** <https://slsa.dev/>
+
+Supply-chain attestation formats exist to make a claim *bound to the digest of the thing it
+describes*, on the theory that an unbound claim is merely a nearby assertion. **That is the
+eight-instance defect class** — `tamper: clean` hiding an absent diff, `ci: 2/2 pass` describing a
+commit that no longer ships. `ci: … @ <sha>` is a hand-rolled mini-attestation, and
+"make the value carry what it describes" was independently rediscovered here.
+
+*Chase first:* whether the `agent-session:gate` block should **be** an attestation rather than
+resemble one, and whether their threat model already enumerates the substitution/staleness
+failures this project keeps finding one run at a time. Highest-value lead of the four.
+
+### 2. Instruction evaluation — the measurement cost limit
+**DSPy** <https://github.com/stanfordnlp/dspy> · **promptfoo** <https://promptfoo.dev/>
+
+Move 5 cost ~$50 and half a session to ablate **one** section of instruction text, hand-rolled
+from `claude -p` + `jq` + bash. About six of the skill's rules remain unmeasured, and that price
+is the standing reason they may stay that way. DSPy's premise — treat prompt text as parameters
+optimised against a metric rather than prose to be argued about — is the automated form of what
+move 5 did by hand; eval harnesses like promptfoo target the run-N-variants-and-compare loop
+directly.
+
+*Chase first:* whether either can drive a **control-vs-treatment ablation with per-rep outputs
+readable by hand**, since reading every rep is where all of move 5's value came from — a harness
+that only reports aggregate scores would have concluded the opposite of the truth.
+
+### 3. Change classification and bot-merge policy — phase 3
+**ITIL "standard change"** (no single canonical URL) · **Renovate** <https://docs.renovatebot.com/>
+
+`auto-ok` / `needs-review` is structurally the decades-old **standard vs. normal change**
+distinction: a standard change is pre-approved because it is low-risk, repeatable and
+well-understood, and bypasses the review board *by policy*. Separately, Renovate and Dependabot
+are the shipping, narrow, **successful** version of unattended PR generation with conditional
+auto-merge — they have a real policy language for "when may a bot merge?"
+
+*Chase first:* Renovate's automerge configuration surface. Phase 3 has now receded three times and
+its gate list grows by roughly one per session; someone has already had to design this decision
+surface for a constrained domain, and the shape of what they chose to make configurable is the
+useful part.
+
+### 4. Mutation testing — a name for a practice already in use
+**PIT** <https://pitest.org/> · **Stryker** <https://stryker-mutator.io/>
+
+*"Mutate the thing the guard guards and watch it fail"* — arrived at here after three guards
+shipped unable to fail — is test adequacy via mutation, and it has tooling and vocabulary. Lowest
+value of the four, because the practice is already habitual; worth it only for the vocabulary and
+for whatever the literature says about **where mutation testing misleads**.
+
 ## Unverified flags (confirm before relying)
+**The entire "Leads not yet surveyed" section above** — recalled, never fetched.
 OpenHands SWE-bench % and MAX_ITERATIONS default; all Devin/Sweep/Zencoder/Factory
 capability claims; the autonomy-research percentage findings (~80% safeguarded / ~73%
 human-in-loop / ~0.8% irreversible); Tessl beta status; any pricing/version/date. The two
