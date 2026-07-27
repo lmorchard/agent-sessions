@@ -937,7 +937,8 @@ first proposed wiring would have granted shell access while leaving all three ex
 **Consequence, stated rather than fudged:** #625 was chosen partly to exercise the driver's multi-issue
 `auto-ok` loop. At `needs-review` it cannot — `make dry-run` still reports `eligible: 0`. It will
 exercise multi-phase `execute` (the `needs-review` branch runs to completion, per #649). **The
-auto-ok loop still has no vehicle.**
+auto-ok loop still has no vehicle.** *(Resolved in move 5: `intake` on #668 produced the second
+`auto-ok` issue, and the loop ran over #668 + #656.)*
 
 ### Move 4c — the multi-issue loop, and four things it broke (2026-07-27)
 
@@ -1051,13 +1052,14 @@ confidence-to-correctness calibration, and measurement is the instrument that ca
 #### Pending after move 3
 
 - ~~**The CI-vs-gate hole in `pr.md`** — blocking for phase 3.~~ → **closed in move 4a** (above).
-- **Queue depth.** `make dry-run` reports `eligible: 0`, so the driver has **never run more than one
-  issue** — the loop, cross-issue cost accumulation, and the between-issue stop conditions are all
-  untested. Same input unblocks a real multi-phase `execute` run. Needs an `intake` pass on something
-  substantial, plus decisions on #625 / #566.
-- **Running the project gates dirties decafclaw's tree.** `make install-js` — a `make check`
-  dependency — rewrites `src/decafclaw/web/static/package-lock.json` every time. Reproduced from a
-  clean tree. Two consequences for the skill: the tamper check's *"no collateral edits"* substitute
+- ~~**Queue depth.**~~ → **closed in move 5.** The loop, cross-issue cost accumulation and the
+  between-issue stop conditions have all now run (4c exercised the transition and the
+  budget-exhausted stop; move 5 ran two issues to two real verdicts). What remains of this entry is
+  narrower: a decision on **#566**, and a real multi-phase `execute` run — for which the vehicle now
+  exists (#625, specced in 4b) but has never been driven.
+- ~~**Running the project gates dirties decafclaw's tree.**~~ → **closed by decafclaw #717**
+  (`npm ci`, see move 4c). Kept for the reasoning, which still generalises: `make install-js` — a
+  `make check` dependency — rewrote `src/decafclaw/web/static/package-lock.json` every time. Two consequences for the skill: the tamper check's *"no collateral edits"* substitute
   would read that lockfile as a collateral edit, and `pr.md` step 4's `git diff origin/main..HEAD`
   runs against a tree the gates themselves modified. The #585 run survived it, so the exposure isn't
   understood yet — worth establishing before an unwatched host runs the gates and then judges the
@@ -1071,7 +1073,9 @@ confidence-to-correctness calibration, and measurement is the instrument that ca
   staleness policy for continuing against a moved `main`, and there is no evidence for one yet.
 - A larger `intake` vehicle so multi-phase `execute` gets a real run — #585 was a 4-line deletion, so
   it tested the *driver*, not the *work*.
-- The standing evidence gap: still only three of the skill's rules have measurements behind them.
+- The standing evidence gap, **updated by move 5**: four of the skill's rules have now been
+  measured, and the fourth measurement **deleted** the rule. The ratio improves either by measuring
+  or by cutting; move 5 did both at once.
 
 ### Move 5 — the discriminate rule, measured and CUT (2026-07-27)
 
@@ -1271,9 +1275,11 @@ nothing was lost.
   was yes.** 170 reps: the section measured *worse than its own absence* (15/15 vs 8/15, twice),
   the failure it prevents occurred once in 125 reps, and the concept was already stated seven
   times elsewhere. Cut. The trim I would have shipped on judgment measured worst of nine arms.
-- **Should the merge gate read GitHub's check runs?** Move 3 showed `eligible-for-auto-merge`
-  is reachable with required CI `pending`. Almost certainly yes, via `gh pr checks` — the open
-  part is whether a pending check makes the verdict `pending` or `human-merge-required`.
+- ~~**Should the merge gate read GitHub's check runs?**~~ → **Resolved in move 4a: yes, via
+  `gh pr checks`, reading `bucket` and never `state`.** The open part — whether a pending check
+  makes the verdict `pending` or `human-merge-required` — resolved to **`pending`**: CI is the one
+  transient row, so an unsettled check means the work is not gradeable yet, not that a human is
+  needed. Move 5 then found the row's sha extraction could silently no-op; fixed.
 
 ## Resolved in move 1 (were open)
 
