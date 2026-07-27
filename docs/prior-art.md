@@ -132,6 +132,73 @@ make it machine-checkable — a tier between "concrete test" and "escalate to hu
 Property-Generated Solver: a Tester agent derives properties from the spec, compiles them
 to executable checks, feeds failures back. <https://arxiv.org/abs/2506.18315>
 
+## Complete-system comparison (2026-07-27, move 5) — FETCHED, not recalled
+
+The original survey looked for tools doing *aspects* of this. This pass looked for whole systems.
+**Four were fetched and read** (Spec Kitty, Bernstein, Symphony via InfoQ, Galarza's loop); the
+listicle summaries around them were not trusted, and one turned out wrong — see the caution at the
+end.
+
+### The closest four
+
+**Symphony** (OpenAI, ~May 2026) — <https://github.com/openai/symphony>, a `SPEC.md` standard plus
+an Elixir reference implementation, explicitly *"not positioned as a standalone product."*
+**It self-selects:** *"continuously watches the task board and ensures that every active task has
+an agent running in the loop until it's done. If new work appears, Symphony picks it up."*
+No verifiability tier, no frozen checks; *"once a task is complete, a human is responsible for
+reviewing the output"* — review is **post-hoc**, not a routing decision made in advance.
+
+**Spec Kitty** — <https://github.com/Priivacy-ai/spec-kitty>. Closest **artifact shape** of
+anything found: specs, plans, work packages, acceptance criteria, review state and merge decisions
+all kept in-repo, agents in isolated worktrees, kanban dashboard. Workflow is
+`spec -> plan -> tasks -> next -> review -> accept -> merge`. But `spec-kitty next --agent <agent>
+--mission <slug>` is **operator-invoked** — no self-selection — and the docs do not show criteria
+deriving runnable checks, a verifiability tier, or a frozen-check/independent-verifier split.
+
+**Bernstein** — <https://github.com/sipyourdrink-ltd/bernstein>. The most interesting one, and it
+made the same structural bet this project did: **no model in the coordination loop** (deterministic
+orchestrator, one LLM call then plain Python), per-task git worktrees, parallel runs that replay
+byte-identically. It also ships **signed lineage plus an opt-in HMAC-chained audit log** that
+*"someone who did not run it can check offline, without rerunning it."* That is the attestation
+idea from lead 1 below, **already shipping in this exact domain**.
+Where it differs: its "janitor" verifies **generic gates** — *"tests pass, files exist, lint clean,
+types correct"* — not per-task acceptance criteria fixed in advance. Goals are human-supplied
+(`bernstein -g "fix the failing test"`), not drawn from a tracker.
+
+**Damian Galarza's Linear-driven loop** — <https://www.damiangalarza.com/posts/2026-02-13-linear-agent-loop/>.
+The closest analog to *our board-driver specifically*: takes the highest-priority Todo, falls back
+to the backlog, implements, spawns **separate reviewer subagents** that *"evaluate the diff against
+the issue requirements"*, opens a PR. No tier system. **Does not merge** — *"I still review every
+pull request before merging."*
+**Steal his failure modes, both of which we will hit:** stale PRs accumulating merge conflicts as
+features land (our re-verification tax, independently rediscovered), and difficulty applying human
+feedback. His fix is a `bin/pr_check` that **prioritises PRs needing revision before starting new
+work** — a queue policy our driver does not have and probably needs.
+
+### What this does to the four stated differentiators
+
+- **#1 verifiability as the routing function** — still looks **unclaimed**. Nothing found makes
+  "can every criterion be mechanically checked?" the gate deciding autonomous vs. human. Symphony,
+  Spec Kitty and Galarza all review *after* the fact; Bernstein verifies generically.
+- **#2 criteria rejected without a runnable oracle** — still looks unclaimed.
+- **#3 autonomous board consumption** — **NO LONGER TRUE AS WRITTEN.** The survey said *"no
+  shipping tool self-selects work off a backlog."* Symphony does, and hobbyist Claude Code loops do
+  too. **Narrow the claim** to: board consumption *gated by a verifiability tier decided at intake*.
+- **#4 the two halves as one closed system** — still the honest differentiator, now the main one.
+
+Also worth correcting an emerging worry: **nobody found auto-merges.** Galarza reviews every PR,
+Spec Kitty's merge is a deliberate step, Symphony ends in human review. Being eight PRs deep with
+nothing merged is **where the field is**, not where this project is behind.
+
+### Caution — the listicles were wrong at least once
+
+Search summaries and SEO round-ups (augmentcode.com and similar) claimed Bernstein *"uses
+spec-driven verification where a living artifact constrains what agents can produce and a verifier
+checks compliance before merge."* **Fetching the repo did not support that** — the janitor is
+generic gates. Not fetched and therefore not repeated here: OpenSpec's star counts and three-phase
+state machine, Composio AO's autonomous PR lifecycle, Kiro's 2026 SMT-solver requirements analysis,
+SpecRoute. Each is a lead, not a fact.
+
 ## Leads not yet surveyed (added 2026-07-27, move 5) — ALL UNVERIFIED
 
 Everything above was surveyed when this project was a **skill**. It has since grown a harness, a
@@ -157,6 +224,10 @@ commit that no longer ships. `ci: … @ <sha>` is a hand-rolled mini-attestation
 *Chase first:* whether the `agent-session:gate` block should **be** an attestation rather than
 resemble one, and whether their threat model already enumerates the substitution/staleness
 failures this project keeps finding one run at a time. Highest-value lead of the four.
+
+*Partially validated already:* **Bernstein** (see the comparison section above) ships signed
+lineage plus an HMAC-chained audit log a reviewer can verify **offline without rerunning it** — the
+attestation idea, in this exact domain, today. Read that before designing anything.
 
 ### 2. Instruction evaluation — the measurement cost limit
 **DSPy** <https://github.com/stanfordnlp/dspy> · **promptfoo** <https://promptfoo.dev/>
