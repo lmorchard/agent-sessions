@@ -19,10 +19,14 @@ Add a section like this to the project's `CLAUDE.md`:
 - **Status field:** `Status` (the single-select field used for column tracking)
 - **Columns:**
   - `ready: Ready`
-  - `in_progress: In Progress`
-  - `in_review: In Review`
+  - `in_progress: In progress`
+  - `in_review: In review`
   - `done: Done`
 ```
+
+*(The example uses the casing GitHub's own templates ship — lowercase `progress`/`review`. An
+earlier version of this file wrote `In Progress` / `In Review` three lines above a warning that real
+boards don't use that casing.)*
 
 The skill reads these as declarative names and resolves the underlying GraphQL IDs at runtime
 — don't hand-write IDs into `CLAUDE.md`, they're noisy and tied to the field schema.
@@ -42,8 +46,35 @@ found.
 
 **Read column names from the board, not from the doc.** `gh project field-list` is authoritative;
 a hand-written doc drifts. Casing matters — a real board's options were `In progress` / `In review`
-where the schema example below reads `In Progress` / `In Review`, and an exact-match transition
+where an earlier schema example read `In Progress` / `In Review`, and an exact-match transition
 would have failed on it.
+
+### What you will actually find — board vocabularies vary, and not subtly
+
+Measured across six real boards under one account:
+
+| Shape | Status options | Seen on |
+|---|---|---|
+| **Template** (GitHub's project templates) | `Backlog` · `Ready` · `In progress` · `In review` · `Done` | the three actively-managed project boards |
+| **Bare default** | `Todo` · `In Progress` · `Done` | older boards, **and every board created by `gh project create`** |
+
+Two consequences:
+
+- **A CLI-created board does not match this skill's transition vocabulary.** `gh project create`
+  applies no template, so a board made that way has no `Ready` and no `In review` — two of the
+  three states the skill moves through. Casing differs on the third (`In Progress` vs
+  `In progress`).
+- **A target column may simply not exist.** That is different from "no board configured," and it
+  needs the same treatment: **say so once** rather than attempting a transition that cannot
+  succeed. A transition to a non-existent option fails or no-ops, and per the rule above, a silent
+  no-op is indistinguishable from working.
+
+So resolve the *option set* before the first transition, not the option you happen to want next —
+and if the board is missing states the run will need, report that at the start rather than
+discovering it at PR-open.
+
+`gh project field-list` does **not** expose option colors or descriptions; those need GraphQL
+(`projectV2.field(name:) { ... on ProjectV2SingleSelectField { options { name color description } } }`).
 
 ## ID resolution (once per session)
 

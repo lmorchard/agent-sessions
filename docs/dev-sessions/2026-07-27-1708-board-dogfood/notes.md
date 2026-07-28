@@ -216,3 +216,49 @@ resolved") paying off in a case it was never tested against.
 **A recursion worth noting, not acting on:** #4 is now the one eligible issue, and driving it would
 require `--repo-path` = this repo — which is exactly the nested configuration #4 exists to warn
 about. The issue is its own first test case.
+
+## Board column vocabulary — renamed to match the convention (2026-07-28)
+
+Les's hypothesis was right and the data sharpened it. Measured across all six boards:
+
+| Shape | Status options | Boards |
+|---|---|---|
+| Template | `Backlog` · `Ready` · `In progress` · `In review` · `Done` | 6 decafclaw, 7 starnet, 8 foxcloud-bidi |
+| Bare default | `Todo` · `In Progress`/`In progress` · `Done` | 4 Fossilizer, 5 Pebbling Club, **9 agent-sessions** |
+
+**So the skill is not idiosyncratic — every actively-managed board already uses the exact five-state
+vocabulary `github-projects.md` transitions through.** Board 9 was the outlier because
+`gh project create` applies no template.
+
+Renamed board 9 to match board 6 byte-for-byte (verified by `diff` of the option lists), including
+colors and descriptions fetched via GraphQL. Then reassigned all nine items: the eight
+`needs-review` issues to `Backlog`, #4 (`auto-ok`) to `Ready`.
+
+**Selection re-verified after the rename:** `eligible: 1`, and the column-disagreement note is now
+gone — it reads `board column: Ready`, because column and tier finally agree. That is the first time
+the advisory-column mechanism has had agreement to report rather than a mismatch.
+
+### Mechanics worth not rediscovering
+
+- `gh project field-list` does **not** expose option colors or descriptions — GraphQL only.
+- **`updateProjectV2Field` replaces the option set wholesale.** It accepts no option IDs, so any
+  option absent from the new list is deleted and every item assigned to it **loses its status**.
+  Renaming is a two-step operation: replace, then reassign, then verify nothing is blank.
+
+All three recorded: the general fact in `references/github-projects.md` (it is useful to any project
+installing the skill, not just this one), the API mechanics in `findings.md`, the board's own
+declaration in `CLAUDE.md`.
+
+### A self-inflicted trap found while documenting
+
+`github-projects.md`'s CLAUDE.md schema example wrote `In Progress` / `In Review` **three lines
+above its own warning** that real boards use lowercase and an exact-match transition would fail. The
+example contradicted the warning. Fixed the example to the casing GitHub's templates actually ship.
+
+### Left as a question rather than a rule
+
+The skill handles *"no board declared"* but not *"board declared, target column absent."* I extended
+the existing **say so once** pattern to cover it rather than inventing a new rule — that pattern is
+already load-bearing in this file, and this project is 3-for-3 on added rules measuring away. The
+deeper question (should the skill create a missing column? map to the nearest? refuse?) is
+behaviour-shaping and belongs on the board, not in an unmeasured paragraph.

@@ -394,6 +394,9 @@ the entries most likely to be silently re-broken.**
 | **`gh pr checks <n> --watch` is the only settle-poll that survives `dontAsk`** — one `gh` invocation covered by the existing allow-rule, one turn instead of one per poll. `sleep` loops, backgrounded shells and the `Monitor` tool are all denied. Validated on a real 11m34s wait. | move 4c |
 | **`gh project item-list` silently truncates at 30.** Pass an explicit `--limit` everywhere *and print the count read*, so truncation is visible rather than inferred from an empty queue. | move 3, 185-item board |
 | **`gh` writes post as the repo owner's account.** A PR shows "review by lmorchard" for the agent's own thread reply, so **any gate row of the form "a human reviewed this" is self-satisfiable** in this setup. | move 2b |
+| **`gh project create` applies no template**, so a CLI-created board gets `Todo` / `In Progress` / `Done` — missing `Ready` and `In review`, two of the three states the skill transitions through, and wrong casing on the third. Template boards get `Backlog` / `Ready` / `In progress` / `In review` / `Done`. Measured across six boards: 3 template, 3 bare. | move 7 |
+| **`gh project field-list` does not expose option colors or descriptions.** Those need GraphQL (`projectV2.field(name:)` → `ProjectV2SingleSelectField.options { name color description }`). | move 7 |
+| **`updateProjectV2Field` replaces the single-select option set wholesale** — it accepts no option IDs, so any option not in the new list is deleted and **every item assigned to it loses its status.** Renaming columns is therefore a two-step operation: replace the option set, then reassign every item. Verify no item is left blank. | move 7, verified on board 9 |
 
 ### Project toolchains
 
