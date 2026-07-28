@@ -57,7 +57,19 @@ to catch it* — and it was found by looking, which is the argument for the swee
 **The fix, every time:** make the row cite a command that is actually run, and make its failure
 mode distinguishable from its success mode.
 
-Instance 8 is the live one — see [design.md's roadmap](design.md#roadmap).
+**Instance 9 is the live one**, and it is the worst of the nine. Verified by running both
+classifiers over one identical gate block (`ci: 2/2 pass @ 0d08b2d`, head `e8f03389abcdef`):
+
+```
+shipped driver  -> ci-stale       "verdict rests on a commit that no longer ships"
+test-file copy  -> gate-eligible  "all gate rows satisfied"
+```
+
+**The suite's classifier calls a stale-CI PR eligible for auto-merge exactly where the shipped
+driver voids it.** So move 5's record that the ci-sha fix was "mutation-tested" does not hold for
+the classifier path — mutating the driver's real regex leaves `driver-test` green, because the
+behavioural assertions run against the test file's own mirror. Under phase 3, "eligible" means
+merge.
 
 ### 2. A null must never render as a positive
 
@@ -120,10 +132,15 @@ A guard is decoration until you mutate the thing it guards and watch it fail.
   yields "current", so the obvious test would have been the non-discriminating one.
 - Two micro-test fixtures in move 1 were discarded as non-discriminating. *"Control passed 5/5" is
   only evidence about wording when the fixture can actually fail.*
-- **Two live `ci-stale` assertions are `grep -q "<string>" "$DRIVER"`** — they pass if the string
-  appears anywhere, including inside a comment. That is the same inert-content trap the
-  `skill-readonly` guard fell into twice, still shipping in `test-driver.sh` (verified
-  2026-07-27). A test that greps its subject for a literal is a spelling check, not a test.
+- **Eight live assertions in `test-driver.sh` are `grep -q "<literal>" "$DRIVER"`** — lines 196,
+  202, 227, 269, 274, 281, 286, 351. Each passes if the string appears anywhere in the driver,
+  including inside a comment. That is the same inert-content trap the `skill-readonly` guard fell
+  into twice, still shipping (verified 2026-07-27). **A test that greps its subject for a literal
+  is a spelling check, not a test.** *(An earlier version of this entry said "two" — it counted
+  only the `ci-stale` pair. Corrected by a triage scanner.)*
+- **`test-driver.sh:20` says "Source the driver's functions without running main."** The file
+  sources nothing; it hand-copies. The comment describes the fix that was never made — the defect
+  class in miniature, inside the file that demonstrates it.
 
 Mutation-testing caught a non-discriminating test in move 5 that review did not.
 
