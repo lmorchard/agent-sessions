@@ -173,3 +173,46 @@ Corrections 3 and 4 are committed. 1, 2 and 5 are issue-body edits, batched into
   `GATE_HEAD_SHA`, no `claude` invocation, no cost.
 - The parking case list is duplicated (driver `:567` and `:685`); a write-side fix must touch both,
   and the recovery path is exactly how #656 got its stale record.
+
+## Step 4 (cont.) — write-back complete
+
+All nine augmented in place: marker + criteria + guards + tier + observed check results, original
+text preserved. **Verified by substring comparison against a pre-edit snapshot, not by eye** — all
+nine byte-identical. Tier labels applied (`auto-ok` / `needs-review`, created for this repo).
+
+### Three reshapes, for actionability over corpus purity
+
+- **#3 → "GHA host for the driver."** Shed its park half. Its trigger-2 tier is *structural and
+  will never clear* (a `.github/workflows/` file is risk-gated by definition), so the issue now
+  says not to spend effort reducing it. Blocked by #1: a GHA host is unwatched by definition.
+- **#5 → absorbs durability**, and now owns `parked.jsonl` entirely. Correctness and durability
+  turn on the same undecided question (*what is a park record, and where does it live?*), so
+  splitting them into adjacent issues would have institutionalised the collision the scanners
+  predicted. One answer — append-an-un-park-record versus derive-from-`runs.jsonl` — collapses it
+  to `auto-ok`.
+- **#4 → rescoped from refuse to warn-with-`--allow-nested-skill-dir`.** Its stated hazard is
+  already covered: the driver builds deny rules from `$SKILL_DIR` unconditionally (`:139`), so a
+  nested skill dir still cannot be written. And an absolute refusal would have foreclosed the
+  drivable-half dogfood, since `SKILL := $(CURDIR)/skills/agent-session` makes driving this repo
+  *the* nested configuration. Residual value is fail-fast on a typo, not prevention.
+
+## Step 5 (re-run) — selection's accept path, the stronger test
+
+```
+eligible: 1
+  ELIGIBLE #4  tier: auto-ok  |  board column: Todo
+    note: board column is 'Todo', not 'Ready' -- not a gate, see spec.md Q2
+  SKIP #1,2,3,5,6,7,8,9  tier: needs-review
+```
+
+**Host-agnosticism now verified on both paths.** The first run only exercised reject-everything;
+this one resolves markers, parses anchored tiers, admits one issue and skips eight — against a
+second repo and a second board, with no code change.
+
+The driver also **surfaced the column mismatch on its own**, correctly as advisory rather than as a
+gate. That is the move-3 decision ("the board column is advisory; disagreements are reported, not
+resolved") paying off in a case it was never tested against.
+
+**A recursion worth noting, not acting on:** #4 is now the one eligible issue, and driving it would
+require `--repo-path` = this repo — which is exactly the nested configuration #4 exists to warn
+about. The issue is its own first test case.
