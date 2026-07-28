@@ -262,3 +262,57 @@ the existing **say so once** pattern to cover it rather than inventing a new rul
 already load-bearing in this file, and this project is 3-for-3 on added rules measuring away. The
 deeper question (should the skill create a missing column? map to the nearest? refuse?) is
 behaviour-shaping and belongs on the board, not in an unmeasured paragraph.
+
+## The decision pass (2026-07-28) — seven decisions, three issues converted
+
+| # | Decision | Effect |
+|---|---|---|
+| **#5** | Derive the park list from `runs.jsonl`; abandon `parked.jsonl` as source of truth | → **`auto-ok`**. Write-side criterion withdrawn; the four stale entries fixed by construction, so trigger 2 ("data migration") never fires |
+| **#6** | Option **(d)** — replay `--classify-only` against a PR whose head moved | → **`auto-ok`**. Free, no invocation. C2/C3 withdrawn to #9; C4 demoted |
+| **#8** | Option **(c)** — carve out read-only `Explore` in operator policy; skill unchanged | **Closed.** No unmeasured skill wording added |
+| **#9** | Parsing **and** classification move; pytest managed by `uv` | Scope settled; trigger-1 leg retired |
+| **#1** | Merge endpoints only (`gh pr merge`, `gh api` PUT/POST to `*/pulls/*/merge`, `curl`) | One of two trigger-1 legs retired |
+| **#2** | Enumeration only; fixes become their own issues | Finite exit condition |
+| **#7** | *Not* unblocked by #8 — needs a separate write-capable grant | Still `Backlog` |
+
+**Queue went from 1 eligible to 3.** `#4`, `#5`, `#6` all `auto-ok` and `Ready`.
+
+### #9's decision has a consequence worth stating plainly
+
+pytest + `uv` means **this repo grows its first Python dependency manifest** (`pyproject.toml`,
+`uv.lock`). Dependency addition is a trigger-2 risk-gated path, so #9's `needs-review` now stands on
+**two independent legs** rather than one — its own hand-run hazard, plus the dependency. Recorded so
+the tier is not later mistaken for over-caution. The invariant that survives is narrower than "no
+third-party imports": **`driver/gate.py` itself must stay stdlib-only** so the driver remains
+portable, while its *tests* may use pytest. `make` stays the operator interface; `uv run pytest`
+becomes a `driver-test` prerequisite rather than a replacement.
+
+### #7's blocker is asymmetric, which #8's decision does not cover
+
+`execute`'s implementers need **write**; its verifier must **not** have it. The verifier's value in
+this project comes precisely from being structurally unable to edit what it grades — dispatched as
+`Explore`, no Edit/Write, which is how it caught its author four times. **A blanket grant would
+quietly remove the property that makes it worth dispatching.** So the grant #7 needs is not "allow
+Agent tool for execute" but a shaped one.
+
+### A live finding, and the mechanism caught me
+
+Appending a revised `## Tier:` heading left **two** conflicting tier headings in #5 and #6. The
+driver did **not** silently honor the first — it returned:
+
+```
+SKIP #5  tier: CONFLICT -- body names both tiers on Tier heading lines; surfacing rather than picking
+```
+
+**That is move 1's "if they disagree, surface the conflict rather than picking one" decision firing
+live for the first time**, and what it caught was my own write-back. The anchored extraction
+(`^##[[:space:]]*Tier[[:space:]]*:`) plus an explicit `conflict` state did exactly what it was
+designed for.
+
+Fixed by demoting the original heading to `## Original tier assessment (superseded …)` — which no
+longer matches the anchor — leaving exactly one `## Tier:` line. Verified: `eligible: 3`.
+
+**The generalisable lesson for the write-back path:** a revised tier must *replace* the heading, not
+append a second one. `intake`/`triage` write-back should say so, since re-tiering after a decision is
+a normal event and the obvious way to do it produces a body the driver refuses to read. That is a
+skill-wording change, so it belongs on the board rather than in an unmeasured edit — candidate #10.

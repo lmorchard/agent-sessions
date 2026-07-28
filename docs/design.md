@@ -473,6 +473,22 @@ Closed, but the *reasoning* is still load-bearing.
   not gradeable yet, not that a human is needed.
 - **Does the discriminate rule need micro-testing?** → yes, and the answer was to **cut the rule**.
   See [findings.md § 4](findings.md#4-add-then-measure-away--3-for-3) before touching this.
+- **Subagent dispatch vs. the operator's Agent-tool policy** → **decided 2026-07-28: carve out
+  read-only `Explore` dispatch in operator policy; the skill is unchanged.** The friction was never
+  skill wording — `intake.md` and `triage.md` describe dispatch correctly and give the right
+  rationale. Teaching the skill a policy-disabled fallback was rejected on this project's own base
+  rate (3 for 3 on added rules measuring away), and measuring whether dispatch is load-bearing was
+  rejected as mispriced against the standing oracle-cost limit. Move 7 step 4 settled it in
+  practice: nine parallel scanners produced real findings with the main context clean.
+  **Write-capable `execute` dispatch is a separate, narrower grant and is NOT covered** — and the
+  grant must be asymmetric, because the verifier's value comes from being structurally unable to
+  edit what it grades. Roadmap item 7 (#625) stays blocked on it.
+- **The amendment trigger's tree** → both trees; see the entry above.
+- **Board column vocabulary** → **read `gh project field-list`, never the doc.** The three actively
+  managed boards use `Backlog / Ready / In progress / In review / Done`, which is what the skill
+  transitions through; `gh project create` applies no template and yields a bare
+  `Todo / In Progress / Done`, missing two of the three states the skill needs. This repo's board
+  was renamed to match. Mechanics in [findings.md](findings.md#gh).
 
 ---
 
