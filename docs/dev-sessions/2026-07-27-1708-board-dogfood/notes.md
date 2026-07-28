@@ -73,3 +73,103 @@ correctly attributed to *no markers* rather than to an empty board — a null re
 
 Worth re-running after triage writes markers back: this run exercised selection's *reject*
 path only. Seeing it actually surface eligible issues is the stronger test.
+
+## Step 4 — `triage`, the second corpus (scan complete, not yet written back)
+
+Nine read-only `Explore` scanners, one per issue, run as the mode specifies. Agent-tool dispatch
+authorized by Les for this fan-out — the first time `triage` step 2 has run as designed rather than
+inline.
+
+### Result: 1 `auto-ok`, 8 `needs-review`
+
+| # | Score | Tier | Load-bearing trigger |
+|---|---|---|---|
+| 1 | under-specified | needs-review | 1 — hook-block fixture has no oracle; block surface withheld |
+| 2 | under-specified | needs-review | 2 (`skills/**`) + 1 |
+| 3 | under-specified | needs-review | 2 (CI config) + 1 |
+| 4 | under-specified | **auto-ok** | none fired |
+| 5 | under-specified | needs-review | 1 — un-park design choice |
+| 6 | intent-unclear | needs-review | 1 — three-way choice |
+| 7 | under-specified | needs-review | 2 (inherited from decafclaw #625) + 1 |
+| 8 | under-specified | needs-review | 1 primary; 2 only on one branch |
+| 9 | under-specified | needs-review | 2 (own hazard: hand-run only) + 1 |
+
+**The heavy skew is the predicted outcome, not a failure.** The brief said to expect it and not to
+fudge against it. Two scanners explicitly declined to manufacture a passing criterion and said so:
+#8 reported that no honest discriminating criterion exists that is not a placement-or-keyword
+proxy, and #4 declined to propose "a test case named X exists in `test-driver.sh`" because that is
+the presence proxy the rulebook rejects.
+
+**Every proposed criterion failed today.** Across nine independent contexts, no scanner proposed a
+criterion that already passes — the same result as the first corpus's 0-of-17, now replicated.
+
+### Step 2's verification — PASSED, and in both directions
+
+The scanners were never told `skills/` is risk-gated. Unprompted:
+
+- **#2 and #8 cited the new `CLAUDE.md` line verbatim** and fired trigger 2 on it.
+- **#3, #4, #5, #6 explicitly checked it and declined to fire**, quoting *"Everything else here is
+  drivable — `driver/`, `docs/`, `Makefile`."*
+
+So the partition works as a mechanism, not as an argument — and the negative direction (correctly
+*not* gating driver work) is the half that would have been easy to get wrong. #4's scanner went
+further and flagged that trigger 2's generic "deploy/infra/CI config" default would arguably catch
+any driver script, noting the project's explicit configuration overrides the default and that the
+ratify pass should make that call knowingly rather than inherit it.
+
+### The headline technical finding, reproduced independently
+
+Scanner #2 ran the shipped classifier and the test file's copy over one identical gate block. I
+reproduced it:
+
+```
+shipped driver  -> ci-stale       "verdict rests on a commit that no longer ships"
+test-file copy  -> gate-eligible  "all gate rows satisfied"
+```
+
+**The suite's classifier calls a stale-CI PR eligible for auto-merge exactly where the shipped
+driver voids it.** Move 5's record that the ci-sha fix was "mutation-tested" therefore does not
+hold for the classifier path. Now in `findings.md` as instance 9, the live one.
+
+### Five errors in text I wrote, caught by the scanners
+
+1. Issue #1 repeated *"`PreToolUse` can hard-block even under `bypassPermissions`"* — traceable to
+   `design.md:104`, from the 2026-07-23 research pass whose own note says several specifics from it
+   could not be verified. **Zero** entries in `findings.md`'s ledger. Phase-3 blocker #1 rests on
+   it, and it is not even load-bearing for the current host (`dontAsk`, not `bypassPermissions`).
+2. Issue #8: *"Touches `skills/`, so needs-review by trigger 2 regardless"* — over-claimed. One of
+   the issue's own three branches needs no skill edit. Tier right, reason wrong.
+3. `findings.md`: "Instance 8 is the live one" — stale within the hour; 8 was closed by the
+   amendment decision.
+4. `findings.md`: "two live `ci-stale` assertions are `grep -q`" — there are **eight**.
+5. Issue #9: "`test-driver.sh` defines 11 helpers" — **15** (12 excluding the harness), inherited
+   from the handoff.
+
+Corrections 3 and 4 are committed. 1, 2 and 5 are issue-body edits, batched into write-back.
+
+### A dependency graph none of the issues knew about
+
+- **#7 is blocked by #8.** `execute`'s implementer subagents and independent verifier are
+  Agent-tool dispatch. For `intake`/`triage` running inline was survivable; here it **collapses
+  implementer and verifier into one context, destroying the only property the run exists to test.**
+  Tonight's authorization was scoped to `triage`.
+- **#3 and #5 collide in `parked.jsonl`.** A naive "port it to a durable store" would make three
+  known-wrong records durable.
+- **#3's GHA half is blocked by #1** — a GHA host is unwatched by definition.
+- **#9 should sequence before or with #2 and #5.** Both need frozen checks that extract the real
+  function rather than mirror it; #9 is the general fix.
+- **#4 conflicts with the drivable-half premise.** `SKILL := $(CURDIR)/skills/agent-session`, so
+  driving this repo *is* the nested configuration #4 refuses. And the deny rules are built from
+  `$SKILL_DIR` regardless of nesting, so the hazard #4 names is already covered by
+  `make skill-readonly`.
+
+### Also surfaced
+
+- **#649 has no row in `runs.jsonl`** (only 585, 656, 668, 710). It was a hand-run dogfood, so it
+  is evidence about the *skill's* `needs-review` branch, not about the *driver* carrying a
+  `needs-review` issue to completion — which remains untested.
+- **#6's scanner proposed an option (d) the issue did not list:** replay `--classify-only` against
+  a PR whose head has moved past its gate's ci sha. Reaches the `ci-stale` branch with a real
+  `GATE_HEAD_SHA`, no `claude` invocation, no cost.
+- The parking case list is duplicated (driver `:567` and `:685`); a write-side fix must touch both,
+  and the recovery path is exactly how #656 got its stale record.
