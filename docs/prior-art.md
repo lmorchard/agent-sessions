@@ -99,10 +99,14 @@ Active academic subfield — our intake half is well-grounded.
 2. **Mechanically-enforced verifiable criteria at intake.** Spec Kit / Kiro / Tessl aspire
    to it; none *reject* a criterion without a runnable oracle. Our readiness gate refusing
    "no criterion without a check" is a real sharpening.
-3. **Autonomous board consumption.** No shipping tool self-selects work off a backlog —
-   all require per-task human assignment (Copilot: human assigns each issue). This is the
-   riskiest, least-explored piece — where our escalation gating matters most, and where
-   we'll do original design.
+3. ~~**Autonomous board consumption.** No shipping tool self-selects work off a backlog —
+   all require per-task human assignment (Copilot: human assigns each issue).~~
+   **FALSE as of 2026-07-27 — corrected, see "Complete-system comparison" below.** OpenAI's
+   **Symphony** watches a task board and picks up new work unprompted, and hobbyist Claude Code
+   loops do the same. **Narrowed claim that survives:** board consumption *gated by a
+   verifiability tier decided at intake* — Symphony and the rest review **after** the fact, so
+   nothing found routes work by whether it can be checked *before* the work starts. Still the
+   riskiest, least-explored piece, and still where our escalation gating matters most.
 4. **The two halves as one closed system.** Interview-agent research and execution-agent
    products exist separately; wiring the intake grill's output (verifiable criteria +
    escalation label) directly into the execution loop's autonomy gate is an end-to-end
