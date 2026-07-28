@@ -20,6 +20,18 @@ conventions + gotchas only.
 - **The reference skill it derives from** is at `~/.claude/skills/dev-session/` (phases +
   references). Adapt from it; don't edit it.
 
+## Project board
+
+<https://github.com/users/lmorchard/projects/9> — the `agent-sessions` backlog. Status column
+options, read from `gh project field-list 9 --owner lmorchard` and authoritative over this line:
+**`Todo` / `In Progress` / `Done`**.
+
+Note these are GitHub's default template names, **not** the `Ready` / `In progress` / `In review`
+vocabulary `references/github-projects.md` describes transitioning through — there is no `Ready`
+and no `In review` here. Selection does not depend on it (the driver gates on marker + anchored
+tier and treats the column as advisory), but a transition to a non-existent column cannot succeed.
+Read the field list; don't assume the schema example.
+
 ## Risk-gated paths (off-limits to unattended work)
 
 `references/acceptance-criteria.md`'s **trigger 2** is project-configurable — it fires on *"anything
