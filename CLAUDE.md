@@ -20,6 +20,25 @@ conventions + gotchas only.
 - **The reference skill it derives from** is at `~/.claude/skills/dev-session/` (phases +
   references). Adapt from it; don't edit it.
 
+## Risk-gated paths (off-limits to unattended work)
+
+`references/acceptance-criteria.md`'s **trigger 2** is project-configurable — it fires on *"anything
+the project's CLAUDE.md marks off-limits."* For this repo that is:
+
+- **`skills/**` — any issue whose work would edit a skill file is `needs-review`**, however cleanly
+  its criteria reduce to runnable checks. The reason is structural, not stylistic: here the
+  implementer's work product *is* the instructions grading it, which is the single failure this
+  whole system exists to prevent. `make skill-readonly` enforces the same boundary for a *hosted*
+  run; this line is its **intake-time counterpart**, and it takes effect without any skill file
+  being touched.
+
+Plus the standing defaults trigger 2 already names: auth/authorization, secrets, data
+migration/deletion, deploy/infra/CI config, dependency changes.
+
+**Everything else here is drivable** — `driver/`, `docs/`, `Makefile`. That partition is the only
+reason this repo can dogfood its own front half at all: skill-wording work routes to a human, and
+driver/doc work does not.
+
 ## Governing principle
 
 **An agent is only as autonomous as its verifier is trustworthy** — and *trustworthy* means
