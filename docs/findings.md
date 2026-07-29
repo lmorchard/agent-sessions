@@ -393,6 +393,7 @@ the entries most likely to be silently re-broken.**
 | **`--required` is a trap on a repo with no required checks:** prints `no required checks reported` and **exits 1**. Grade *all* checks. | move 4a |
 | **`gh pr checks <n> --watch` is the only settle-poll that survives `dontAsk`** — one `gh` invocation covered by the existing allow-rule, one turn instead of one per poll. `sleep` loops, backgrounded shells and the `Monitor` tool are all denied. Validated on a real 11m34s wait. | move 4c |
 | **`gh project item-list` silently truncates at 30.** Pass an explicit `--limit` everywhere *and print the count read*, so truncation is visible rather than inferred from an empty queue. | move 3, 185-item board |
+| **`gh project item-add` is not immediately readable by `item-list`.** The new item's id comes back empty on a read issued right after the add, so a follow-up `item-edit` fails with `Could not resolve to a node with the global id of ''`. Hit twice in a row. Re-read before editing, and **check the id is non-empty rather than interpolating it blind** — an empty id produces a confusing GraphQL error, not a clear one. | move 7, filing #12 and #13 |
 | **`gh` writes post as the repo owner's account.** A PR shows "review by lmorchard" for the agent's own thread reply, so **any gate row of the form "a human reviewed this" is self-satisfiable** in this setup. | move 2b |
 | **`gh project create` applies no template**, so a CLI-created board gets `Todo` / `In Progress` / `Done` — missing `Ready` and `In review`, two of the three states the skill transitions through, and wrong casing on the third. Template boards get `Backlog` / `Ready` / `In progress` / `In review` / `Done`. Measured across six boards: 3 template, 3 bare. | move 7 |
 | **`gh project field-list` does not expose option colors or descriptions.** Those need GraphQL (`projectV2.field(name:)` → `ProjectV2SingleSelectField.options { name color description }`). | move 7 |
@@ -413,6 +414,18 @@ survived it, so **the exposure is not understood** — worth establishing before
 runs the gates and then judges the diff. The skill itself contains no `git add` (verified by grep),
 so it does not carry the specific hazard that bit us: `make check` dirtied the lockfile, a blanket
 `git add -A` swept it up, and it reached decafclaw's `main` before being reverted.
+
+**It happened again, 2026-07-29, to the author of the paragraph above.** A blanket `git add -A`
+while the driver's `express` worktree was present committed `.worktrees/<branch>` as an **embedded
+git repository** on this repo's `main`, and pushed it. Reverted with `git rm --cached`; `.worktrees/`
+is now ignored. Two things worth keeping:
+
+- **The window is created by the tooling.** A driver run leaves a worktree in the repo root, so any
+  `git add -A` during or after a run is exposed. `.gitignore` needed the entry *before* the first
+  run, not after.
+- **Knowing the hazard demonstrably does not prevent it.** This is the second occurrence, both by
+  the same person, the second within an hour of re-reading the note. **`git add -A` in a repo the
+  tooling writes to is the problem, not the operator's memory** — stage explicit paths.
 | **A hard line-wrap inside a code fence misleads readers.** It is what misled Copilot into a wrong review comment on #638. Test commands in their line-wrapped form. | move 2 |
 
 ### Operational figures
