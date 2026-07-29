@@ -37,7 +37,19 @@ by `gh project create`, which applies no template, so it started on the bare `To
 ## Risk-gated paths (off-limits to unattended work)
 
 `references/acceptance-criteria.md`'s **trigger 2** is project-configurable — it fires on *"anything
-the project's CLAUDE.md marks off-limits."* For this repo that is:
+the project's CLAUDE.md marks off-limits."*
+
+**The default is `needs-review`: anything not named drivable below is gated.** This is an allowlist,
+not a denylist, and the direction is the whole point. Decided 2026-07-29 after the partition went
+stale by omission **twice in two days** — once when the classifier moved into `driver/gate.py`, once
+when `scripts/` was created (in the very commit that added the "ask what it just invalidated" section
+below). Under a denylist, a directory nobody has classified reads as *drivable*, so the failure mode
+of forgetting is that unreviewed work runs unattended, and a triage scanner has to guess by analogy.
+Under an allowlist, forgetting is merely inconvenient: new code routes to a human until someone says
+otherwise. **A path this file does not mention is not a question to resolve by analogy — it is
+`needs-review` until listed.**
+
+For this repo, the gated paths worth calling out by name, because the *reason* is what generalizes:
 
 - **`skills/**` — any issue whose work would edit a skill file is `needs-review`**, however cleanly
   its criteria reduce to runnable checks. The reason is structural, not stylistic: here the
@@ -56,9 +68,37 @@ the project's CLAUDE.md marks off-limits."* For this repo that is:
 Plus the standing defaults trigger 2 already names: auth/authorization, secrets, data
 migration/deletion, deploy/infra/CI config, dependency changes.
 
-**The rest of `driver/`, plus `docs/` and `Makefile`, is drivable.** That partition is the only
-reason this repo can dogfood itself at all: skill-wording and oracle work routes to a human,
-orchestration and doc work does not.
+### What "the oracle" means — the narrow reading
+
+Decided 2026-07-29, because the question kept recurring one detector at a time and each answer was
+being re-derived by analogy. **Gated means the code decides whether *this run's own work* is
+acceptable to merge.** That is the outcome classifier and nothing else. A test suite, a lint recipe or
+a doc-rot detector grades the *work*; only `gate.py` grades the *verdict*, and a verdict is what
+converts into an automatic merge under phase 3.
+
+So `scripts/docs_check.py` is **drivable**, and so is a future check-linter, however detector-shaped
+they look.
+
+**The residual risk, named rather than gated away** — because this is the same trade already accepted
+below for the driver's routing. A run that edits `docs/` *and* `scripts/docs_check.py` in one change
+could weaken the detector that would have caught its own doc rot, and `make check` would still be
+green. The broad reading would close that, but it would also sweep in `driver/test-driver.sh`,
+`driver/test_gate.py`, `driver/test-park-state.sh` and the `Makefile` recipes — every one of which is
+listed as drivable directly below, and whose drivability is the only reason this repo can dogfood
+itself. The mitigations are the same ones already relied on: tests that import what ships, `make
+check` in every PR, and a human at the merge gate. Revisit if a run ever actually does it.
+
+### Drivable (the allowlist)
+
+- **`driver/`, except `driver/gate.py`** — orchestration, its bash fixture suites, and its Python
+  tests.
+- **`docs/`** — including `findings.md` and session notes.
+- **`Makefile`**.
+- **`scripts/`** — `docs_check.py` and its tests, per the narrow reading above. Added 2026-07-29; it
+  was unlisted from creation until then, which is what prompted the allowlist.
+
+That partition is the only reason this repo can dogfood itself at all: skill-wording and oracle work
+routes to a human, orchestration and doc work does not.
 
 **What the driver may write to a target repo: issue *metadata*, never issue or PR *content*.**
 Labels and project-board fields are in bounds; issue bodies, comments, PR bodies, reviews and thread
