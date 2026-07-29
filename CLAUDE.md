@@ -63,8 +63,8 @@ orchestration and doc work does not.
 **Residual risk, stated rather than gated away.** `agent-session-driver.sh` still contains the
 outcome *routing* — the parking case lists, the budget reclassification thresholds — and a run could
 in principle edit those to flatter its own record. Path granularity cannot express "this file except
-its classification path," so this is not gated. The mitigations are the 49-assertion fixture suite,
-`make driver-check`, and running watched. Revisit if a run ever touches that routing.
+its classification path," so this is not gated. The mitigations are the fixture suite
+(`make driver-test`), `make driver-check`, and running watched. Revisit if a run ever touches that routing.
 
 ## Governing principle
 
@@ -98,6 +98,41 @@ implementation). Every mode moves a weak-oracle "a human decides" toward a stron
   `auto-ok`; any human-judgment criterion OR risk-gated path → `needs-review`. Risk-gated:
   auth, secrets, data migration/deletion, deploy/infra/CI, dependency changes.
 
+## Documentation: no doc states a fact a command can print
+
+Every documentation defect this project has hit was **a fact derivable from a live source, or prose
+duplicating one.** Never a judgment, never a rule — `findings.md`'s rules are as true as the day they
+were written; its *counts* drifted. So:
+
+- **Cite the command, not the number.** "the fixture suite (`make driver-test`)", not "the
+  `N`-assertion fixture suite" — that exact claim, with a real number in it, sat stale in this file
+  until `docs-check` caught it. *(Written with `N` on purpose: a literal number here would trip the
+  detector, which matches literals and cannot tell a claim from an example. See below.)*
+- **Don't restate a live source in prose.** `design.md`'s roadmap duplicated the board and rotted
+  within two days; prose above a table restated the table and contradicted it within the hour.
+- **When a count *is* the argument, keep it next to its evidence.** `findings.md`'s "nine instances"
+  is the argument (the class is not converging), and the table beneath it makes the count countable.
+  That shape is fine. Prose asserting a count *away* from its table is not.
+- **`make docs-check` enforces the checkable part** — dead links, tables split by prose, and
+  assertion counts that no longer match the suite. It is in `make check`. It found two real defects
+  on its first run, one of which had survived two readings.
+
+A rule here is an exhortation, and this project is **3 for 3** on those measuring away
+([findings.md](docs/findings.md) defect class 4). The detector is the load-bearing half; treat this
+section as its rationale.
+
+## When you change something, ask what it just invalidated
+
+A distinct failure shape, and the audit pass does not catch it: **inherited** stale claims get caught
+by re-verification, but a claim *you* falsify yourself, in the same session, by doing ordinary work,
+has no trigger. This file said all of `driver/` was drivable; four hours later the classifier moved
+into `driver/gate.py`, which made it false, and nobody noticed until it came up for an unrelated
+reason.
+
+So when you move or add something oracle-bearing, check the two lists that describe the partition:
+**Risk-gated paths** above, and `design.md`'s architecture sections. Moving code that grades a run is
+the specific move that invalidates them.
+
 ## Working conventions
 
 - **Skill-authoring discipline** (`superpowers:writing-skills`): this is a workflow/reference
@@ -110,7 +145,13 @@ implementation). Every mode moves a weak-oracle "a human decides" toward a stron
   **preserve the author's text verbatim** (concatenate, don't regenerate).
 - **Verify, don't assume** — this project's recurring theme. Check a claim (grep/run/read)
   before acting on it, including your own memory of the code/docs.
-- Commit per logical step; keep changes small; update `docs/design.md` build-status when
-  state changes; capture findings in Les's journal (`~/Documents/Obsidian/main/journals/`).
+- Commit per logical step; keep changes small; capture findings in Les's journal
+  (`~/Documents/Obsidian/main/journals/`).
+- **Do not hand-maintain a state section.** An earlier version of this line said to update
+  `design.md`'s build-status whenever state changed — and that instruction is what produced a
+  Current-state block three moves stale, still claiming "seven PRs, six merged" when it was eight
+  and all merged. State lives where it cannot rot: the **board** for work items, `runs.jsonl` for
+  per-run provenance, the **README** for the one-paragraph summary. `design.md` carries only what
+  none of those hold.
 - Address the user as **Les**; push back on questionable approaches; smallest reasonable
   changes over cleverness.

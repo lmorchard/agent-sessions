@@ -146,6 +146,10 @@ A guard is decoration until you mutate the thing it guards and watch it fail.
   into twice, still shipping (verified 2026-07-27). **A test that greps its subject for a literal
   is a spelling check, not a test.** *(An earlier version of this entry said "two" — it counted
   only the `ci-stale` pair. Corrected by a triage scanner.)*
+- **`make docs-check`, on its first run, flagged `CLAUDE.md`'s own *example* of a stale count** —
+  it matches a literal and cannot tell a claim from an illustration. Not fixed by teaching it to
+  ignore quoted text, which would open a bypass for a real stale claim in quotes; fixed by writing
+  examples with `N`. **The class reached the detector built to catch rot, on day one** (move 7).
 - **`test-driver.sh:20` says "Source the driver's functions without running main."** The file
   sources nothing; it hand-copies. The comment describes the fix that was never made — the defect
   class in miniature, inside the file that demonstrates it.
@@ -413,7 +417,6 @@ the entries most likely to be silently re-broken.**
 |---|---|
 | **pytest exits 5 on empty collection.** `no tests ran` is a *failed check*, not a pass — a mechanical detector, not an exhortation. It bit twice in one session (a nonexistent file, then a mangled shell loop) and `tail -1` hid it both times. | move 2b |
 | **npm 11 prunes 27 nested optional `@esbuild/*` platform entries that npm 10 records**, so `npm install` rewrites `package-lock.json` deterministically. A *verification* target must not run a command whose job is to mutate — use **`npm ci`**, which cannot write the lockfile and additionally fails when `package.json` and the lockfile disagree. | decafclaw #716 → #717 |
-
 | **A hard line-wrap inside a code fence misleads readers.** It is what misled Copilot into a wrong review comment on #638. Test commands in their line-wrapped form. | move 2 |
 | **Editing a running bash script can silently change what it executes — and it fails *open*.** bash reads a script incrementally, so a **truncate-and-rewrite in place** (`cat >`, Python's `open(w)`) makes the running process continue into replacement text: measured, a script went on to execute two lines that **did not exist when it started**, exiting 0 with no error and no signal. An **atomic replace via rename** (`mv`) is unaffected, because the process keeps its original inode. **Measured for this harness: Claude Code's `Write` and `Edit` both change the inode** (`363717959 → 363717969`, `363717979 → 363718025`), so they are safe. Do not rely on that — the general mitigation is to `exec` from a snapshot copy rather than to know every editor's write strategy. | move 7, verified both directions |
 

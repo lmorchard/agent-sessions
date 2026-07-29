@@ -4,7 +4,7 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help check driver-check driver-test gate-test dry-run run loop run-self dry-run-self skill-readonly
+.PHONY: help check driver-check driver-test gate-test docs-check dry-run run loop run-self dry-run-self skill-readonly
 
 help:
 	@echo "check            run every check (driver-check + driver-test + skill-readonly)"
@@ -12,6 +12,7 @@ help:
 	@echo "driver-test      bash fixture tests (runs gate-test first)"
 	@echo "gate-test        pytest over driver/gate.py -- imports it, never restates it"
 	@echo "skill-readonly   assert the hosted run cannot write to the skill directory"
+	@echo "docs-check       detect doc rot: dead links, split tables, stale counts"
 	@echo "dry-run          selection only against $(REPO); no claude invocation"
 	@echo "run              one real unattended run (nothing merges)"
 	@echo "loop             burn down up to 2 eligible issues (nothing merges)"
@@ -21,7 +22,7 @@ help:
 	@echo ""
 	@echo "  REPO=$(REPO)  REPO_PATH=$(REPO_PATH)  BOARD=$(BOARD)"
 
-check: driver-check driver-test skill-readonly
+check: driver-check driver-test skill-readonly docs-check
 	@echo "all checks passed"
 
 # C1. Kept separate from driver-test so it can be cited as its own check.
@@ -67,6 +68,13 @@ skill-readonly:
 	  echo "FAIL: hardcoded // path in a deny rule; must interpolate SKILL_DIR"; exit 1; \
 	fi; \
 	echo "skill-readonly: driver denies Edit/Write/NotebookEdit on the skill dir"
+
+# Documentation rot is mechanical, so detect it mechanically. Every doc defect this
+# project hit was a fact derivable from a live source, or prose duplicating one --
+# never a judgment. A CLAUDE.md rule saying "don't do that" would be an exhortation,
+# and this project is 3 for 3 on those measuring away. See scripts/docs_check.py.
+docs-check:
+	@python3 scripts/docs_check.py
 
 dry-run:
 	@bash $(DRIVER) --repo $(REPO) --board $(BOARD) --dry-run
