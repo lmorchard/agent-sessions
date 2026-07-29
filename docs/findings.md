@@ -107,8 +107,8 @@ table's own column and not in a sentence above it.)*
 
 ### 3. Brittle absolutes encoding relative invariants
 
-Three instances, all guards. A guard pins a number or a sha; the real invariant is relative;
-upstream moves; the guard trips while the property it protects still holds.
+Four instances, all guards. A guard pins a number, a sha or a literal string; the real invariant is
+relative; the thing it pinned moves; the guard trips while the property it protects still holds.
 
 1. `#638` G1 pinned `3234 passed, 2 skipped`; a rebase made it `3265`. The property — *nothing
    lost, newly skipped, or newly failing* — held.
@@ -116,8 +116,22 @@ upstream moves; the guard trips while the property it protects still holds.
    earned itself twice in one run.
 3. Move 3's G2 pinned a sha where the invariant is *"`main` is only ever fast-forwarded, never
    rewritten."* First one that was ours rather than inherited.
+4. A triage guard on #20 pinned `grep -c 'is drivable' CLAUDE.md` → 1, where the invariant is *"the
+   partition still names a drivable set, still excludes `gate.py`, and now states a default."*
+   Restructuring the section — which was the ratified deliverable — dropped the literal phrase and
+   tripped the guard while every property it existed to protect held.
 
 **Write the invariant, not the reading.**
+
+**Instance 4 carries a lesson the first three do not: a ratified scope change invalidates the
+guards, not just the criteria.** The first three were pinned to something *upstream* moved. This one
+was pinned by the same session that then agreed to reframe the issue's scope from "add one entry" to
+"restructure the section" — and a guard written under the old scope encodes the old scope. Nothing
+prompts you to re-read the guards when the criteria change, which is the same no-trigger shape as
+self-created doc staleness. **When a decision widens or redirects an issue's scope, re-read its
+guards in the same breath as its criteria**, and expect the honest outcome to be *restate the
+invariant*, not *delete the guard* — swapping a failing guard for a passing one is how a suite stops
+meaning anything.
 
 ### 4. Add-then-measure-away — 3 for 3
 
