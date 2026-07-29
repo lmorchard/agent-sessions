@@ -579,3 +579,39 @@ than a reviewer — several of the seven catalogued bad-check instances are dete
 (`grep -q <literal> <file>`; an exit code both branches share; a hardcoded path outside the repo; a
 pinned count where a relative invariant is meant), and mechanical detectors have consistently
 outperformed exhortations in this project.
+
+## PR #10 merged (2026-07-29) — and it locked the door behind itself
+
+Merged by Les; #4 closed as completed. Bash suite **49 → 61 assertions**, 0 failed, `make check`
+green on the merged main.
+
+**The guard now refuses the exact configuration the run that produced it used.** Verified:
+
+| invocation | exit |
+|---|---|
+| `--skill-dir <repo>/skills/agent-session --repo-path <repo>` | **2** — refuses |
+| same, plus `--allow-nested-skill-dir` | 0 |
+
+So every future driver run against this repo needs the flag. `--dry-run` is unaffected, because the
+run correctly placed the check inside the block that `--dry-run`/`--classify-only` skip.
+
+Added **`make run-self`** and **`make dry-run-self`** rather than leaving the flag as something to
+remember. Passing it in a named target is not an erosion of the guard: the guard exists to catch a
+*typo* in `--skill-dir`, and a named target is not a typo. And the nested configuration is safe here
+for two reasons that do not depend on anyone remembering them —
+
+1. `skills/**` and `driver/gate.py` are risk-gated in `CLAUDE.md`, so intake tiers anything touching
+   them `needs-review` and **selection skips it**;
+2. `DENIED_TOOLS` blocks `Edit`/`Write`/`NotebookEdit` on the skill dir **regardless of nesting**.
+
+The residual hazard the guard actually addresses is a mistyped `--skill-dir` silently pointing
+somewhere that makes the deny rules cover paths the run needs. That is unaffected by the target.
+
+**Note the shape of what just happened:** the first driver run against this repo produced a guard that
+makes driving this repo require an explicit opt-in. That is the system correctly making its own
+riskiest configuration deliberate rather than ambient — and it is the first time a run's output has
+constrained how the driver may be invoked.
+
+Still open from that run: **#11's root-path bypass is now shipped on `main`** (`--repo-path /` yields
+pattern `//*`, matching nothing). Reachability is near-nil, and the fix is deliberately gated on
+freezing a check for it first.

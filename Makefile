@@ -4,7 +4,7 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help check driver-check driver-test gate-test dry-run run loop skill-readonly
+.PHONY: help check driver-check driver-test gate-test dry-run run loop run-self dry-run-self skill-readonly
 
 help:
 	@echo "check            run every check (driver-check + driver-test + skill-readonly)"
@@ -15,6 +15,8 @@ help:
 	@echo "dry-run          selection only against $(REPO); no claude invocation"
 	@echo "run              one real unattended run (nothing merges)"
 	@echo "loop             burn down up to 2 eligible issues (nothing merges)"
+	@echo "run-self         drive THIS repo (needs --allow-nested-skill-dir; ISSUE=n to pin)"
+	@echo "dry-run-self     selection only against this repo's own board"
 	@echo "                 ISSUES=n BUDGET=n override queue depth / per-issue ceiling"
 	@echo ""
 	@echo "  REPO=$(REPO)  REPO_PATH=$(REPO_PATH)  BOARD=$(BOARD)"
@@ -84,3 +86,23 @@ run:
 # separate only because it was assembled by hand twice and is worth discovering.
 loop:
 	@$(MAKE) run ISSUES=$(or $(ISSUES_OVERRIDE),2)
+
+# Drive THIS repo. Needs --allow-nested-skill-dir, because $(SKILL) lives inside
+# $(CURDIR) and #10's guard now refuses that configuration by default (exit 2).
+#
+# Passing the flag here is deliberate, not an erosion of the guard: the guard
+# exists to catch a *typo* in --skill-dir, and a named target is not a typo. The
+# nested configuration is safe here for two independent reasons, neither of which
+# depends on remembering anything:
+#   1. skills/** and driver/gate.py are risk-gated in CLAUDE.md, so intake tiers
+#      any issue touching them needs-review and selection skips it;
+#   2. DENIED_TOOLS blocks Edit/Write/NotebookEdit on $(SKILL) regardless of
+#      nesting, so a run could not write the skill even if it were selected.
+# Verified 2026-07-29: without the flag this exits 2; with it, selection runs.
+run-self:
+	@bash $(DRIVER) --repo lmorchard/agent-sessions --board lmorchard/9 \
+	  --skill-dir $(SKILL) --repo-path $(CURDIR) --allow-nested-skill-dir \
+	  --max-issues $(ISSUES) --max-budget-usd $(BUDGET) $(if $(ISSUE),--issue $(ISSUE),)
+
+dry-run-self:
+	@bash $(DRIVER) --repo lmorchard/agent-sessions --board lmorchard/9 --dry-run
