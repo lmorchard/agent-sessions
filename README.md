@@ -136,8 +136,9 @@ Ordered by how likely you are to want it:
   look like.
 - **[docs/prior-art.md](docs/prior-art.md)** — survey of related work, with claims marked
   verified or not.
-- **[docs/build-log.md](docs/build-log.md)** — the chronological account. Provenance; nothing
-  reads it to make a decision.
+- **[docs/build-log.md](docs/build-log.md)** — the chronological account of the first five moves,
+  now closed. Useful for the *incidents behind the rules* in `findings.md`; its state claims have
+  decayed and it says so.
 - **[CLAUDE.md](CLAUDE.md)** — conventions for working in this repo, and which paths are
   off-limits to unattended runs.
 

@@ -1,17 +1,46 @@
-# agent-sessions — build log
+# agent-sessions — build log (moves 1–5, CLOSED)
 
-The chronological account, move by move. **Append-only; nothing reads this file to make a
-decision.** Its job is provenance: what was run, what it cost, what broke, and which PR carries
-the evidence.
+The chronological account of moves 1 through 5. **Closed as of move 6 — do not append to it.**
 
-- The durable lessons extracted from these runs live in **[findings.md](findings.md)** — that is
-  the file to read. Where a move's narrative below states a rule, `findings.md` carries the
-  canonical version with its full instance list.
-- The design the runs were testing lives in **[design.md](design.md)**.
+**Why it's closed, and it was decided by observation rather than by preference:** moves 6 and 7 were
+never written here. Their account went into their session's `notes.md`, over two days, and nothing
+missed it. The file had stopped being written two moves before anyone asked whether it should be.
 
-Entries are frozen as written on the day. Where a later move resolved something an entry left
-open, the resolution is annotated inline or lives in `design.md`'s roadmap — the entry itself is
-not rewritten.
+What replaced it, by job:
+
+| What this file used to carry | Where it lives now |
+|---|---|
+| per-run provenance — issue, outcome, cost, PR | **`.driver-state/runs.jsonl`**, machine-readable, and [design.md](design.md)'s current-state table |
+| a move's narrative account | that session's `notes.md` under [dev-sessions/](dev-sessions/) |
+| decisions and their reasoning | the **issue body** on the board — a decision in a comment is invisible to every downstream mode |
+| durable rules | **[findings.md](findings.md)** |
+
+## What this file is still good for
+
+**The incidents behind the rules.** `findings.md` is deliberately terse — it states a rule and
+counts its instances. When you want to know *why* a rule is shaped the way it is, the story is
+usually here: the tamper rule that fired on comments, the guard that couldn't fail, the gate row
+whose command didn't exist. Read it that way — as the evidence for something stated elsewhere, not
+as a description of the system.
+
+## Do not trust state claims inside it
+
+Entries are frozen as written on the day, so anything time-sensitive has decayed. Specifically
+**do not** carry forward:
+
+- **Counts.** "`make check` = 21 fixture tests" is now 61 bash assertions plus 45 pytest cases.
+  Test totals, line counts and suite sizes are all stale.
+- **"Still unexercised" claims.** The amendment path is described here as never having fired after
+  five runs; it has since fired twice, and the policy governing it is settled — see
+  [design.md](design.md).
+- **Queue and board snapshots.** This project now tracks work on
+  [a board](https://github.com/users/lmorchard/projects/9); any queue state written below is a
+  historical reading.
+- **Pending lists.** These were reconciled during move 6 — four entries turned out already closed
+  and one had lost its referent entirely. [design.md](design.md)'s roadmap is the live list.
+
+For current state read [design.md](design.md); for the rules read [findings.md](findings.md); for
+how to run any of it read [usage.md](usage.md).
 
 ### Move 1 dogfood — starnet #129, stopped at Phase 0 (2026-07-24)
 
