@@ -525,6 +525,18 @@ about mutation-testing a guard that protects a dangerous state.
   already knew what a criterion was, where the earlier eight were ordinary wishlist issues. If that
   is the cause, the conversion rate is a property of the *backlog*, not of `triage`, and neither
   figure generalises to a fresh repo.
+- **Judge a `triage` pass by the eligible count it produced, not by the issues it touched.** "Scanned
+  N, augmented K" is an *activity* report, and it is adjacent to the thing that matters — whether work
+  the loop can pick up now exists. A pass can augment a dozen issues, report truthfully, and leave the
+  eligible count unchanged because everything reduced to `needs-review`. Run the selection path
+  (`make dry-run` / `make dry-run-self`) before and after and compare; **report it even when the answer
+  is zero**, because "augmented eight, eligible still zero" is the honest and useful result and it
+  names its own cause. This is an operator expectation deliberately recorded here rather than as a rule
+  in the skill: the concept is already reachable from four places in `skills/agent-session/`, and this
+  project is 3-for-3 on rules added in that situation measuring away. Two live readings, 2026-07-29:
+  the first pass took eligible 1 → 3; the second took it 3 → 1 and **that drop was the signal** — it
+  exposed a matcher bug ([defect class 1, instance 10](#1-a-row-satisfied-by-evidence-adjacent-to-what-it-names--open-gap))
+  that an activity report would have hidden.
 - **A driver that dies between invoking and classifying leaves no record.** Observed: a run
   completed (98 turns, 19 min, **$9.44**) and opened a PR, then the process was killed before
   classifying — real money spent, a PR open, and an empty `runs.jsonl`. Everything the driver

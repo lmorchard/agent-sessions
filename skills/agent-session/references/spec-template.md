@@ -37,10 +37,17 @@ are not criteria (they can't fail at freeze) and they don't affect the tier. See
 
 - GUARD: [`command`] — [what it protects]. Passes today.
 
-## Tier
+## Tier: auto-ok
 
-[`auto-ok` or `needs-review`, derived per `acceptance-criteria.md` — every criterion
-checkable AND no risk-gated path → auto-ok; else needs-review. State the reason.]
+[Replace `auto-ok` above with `needs-review` if either trigger fires. Derived per
+`acceptance-criteria.md` — every criterion checkable AND no risk-gated path → auto-ok; else
+needs-review. State the reason here, in prose beneath the heading.]
+
+[**The heading format is load-bearing, not style.** It must be `## Tier: ` followed by the literal
+`auto-ok` or `needs-review` **on that same line** — the driver anchors on `^## Tier:` and reads the
+tier token from the heading line only. A bare `## Tier` is unreadable to it; the token in the
+paragraph below is invisible to it; both tier words on the line make it report a conflict. Exactly
+one such heading per body.]
 
 ## Design decisions
 

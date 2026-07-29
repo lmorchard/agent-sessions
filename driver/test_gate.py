@@ -166,6 +166,27 @@ def test_no_marker_is_missing():
     assert gate.tier_of("## Tier: `auto-ok`\nno marker") == "missing"
 
 
+def test_shipped_spec_template_parses_through_the_shipped_parser():
+    """The template the skill tells authors to copy must be readable by the parser.
+
+    It was not: `spec-template.md` shipped a bare `## Tier` heading, which the
+    `^## Tier:` anchor does not match, so `tier_of` returned "missing" for the
+    very shape the skill prescribes. A grep for the heading string would not have
+    caught it -- adding only the colon yields "unparsed", and a
+    `[auto-ok | needs-review]` placeholder yields "conflict". Only routing the
+    shipped artifact through the shipped parser distinguishes those.
+
+    `marker=""` is deliberate: with the default marker this passes on the
+    spec-marker string appearing in the template's *prose*, which is evidence
+    adjacent to what the check names. This asserts the tier anchor alone.
+    """
+    template = (
+        Path(__file__).parent.parent
+        / "skills/agent-session/references/spec-template.md"
+    ).read_text()
+    assert gate.tier_of(template, marker="") in ("auto-ok", "needs-review")
+
+
 # --- budget reclassification ----------------------------------------------
 
 @pytest.mark.parametrize("outcome,cost,budget,expected", [
