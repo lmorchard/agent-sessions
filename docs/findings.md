@@ -221,6 +221,15 @@ body through the marker. **Comments are provenance; the body is the constraint.*
 over a `pyproject.toml` change, which would have touched build/CI config and pulled toward
 `needs-review`. How you propose to do it changes how it must be reviewed.
 
+**A tier is a property of an issue, so an issue carrying several follow-ups takes the worst one.**
+Triage should ask whether the parts share a tier before deriving one. #11 was filed by an unattended
+run as three follow-ups: one had a discriminating criterion and no open question, the other two were
+ungradeable without a foreign host and shared an unresolved design question. Carried as a single
+issue it was `needs-review`; split, the first third is drivable. **The shape recurs by construction** —
+a run filing its own follow-ups groups them by *where it found them* (one review, one freeze), which
+has nothing to do with how they verify. The counter-pressure is real and worth stating: split only to
+the granularity where each piece has its own question, or you ratify the same decision twice.
+
 **When a decision passes an object across a trust boundary, enumerate the object's methods before
 recommending it.** "It's the existing pattern" was true and irrelevant in #625 — the precedent
 passed a *single callable*, not a capability-rich object. Deliberately **not** added as a skill
@@ -456,7 +465,13 @@ is now ignored. Two things worth keeping:
   total $22.96 — both would have exhausted the old $12 ceiling. `make run` now defaults to
   `--max-budget-usd 25` and `make loop` does two issues; the hand-assembled command is obsolete.
 - **A ~1-in-8 triage conversion rate** should govern board-driver expectations. Of 8 issues scanned,
-  3 came out `auto-ok` but only 1 was genuinely ready.
+  3 came out `auto-ok` but only 1 was genuinely ready. **Second data point, 2026-07-29: 3 scanned, 2
+  `auto-ok`, both with a discriminating criterion that was actually run** — a much better rate on a
+  much smaller sample, and the sample is small enough that the first figure should still govern
+  planning. What plausibly differs is the input: these three were written by people (or runs) who
+  already knew what a criterion was, where the earlier eight were ordinary wishlist issues. If that
+  is the cause, the conversion rate is a property of the *backlog*, not of `triage`, and neither
+  figure generalises to a fresh repo.
 - **A driver that dies between invoking and classifying leaves no record.** Observed: a run
   completed (98 turns, 19 min, **$9.44**) and opened a PR, then the process was killed before
   classifying — real money spent, a PR open, and an empty `runs.jsonl`. Everything the driver
