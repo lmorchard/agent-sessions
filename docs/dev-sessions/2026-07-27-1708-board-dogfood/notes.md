@@ -615,3 +615,104 @@ constrained how the driver may be invoked.
 Still open from that run: **#11's root-path bypass is now shipped on `main`** (`--repo-path /` yields
 pattern `//*`, matching nothing). Reachability is near-nil, and the fix is deliberately gated on
 freezing a check for it first.
+
+---
+
+# Retrospective — moves 6 and 7 (2026-07-27 → 07-29)
+
+29 commits. Moves 6 and 7 both complete, plus the amendment-policy decision that had been open
+since move 5.
+
+## The session's dominant pattern: mechanisms caught the author; reasoning did not
+
+Roughly nine times, something mechanical caught an error that confident reasoning had produced:
+
+| What caught it | What it caught |
+|---|---|
+| Triage scanner (#1) | `bypassPermissions` cited as fact in issue #1 — traceable to the research pass that flagged its own unreliability, zero entries in the findings ledger |
+| Triage scanner (#8) | my trigger-2 rationale over-claimed; one of the issue's own branches needs no skill edit |
+| Triage scanner (#2) | "Instance 8 is the live one" — stale **within the hour** |
+| Triage scanner (#2) | "two" `grep -q` assertions → actually **eight** |
+| Triage scanner (#9) | "11 helpers" → actually 15 |
+| Triage scanners (#2, #6) | the driver-vs-copy classifier divergence — the session's most serious defect |
+| A bash assertion | me creating a **second** tier divergence mid-refactor (removing `TIER_JQ` from the test while leaving it in the driver) |
+| The driver's `CONFLICT` state | my write-back appending a second `## Tier:` heading instead of replacing |
+| The amendment policy (1 day old) | my own frozen check C3, written into the inert-content trap |
+
+**And nothing caught the one case where no mechanism existed:** `git add -A` swept the driver's
+worktree onto `main` and pushed it. Second occurrence of that hazard, same person, one screen after
+re-reading the note about the first.
+
+The lesson is not "be more careful." It is that **the catch rate tracks the presence of a mechanism,
+not the presence of care** — and every one of the above was caught by something that could not be
+talked out of its answer.
+
+## A new failure shape worth naming: self-created staleness
+
+`CLAUDE.md` said *"everything else here is drivable — `driver/`, `docs/`, `Makefile`."* True when
+written. Then **I moved the classifier into `driver/gate.py` four hours later**, which made it false,
+and did not notice until reasoning about whether to drive this repo.
+
+This is distinct from the staleness this project already tracks. Inherited stale claims get caught by
+a re-verification pass — that is what move 6's roadmap reconciliation was. **A claim you falsify
+yourself, in the same session, by doing ordinary work, has no such trigger.** The mitigation has to be
+attached to the *change* rather than to a periodic audit: moving oracle-bearing code should prompt
+"what did that invalidate?"
+
+## What is genuinely better than it was
+
+- **`findings.md` exists and earned itself immediately.** It was the reference that caught several of
+  the errors above, and grew ~7 entries during the session.
+- **The prose backlog is gone.** 13 issues on a board, tiered, with criteria and *observed* check
+  results rather than proposed ones.
+- **The worst live defect was found and fixed.** The suite graded a replica that returned
+  `gate-eligible` where the shipped classifier returned `ci-stale`. Under phase 3, "eligible" means
+  merge — so the test suite could not detect a regression in the code that decides mergeability.
+  Now mutation-tested: narrowing the regex breaks 6 pytest cases and 5 bash assertions where it
+  previously broke nothing.
+- **`triage`'s second corpus**: 9 scanners, 1 `auto-ok` / 8 `needs-review`, and **every proposed
+  criterion failed today** — replicating the first corpus's 0-of-17 across nine independent contexts.
+- **Host-agnosticism is verified rather than asserted** — a second repo and board, selection *and*
+  real invocation.
+- **Prior art: 2 of 3 claims refuted.** SLSA does not enumerate our defect class; promptfoo caches by
+  default and would have reported zero variance in a variance study; ITIL supplies the finite,
+  evidence-based exit condition the phase-3 gate list lacks.
+
+## What I would flag as concerning
+
+**1. Three skill edits, none measured, each justified as exempt.** 64 lines added to `skills/` this
+session — the amendment policy, the board-variability section. Each was argued as *mechanical* or
+*disambiguation* rather than behaviour-shaping, and therefore outside the micro-test rule. **That
+argument is itself unmeasured**, and "this one is different" is exactly the rationalisation the
+3-for-3 finding predicts. Recorded because it is the session's largest unflagged risk, not because
+the edits are known bad.
+
+**2. This session's own work bypassed the merge gate.** 29 commits, nearly all pushed straight to
+`main`. Only #4 went through a PR, and only because the driver opened it. **We are building a merge
+gate and did not use it on ourselves.** Flagged once mid-session and then continued anyway, which is
+the more interesting data point.
+
+**3. The evidence gap widened in ratio terms.** Zero new measurements, meaningful new wording. The
+standing limit in `findings.md` is honest about why, but the direction is wrong.
+
+**4. Cost is climbing and the review cycle dominates.** $13.20 for a small guard on the smallest
+repo — above decafclaw's $11.87 ceiling. The diff was cheap; the review round-trip was not.
+
+## State of the project
+
+**Skill:** complete. All four routing paths have real-run evidence. **8 PRs have gone through it and
+all 8 are merged** — every one by Les, by hand, usually within hours. "Nothing merges" is about the
+machine, not the outcome: the loop lands work.
+
+**Driver:** runs against two repos. Multi-issue loop works. Gate parsing and classification now live
+in an importable Python module whose tests import it. 61 bash assertions + 45 pytest, `make check`
+green. Driving this repo requires `--allow-nested-skill-dir` (`make run-self`).
+
+**Board:** project 9. #4 and #8 closed. **#5 and #6 `Ready`** (`auto-ok`). #1, #2, #3, #7, #9
+`needs-review` with criteria. #11, #12, #13 filed but untriaged — #13 exists to make that visible.
+
+**Phase 3:** still gated, now on **two** things (the `PreToolUse` merge-block hook; the
+adjacent-evidence sweep) — down from three since the amendment policy settled. The open decision about
+whether the list should have a finite exit condition now has ITIL's answer available to it.
+
+**Docs:** `design.md` 524 · `build-log.md` 945 · `findings.md` 465 · `prior-art.md` 318.
