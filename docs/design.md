@@ -11,8 +11,11 @@ Two companion files, split out of this one in move 6:
   before writing any flag list or gate row.**
 - **[build-log.md](build-log.md)** — the chronological account of moves 1–5. Provenance only;
   nothing reads it to make a decision.
+- **[usage.md](usage.md)** — the operator's guide: commands, outcomes, run artifacts, recovery.
+  Written for someone running the thing rather than changing it.
 
-[prior-art.md](prior-art.md) has the external survey.
+[prior-art.md](prior-art.md) has the external survey, and [../README.md](../README.md) is the
+plain-language introduction.
 
 ## Origin
 
