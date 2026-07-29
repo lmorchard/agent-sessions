@@ -113,6 +113,9 @@ were written; its *counts* drifted. So:
 - **When a count *is* the argument, keep it next to its evidence.** `findings.md`'s "nine instances"
   is the argument (the class is not converging), and the table beneath it makes the count countable.
   That shape is fine. Prose asserting a count *away* from its table is not.
+- **If you must state a countable fact, date it.** A dated fact stops being wrong and becomes
+  history — *"as of 2026-07-29: eight PRs, all merged"* is honest a year later in a way the bare
+  number is not.
 - **`make docs-check` enforces the checkable part** — dead links, tables split by prose, and
   assertion counts that no longer match the suite. It is in `make check`. It found two real defects
   on its first run, one of which had survived two readings.

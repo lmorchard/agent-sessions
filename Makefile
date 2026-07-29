@@ -10,7 +10,7 @@ help:
 	@echo "check            run every check (driver-check + driver-test + skill-readonly)"
 	@echo "driver-check     assert the driver has no executable merge path"
 	@echo "driver-test      bash fixture tests (runs gate-test first)"
-	@echo "gate-test        pytest over driver/gate.py -- imports it, never restates it"
+	@echo "gate-test        pytest over gate.py + docs_check.py -- imports, never restates"
 	@echo "skill-readonly   assert the hosted run cannot write to the skill directory"
 	@echo "docs-check       detect doc rot: dead links, split tables, stale counts"
 	@echo "dry-run          selection only against $(REPO); no claude invocation"
@@ -46,7 +46,7 @@ driver-test: gate-test
 	@bash driver/test-driver.sh
 
 gate-test:
-	@uv run --quiet pytest driver/test_gate.py
+	@uv run --quiet pytest driver/test_gate.py scripts/test_docs_check.py
 
 # Replaces move 3's `skill-untouched` guard, which pinned skills/ to a snapshot to
 # prove the driver needed no skill edit. That claim is now verified and permanently

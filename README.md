@@ -116,8 +116,8 @@ files a run leaves behind, and how to recover an interrupted one.
 
 ## Status
 
-The skill is complete and has real-run evidence on all of its routing paths. Eight PRs have
-gone through it, all merged. The driver runs, including over multiple issues, against more than
+The skill is complete and has real-run evidence on all of its routing paths. Every PR it has
+produced has been merged — by a human, by hand. The driver runs, including over multiple issues, against more than
 one repository. This project now tracks its own backlog on [its own
 board](https://github.com/users/lmorchard/projects/9), using its own tooling.
 

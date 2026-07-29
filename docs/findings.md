@@ -26,50 +26,52 @@ The dominant defect class, and the one the merge gate exists to prevent. A gate 
 check cites a specific mechanism; something *near* that mechanism supplies the answer; the row
 reports true. Nothing lies, and the row means nothing.
 
-**This is an open, actionable gap — not a retrospective.** Nine instances, and the class is **not
-converging**: they are still being found one unattended run at a time, and move 5 alone produced
-two. Worse, move 5's exit-code defect was *the same bug move 4c had fixed one field over, hours
-earlier* — the fix was applied to the cost field and never generalised to the exit code. Fixing
-instances one at a time is losing to the rate at which they arrive.
+**Every instance below is fixed. The gap is not the instances — it is that nobody has ever
+looked.** Eight of the nine were found by an unattended run stumbling into them; exactly one was
+found by looking. So the number remaining is **unknown**, and phase 3 converts each remaining one
+into an automatic merge.
 
-**The sweep that has never been done:** enumerate every gate row, guard and manifest check, and for
-each one ask *"what could satisfy this that is not the thing it names?"* Instances 1–8 below were
-each found by an unattended run stumbling into it; **none was found by looking.** Until that sweep
-happens, the honest position is that the gate has an unknown number of these left, and phase 3
-turns each remaining one into an automatic merge.
+**The sweep that has never been done:** enumerate every gate row, guard and manifest check, and ask
+of each *"what could satisfy this that is not the thing it names?"* Tracked as
+[board #2](https://github.com/lmorchard/agent-sessions/issues/2).
 
-**Instance 9 is the one to sit with**, because it is the defect class *inside the mechanism meant
-to catch it* — and it was found by looking, which is the argument for the sweep.
+Two things about the *rate* that the fixes-so-far do not settle. Move 5 alone produced two. And move
+5's exit-code defect was **the same bug move 4c had fixed one field over, hours earlier** — the fix
+was applied to the cost field and never generalised. Fixing instances one at a time has been losing
+to the rate at which they arrive.
 
-| # | Instance | Where |
-|---|---|---|
-| 1 | The gate cited `gh pr view <n> --json reviewThreads` — not a valid field. It errors and prints the field list, which reads like "no threads." | move 2 (#586) |
-| 2 | The tamper mechanism is vacuous when criteria are commands rather than test files: nothing to diff, and the `clean` verdict could not be distinguished from *nothing-to-compare*. | move 2 (#586) |
-| 3 | `checks.md` — for command-based criteria, the *entire* oracle — sat outside its own tamper baseline. | move 2 (#586) |
-| 4 | `project-gates` recorded a *local* `make check` and cited no GitHub check runs, so the gate read `eligible-for-auto-merge` while CI was `pending` and `mergeStateStatus` was `UNSTABLE`. | move 3 (#699) |
-| 5 | `gh pr checks --required` on a repo with no required checks: a row built on it either errors or passes vacuously. | move 4a |
-| 6 | Import-boundary guard G3 stays green while the boundary it protects is gone — a capability that arrives as an *object* imports nothing. C4 was added to assert what G3 structurally cannot see. | move 4b (#625) |
-| 7 | Three independent unattended runs reported `project-gates` satisfied **by substitute**, having run `make check`'s four steps natively because `make check` itself was unpassable. | move 4c |
-| 8 | `amendments: none` was true only under one of two readings of the amendment policy. **Closed 2026-07-27** — the policy now names both trees, and under it #668 was an amendment. | move 5 (#668) |
-| 9 | **The driver's test suite tests a replica of the classifier, not the classifier.** `test-driver.sh` hand-copies driver logic — one helper is annotated *"Mirrors the driver's extraction + comparison exactly"* with nothing enforcing that — and it has **already diverged**: `classify_outcome` is 53 lines in the driver and 15 in the copy, with **zero `ci-stale` awareness** in the copy. | verified 2026-07-27 |
+| # | Instance | Where | Status |
+|---|---|---|---|
+| 1 | The gate cited `gh pr view <n> --json reviewThreads` — not a valid field. It errors and prints the field list, which reads like "no threads." | move 2 (#586) | fixed |
+| 2 | The tamper mechanism is vacuous when criteria are commands rather than test files: nothing to diff, and the `clean` verdict could not be distinguished from *nothing-to-compare*. | move 2 (#586) | fixed |
+| 3 | `checks.md` — for command-based criteria, the *entire* oracle — sat outside its own tamper baseline. | move 2 (#586) | fixed |
+| 4 | `project-gates` recorded a *local* `make check` and cited no GitHub check runs, so the gate read `eligible-for-auto-merge` while CI was `pending` and `mergeStateStatus` was `UNSTABLE`. | move 3 (#699) | fixed |
+| 5 | `gh pr checks --required` on a repo with no required checks: a row built on it either errors or passes vacuously. | move 4a | fixed |
+| 6 | Import-boundary guard G3 stays green while the boundary it protects is gone — a capability that arrives as an *object* imports nothing. C4 was added to assert what G3 structurally cannot see. | move 4b (#625) | fixed |
+| 7 | Three independent unattended runs reported `project-gates` satisfied **by substitute**, having run `make check`'s four steps natively because `make check` itself was unpassable. | move 4c | fixed |
+| 8 | `amendments: none` was true only under one of two readings of the amendment policy. The policy now names both trees, and under it #668 was an amendment. | move 5 (#668) | closed 2026-07-27 |
+| 9 | **The driver's test suite tests a replica of the classifier, not the classifier.** `test-driver.sh` hand-copies driver logic — one helper is annotated *"Mirrors the driver's extraction + comparison exactly"* with nothing enforcing that — and it has **already diverged**: `classify_outcome` is 53 lines in the driver and 15 in the copy, with **zero `ci-stale` awareness** in the copy. | verified 2026-07-27 | closed by [#9](https://github.com/lmorchard/agent-sessions/issues/9) |
 
 **The tell:** the row names a command, and the evidence offered is not that command's output.
 **The fix, every time:** make the row cite a command that is actually run, and make its failure
 mode distinguishable from its success mode.
 
-**Instance 9 is the live one**, and it is the worst of the nine. Verified by running both
-classifiers over one identical gate block (`ci: 2/2 pass @ 0d08b2d`, head `e8f03389abcdef`):
+**Instance 9 was the worst of the nine, and it is worth keeping the evidence.** Running both
+classifiers over one identical gate block (`ci: 2/2 pass @ 0d08b2d`, head `e8f03389abcdef`) gave:
 
 ```
 shipped driver  -> ci-stale       "verdict rests on a commit that no longer ships"
 test-file copy  -> gate-eligible  "all gate rows satisfied"
 ```
 
-**The suite's classifier calls a stale-CI PR eligible for auto-merge exactly where the shipped
-driver voids it.** So move 5's record that the ci-sha fix was "mutation-tested" does not hold for
-the classifier path — mutating the driver's real regex leaves `driver-test` green, because the
-behavioural assertions run against the test file's own mirror. Under phase 3, "eligible" means
-merge.
+**The suite's classifier called a stale-CI PR eligible for auto-merge exactly where the shipped
+driver voided it** — so move 5's record that the ci-sha fix was "mutation-tested" did not hold for
+the classifier path. Under phase 3, "eligible" means merge.
+
+Closed by extracting the parser to `driver/gate.py`, whose tests **import** it: the same mutation now
+breaks named cases in both suites where it previously broke nothing. *(Note this prose named "the
+live instance" twice in two days and was wrong both times — which is why status now lives in the
+table's own column and not in a sentence above it.)*
 
 ### 2. A null must never render as a positive
 

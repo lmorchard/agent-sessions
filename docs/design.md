@@ -240,7 +240,7 @@ them is what makes "is this a skill-authoring project?" feel like a confusing qu
 |  | `skills/agent-session/` | `driver/` + `Makefile` |
 |---|---|---|
 | What it is | the reusable artifact — a Claude Code skill, `dev-session` lineage | this repo's autonomy infrastructure, the unattended burndown loop |
-| Roughly | ~1,940 lines of markdown | ~1,190 lines of bash + ~530 of Python |
+| Made of | markdown | bash, plus a Python parser (`driver/gate.py`) |
 | Its oracle | micro-tests and dogfooding | fixture tests and mutation testing |
 | Who reads it | any project that installs the skill | only this repo |
 
@@ -323,8 +323,9 @@ what is not.
 PRs, six merged." That is the failure mode a hand-maintained state block always has, so this one is
 written to have less to be wrong about.)*
 
-**Proven.** All four routing paths have real-run evidence. **Eight PRs have gone through the skill
-and all eight are merged** — every one by a human, by hand, usually within hours. The driver runs
+**Proven.** All four routing paths have real-run evidence. **Its PRs land, and a human merges every
+one of them by hand** — usually within hours of the run. *(As of 2026-07-29: eight PRs, all merged.
+Dated because it is a countable fact; the durable claim is the pattern, not the number.)* The driver runs
 against two repositories including a multi-issue loop; its gate parsing and classification are an
 importable Python module whose tests import it rather than restate it. This repo now tracks its own
 backlog with its own tooling.

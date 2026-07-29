@@ -13,6 +13,6 @@ dependencies = []
 dev = ["pytest>=8"]
 
 [tool.pytest.ini_options]
-testpaths = ["driver"]
+testpaths = ["driver", "scripts"]
 python_files = ["test_*.py"]
 addopts = "-q"
