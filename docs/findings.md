@@ -26,10 +26,11 @@ The dominant defect class, and the one the merge gate exists to prevent. A gate 
 check cites a specific mechanism; something *near* that mechanism supplies the answer; the row
 reports true. Nothing lies, and the row means nothing.
 
-**Every instance below is fixed. The gap is not the instances — it is that nobody has ever
-looked.** Eight of the nine were found by an unattended run stumbling into them; exactly one was
-found by looking. So the number remaining is **unknown**, and phase 3 converts each remaining one
-into an automatic merge.
+**Nine of the ten below are fixed; the tenth is open. The gap is not the instances — it is that
+nobody has ever looked.** Eight of the ten were found by an unattended run stumbling into them; **two
+were found by looking**, and both of those came from *verifying a change rather than auditing the
+code*. So the number remaining is **unknown**, and phase 3 converts each remaining one into an
+automatic merge.
 
 **The sweep that has never been done:** enumerate every gate row, guard and manifest check, and ask
 of each *"what could satisfy this that is not the thing it names?"* Tracked as
@@ -51,10 +52,18 @@ to the rate at which they arrive.
 | 7 | Three independent unattended runs reported `project-gates` satisfied **by substitute**, having run `make check`'s four steps natively because `make check` itself was unpassable. | move 4c | fixed |
 | 8 | `amendments: none` was true only under one of two readings of the amendment policy. The policy now names both trees, and under it #668 was an amendment. | move 5 (#668) | closed 2026-07-27 |
 | 9 | **The driver's test suite tests a replica of the classifier, not the classifier.** `test-driver.sh` hand-copies driver logic — one helper is annotated *"Mirrors the driver's extraction + comparison exactly"* with nothing enforcing that — and it has **already diverged**: `classify_outcome` is 53 lines in the driver and 15 in the copy, with **zero `ci-stale` awareness** in the copy. | verified 2026-07-27 | closed by [#9](https://github.com/lmorchard/agent-sessions/issues/9) |
+| 10 | **`pr_for_issue` matches a bare `#N` anywhere in an open PR's body, title or branch name**, so a PR that merely *mentions* an issue removes it from selection. The function's own comment says *"an express PR carries `Closes #N`"* and the code never requires the keyword. A docs PR listing six issue numbers hid six issues; `closingIssuesReferences` was empty on it. | verified 2026-07-29 | open, [#23](https://github.com/lmorchard/agent-sessions/issues/23) |
 
 **The tell:** the row names a command, and the evidence offered is not that command's output.
 **The fix, every time:** make the row cite a command that is actually run, and make its failure
 mode distinguishable from its success mode.
+
+**Instance 10 adds a direction the first nine did not have: this class can cost *liveness*, not just
+correctness.** Nine of them made a check wrongly report *true*, which a later stage or a reader could
+still catch. This one makes eligible work wrongly report *absent*, and nothing downstream looks — the
+driver idles while printing a skip reason that reads as true. It is also **self-amplifying in this
+repo specifically**: the matcher keys on issue numbers appearing in prose, so the more the project
+documents its own triage, the more of its own backlog it hides.
 
 **Instance 9 was the worst of the nine, and it is worth keeping the evidence.** Running both
 classifiers over one identical gate block (`ci: 2/2 pass @ 0d08b2d`, head `e8f03389abcdef`) gave:
@@ -220,6 +229,15 @@ body through the marker. **Comments are provenance; the body is the constraint.*
 **Mechanism choice and tier are coupled.** #638 stayed `auto-ok` because per-test marks were chosen
 over a `pyproject.toml` change, which would have touched build/CI config and pulled toward
 `needs-review`. How you propose to do it changes how it must be reviewed.
+
+**A tier is a property of an issue, so an issue carrying several follow-ups takes the worst one.**
+Triage should ask whether the parts share a tier before deriving one. #11 was filed by an unattended
+run as three follow-ups: one had a discriminating criterion and no open question, the other two were
+ungradeable without a foreign host and shared an unresolved design question. Carried as a single
+issue it was `needs-review`; split, the first third is drivable. **The shape recurs by construction** —
+a run filing its own follow-ups groups them by *where it found them* (one review, one freeze), which
+has nothing to do with how they verify. The counter-pressure is real and worth stating: split only to
+the granularity where each piece has its own question, or you ratify the same decision twice.
 
 **When a decision passes an object across a trust boundary, enumerate the object's methods before
 recommending it.** "It's the existing pattern" was true and irrelevant in #625 — the precedent
@@ -456,7 +474,13 @@ is now ignored. Two things worth keeping:
   total $22.96 — both would have exhausted the old $12 ceiling. `make run` now defaults to
   `--max-budget-usd 25` and `make loop` does two issues; the hand-assembled command is obsolete.
 - **A ~1-in-8 triage conversion rate** should govern board-driver expectations. Of 8 issues scanned,
-  3 came out `auto-ok` but only 1 was genuinely ready.
+  3 came out `auto-ok` but only 1 was genuinely ready. **Second data point, 2026-07-29: 3 scanned, 2
+  `auto-ok`, both with a discriminating criterion that was actually run** — a much better rate on a
+  much smaller sample, and the sample is small enough that the first figure should still govern
+  planning. What plausibly differs is the input: these three were written by people (or runs) who
+  already knew what a criterion was, where the earlier eight were ordinary wishlist issues. If that
+  is the cause, the conversion rate is a property of the *backlog*, not of `triage`, and neither
+  figure generalises to a fresh repo.
 - **A driver that dies between invoking and classifying leaves no record.** Observed: a run
   completed (98 turns, 19 min, **$9.44**) and opened a PR, then the process was killed before
   classifying — real money spent, a PR open, and an empty `runs.jsonl`. Everything the driver
