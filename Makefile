@@ -4,13 +4,14 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help check driver-check driver-test gate-test docs-check dry-run run loop run-self dry-run-self skill-readonly
+.PHONY: help check driver-check driver-test gate-test park-test docs-check dry-run run loop run-self dry-run-self skill-readonly
 
 help:
-	@echo "check            run every check (driver-check + driver-test + skill-readonly)"
+	@echo "check            run every check -- the targets listed below, in one go"
 	@echo "driver-check     assert the driver has no executable merge path"
 	@echo "driver-test      bash fixture tests (runs gate-test first)"
 	@echo "gate-test        pytest over gate.py + docs_check.py -- imports, never restates"
+	@echo "park-test        frozen acceptance checks for #5 (park state as a label)"
 	@echo "skill-readonly   assert the hosted run cannot write to the skill directory"
 	@echo "docs-check       detect doc rot: dead links, split tables, stale counts"
 	@echo "dry-run          selection only against $(REPO); no claude invocation"
@@ -22,7 +23,7 @@ help:
 	@echo ""
 	@echo "  REPO=$(REPO)  REPO_PATH=$(REPO_PATH)  BOARD=$(BOARD)"
 
-check: driver-check driver-test skill-readonly docs-check
+check: driver-check driver-test park-test skill-readonly docs-check
 	@echo "all checks passed"
 
 # C1. Kept separate from driver-test so it can be cited as its own check.
@@ -47,6 +48,13 @@ driver-test: gate-test
 
 gate-test:
 	@uv run --quiet pytest driver/test_gate.py scripts/test_docs_check.py
+
+# The frozen acceptance checks for issue #5, wired in AFTER the work landed --
+# deliberately, because guard G1 was "make check green" and it had to pass at the
+# freeze, when every one of these failed. They invoke the shipped driver as a
+# subprocess against stubbed `gh` and `claude`, so deleting the behaviour flips them.
+park-test:
+	@bash driver/test-park-state.sh
 
 # Replaces move 3's `skill-untouched` guard, which pinned skills/ to a snapshot to
 # prove the driver needed no skill edit. That claim is now verified and permanently

@@ -441,6 +441,52 @@ _nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
   --skill-dir "$NEST_TMP/a/bc" --repo-path "$NEST_TMP/a/b" --state-dir "$NEST_TMP/s-prefix"
 check "a string prefix that is not a path prefix is not containment" "no-warn gh-check" "$(_nest_verdict)"
 
+# --- the issue query must actually request the labels it filters on --------
+#
+# Slice coverage, added because mutation testing found the FROZEN checks blind to
+# this one: driver/test-park-state.sh serves a fixed issue-list fixture, so dropping
+# `labels` from the driver's --json list left all 27 of its assertions green while
+# the park list would have gone permanently empty in production. Not an amendment --
+# the frozen checks are incomplete here, not wrong, so the coverage goes in the
+# editable suite instead of being edited into the oracle.
+#
+# The stub below HONORS the requested field list, which is the whole point: it is
+# the only way a missing --json field can change what the driver sees.
+
+echo "issue query: the park filter's field must be requested, not assumed"
+
+Q_TMP="$(mktemp -d)"
+mkdir -p "$Q_TMP/bin"
+cat > "$Q_TMP/issues.json" <<'JSON'
+[{"number":7,"title":"labeled","body":"<!-- agent-session:spec -->\n\n## Tier: `auto-ok`\n","labels":[{"name":"driver-parked"}]}]
+JSON
+cat > "$Q_TMP/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+fields=""; prev=""
+for a in "$@"; do [ "$prev" = "--json" ] && fields="$a"; prev="$a"; done
+case "$*" in
+  "issue list"*) jq --arg f "$fields" \
+                    '[.[] | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' \
+                    "$STUB_DIR/issues.json" ;;
+  "pr list"*)    printf '%s' '[]' ;;
+  *)             exit 0 ;;
+esac
+STUB
+chmod +x "$Q_TMP/bin/gh"
+Q_OUT="$(STUB_DIR="$Q_TMP" PATH="$Q_TMP/bin:$PATH" \
+         bash "$DRIVER" --repo stub/repo --dry-run --state-dir "$Q_TMP/state" 2>&1)"
+# The needle carries the REASON, not just the skip. `SKIP    #7` alone is
+# satisfiable by any skip -- a broken marker or tier parse would skip #7 too, and
+# this test would stay green through the regression it exists to catch. Same
+# adjacent-evidence defect the frozen file's C4 needle was tightened for; found
+# here by the PR reviewer, after I fixed it one file over and missed this one.
+case "$Q_OUT" in
+  *"SKIP    #7  parked"*) ok "a labeled issue is skipped AS PARKED when the query asks for labels" ;;
+  *)                      bad "a labeled issue is skipped AS PARKED when the query asks for labels" \
+                              "SKIP    #7  parked" "$(printf '%s' "$Q_OUT" | tr '\n' '|' | cut -c1-240)" ;;
+esac
+rm -rf "$Q_TMP"
+
 # --- syntax ----------------------------------------------------------------
 
 echo "syntax"

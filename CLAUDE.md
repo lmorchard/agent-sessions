@@ -60,6 +60,15 @@ migration/deletion, deploy/infra/CI config, dependency changes.
 reason this repo can dogfood itself at all: skill-wording and oracle work routes to a human,
 orchestration and doc work does not.
 
+**What the driver may write to a target repo: issue *metadata*, never issue or PR *content*.**
+Labels and project-board fields are in bounds; issue bodies, comments, PR bodies, reviews and thread
+resolutions are not, and merging never is. Recorded 2026-07-29, when #5 moved the park record from a
+local file to a `driver-parked` label and the driver became a GitHub writer for the first time — the
+tier stayed `auto-ok` on the grounds that a label is not auth, secrets, data migration/deletion,
+deploy/infra/CI config or a dependency. **Widening this line is a decision to put to the human, not
+a drift to discover in a diff**, which is the whole reason it is written down rather than inferred
+from what the driver happens to call today.
+
 **Residual risk, stated rather than gated away.** `agent-session-driver.sh` still contains the
 outcome *routing* — the parking case lists, the budget reclassification thresholds — and a run could
 in principle edit those to flatter its own record. Path granularity cannot express "this file except
