@@ -460,3 +460,87 @@ class of change is safe because N instances landed cleanly."*
 That is the answer to the phase-3 open decision's actual question: ITIL's *when may this be
 automatic* is **evidence-based and finite**, which is exactly what a gate list growing by one per
 session lacks. Both this and Renovate's ordering point are now recorded in `design.md`'s roadmap.
+
+## Step 8 — the driver ran against this repo (2026-07-29)
+
+`--issue 4`, watched. **`gate-human`**, [PR #10](https://github.com/lmorchard/agent-sessions/pull/10),
+**$13.20**, exit 0. Nothing merged.
+
+**Both blockers that had stood since move 5 were retired first, by measurement rather than argument:**
+
+- The `skill-readonly` blocker was already handled by step 2 — skill issues tier `needs-review` and
+  selection skips them, *and* the deny rules are built from `$SKILL_DIR` regardless of nesting. Two
+  independent mechanisms; nothing had to be disabled.
+- The editing-a-running-script hazard **does not apply to this harness.** Measured inode behaviour:
+  `Write` 363717959 → 363717969, `Edit` 363717979 → 363718025. Both write-then-rename, so a running
+  script keeps its inode. The hazard is real for truncate-in-place writers (verified separately) but
+  not for the tools an implementer here would use.
+
+Before running, `driver/gate.py` was added to the risk-gated paths — the move-7 partition had marked
+all of `driver/` drivable, which **stopped being true when the classifier moved there hours
+earlier**. An issue editing `gate.py` edits the code that grades its own run.
+
+### The run behaved correctly, including under review pressure
+
+Gate block: tier `auto-ok`, C1–C4 pass, G1–G5 pass, `tamper: clean`, freeze `207ead9`,
+`project-gates: make check green`, `threads: 3 unresolved` → `verdict: human-merge-required`.
+
+**`human-merge-required` for the right reason.** The tier stayed `auto-ok`; it was the *threads* row
+that failed. Copilot filed three comments, **all three genuinely real**, and the run **fixed none of
+them** — because two touch `driver/test-driver.sh`, frozen at `207ead9` and read-only for the rest of
+the run, and the third could not carry a check under the freeze. It filed
+[#11](https://github.com/lmorchard/agent-sessions/issues/11) instead and left the threads unresolved.
+
+That is *"resolve only what you fixed"* and the read-only rule holding **together, unattended, under
+real review pressure, for the first time.** Its own reasoning: *"Landing an untested fix to satisfy a
+reviewer is a smaller version of the implementer deciding what 'done' means."*
+
+**`ci: no checks configured` was used in anger for the first time.** This repo has no CI, and the
+value exists because of move 4a's *a null must never render as a positive*. `gate.py`'s faithful port
+of the warning exemption (`ci_row != "no checks configured"`) meant no spurious staleness warning —
+the port paid off within hours.
+
+### Copilot found a real bug in the shipped guard, verified independently
+
+`--repo-path /` **bypasses the containment guard.** With `repo_real=/` the `case` pattern becomes
+`//*`, which no ordinary absolute path matches. Reproduced in isolation:
+
+| skill / repo | result |
+|---|---|
+| `/Users/x/repo/skills/a` / `/Users/x/repo` | FIRES ✓ |
+| `/Users/x/repo` / `/Users/x/repo` (equal) | FIRES ✓ |
+| `/Users/x/repo/skills/a` / `/Users/x/other` | BYPASSED ✓ (correct) |
+| `/Users/x/repo/skills/a` / **`/`** | **BYPASSED ✗** |
+
+Reachability is near-nil (you have to type `/`), and the run's deferral logic was right: **freeze a
+check first, then fix.** Shipping an unexercised fix is the defect class this repo already catalogues
+three times.
+
+### New defect the run surfaced: the denial detector matches its own regex
+
+The log reported **3 denials**. Two are fragments of the detector's *own grep pattern* —
+
+```
+]*denied by your permission settings[^\
+denied by your permission settings\
+```
+
+— because the run read `agent-session-driver.sh` while working on it, putting the detector's pattern
+text into the stream, where the detector then matched it. Confirmed: 5 occurrences of the pattern
+source in `stream.jsonl`; **exactly 1 genuine denial.**
+
+**Inert-content false positive, and it is specific to self-referential runs** — it cannot occur when
+driving another repo, so no amount of decafclaw running would have found it. That is the dogfood
+earning its place. Nth instance of a class this project has now hit in the `skill-readonly` guard
+(twice), frozen check C3 (tonight, amendment A1), the eight `grep -q` "spelling checks", and now the
+denial detector itself.
+
+### Cost, and a question the run raised that is Les's
+
+**$13.20 — the most expensive run yet**, above decafclaw's $11.87 ceiling, on a far smaller repo. The
+review cycle is the expensive part, not the diff.
+
+And the run's own meta-observation, which is a real design question: **a review that lands after the
+freeze can only ever produce follow-ups for anything touching the oracle.** Two of Copilot's three
+findings were structurally unfixable in-run for that reason. Is that the intended cost, or should
+review be solicited *earlier* — against the freeze commit, before implementation?
