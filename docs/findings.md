@@ -259,6 +259,21 @@ passed a *single callable*, not a capability-rich object. Deliberately **not** a
 rule: one instance, and it feels exactly like the two rules that were measured away. If it recurs,
 that is the signal.
 
+**Some guards cannot be mutation-tested without performing the hazard, and that has to be recorded
+rather than resolved.** A guard on #18 asserts the nest cases' `PATH` is wholly constructed by the
+harness. Its mutation — making the constructed dir a *prefix* rather than the whole `PATH` — is
+precisely what makes the harness non-hermetic, so applying it on any host with a real `gh` turns
+nine validation probes into live driver runs. Attempted once: **it selected a real issue and created
+a worktree before it was killed.** So the guard ships un-mutation-tested, with the reason written
+next to it, and the design property demonstrated *outside* the suite instead (run the driver with a
+stubbed `gh` on a pinned `PATH` and watch it pass validation, pass the required-command loop, write
+the state dir and enter selection). **The wrong move here is to automate the demonstration**, which
+means keeping a live-run trigger in a suite that otherwise cannot reach the network.
+
+Generalisable: **when a guard protects against a dangerous state, its mutation test enters that
+state.** Ask what the mutation *does* before running it, and prefer a one-off demonstration recorded
+in the PR over a repeatable test that arms the hazard.
+
 **A guard's pass count is not a coverage measure, and `-k` selections silently include
 neighbours.** #586's G1 `12 passed` was 8 irrelevant tests from a different method; exactly one
 covered the path at issue.
@@ -477,6 +492,21 @@ is now ignored. Two things worth keeping:
 - **Knowing the hazard demonstrably does not prevent it.** This is the second occurrence, both by
   the same person, the second within an hour of re-reading the note. **`git add -A` in a repo the
   tooling writes to is the problem, not the operator's memory** — stage explicit paths.
+
+**A third data point for that second bullet, 2026-07-29, and the strongest one yet.** While
+implementing #18, a mutation test was run that made the nest harness non-hermetic — and so started a
+real `express` run against a live issue. The hazard had been *read* in a triage scanner's report,
+*agreed with*, and *written into #18's own issue body by the same context*, in the words "running it
+before the fix is unsafe." The gap between recording a hazard and not performing it was under an
+hour and survived writing it down twice. Damage was limited only because `.worktrees/` and
+`.driver-state/` were already ignored and the process was killed early: no commits, no push, no
+`runs.jsonl` record — which is itself the *"dies between invoking and classifying leaves no record"*
+failure, so the money spent is unknown.
+
+**What generalises is not "be careful."** It is that a hazard needs a *mechanism* — an ignore rule, a
+deny rule, a precondition that refuses — and that prose warnings, including ones you wrote yourself
+minutes earlier, have now failed three times in this project at changing behaviour. See also the rule
+about mutation-testing a guard that protects a dangerous state.
 
 ### Operational figures
 
