@@ -413,6 +413,18 @@ survived it, so **the exposure is not understood** — worth establishing before
 runs the gates and then judges the diff. The skill itself contains no `git add` (verified by grep),
 so it does not carry the specific hazard that bit us: `make check` dirtied the lockfile, a blanket
 `git add -A` swept it up, and it reached decafclaw's `main` before being reverted.
+
+**It happened again, 2026-07-29, to the author of the paragraph above.** A blanket `git add -A`
+while the driver's `express` worktree was present committed `.worktrees/<branch>` as an **embedded
+git repository** on this repo's `main`, and pushed it. Reverted with `git rm --cached`; `.worktrees/`
+is now ignored. Two things worth keeping:
+
+- **The window is created by the tooling.** A driver run leaves a worktree in the repo root, so any
+  `git add -A` during or after a run is exposed. `.gitignore` needed the entry *before* the first
+  run, not after.
+- **Knowing the hazard demonstrably does not prevent it.** This is the second occurrence, both by
+  the same person, the second within an hour of re-reading the note. **`git add -A` in a repo the
+  tooling writes to is the problem, not the operator's memory** — stage explicit paths.
 | **A hard line-wrap inside a code fence misleads readers.** It is what misled Copilot into a wrong review comment on #638. Test commands in their line-wrapped form. | move 2 |
 
 ### Operational figures
