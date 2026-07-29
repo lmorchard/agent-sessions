@@ -353,11 +353,21 @@ echo "nested skill-dir: the flags must not be able to describe a self-editing ru
 # exactly why startup has to say so rather than leave it to the deny rules.
 #
 # Every case here invokes the SHIPPED driver as a subprocess, never a restatement
-# of its validation. PATH is pinned to /usr/bin:/bin, which on this host carries
-# jq, git and python3 but NOT gh, so any configuration that survives validation
-# dies at the required-command check: no network, no claude, no state dir. The
-# exit status cannot discriminate -- the guarded and unguarded paths both exit 2
-# -- so every case asserts the stderr text instead.
+# of its validation. Any configuration that survives validation dies at the
+# driver's required-command check: no network, no claude, no state dir. The exit
+# status cannot discriminate -- the guarded and unguarded paths both exit 2 -- so
+# every case asserts the stderr text instead.
+#
+# That stop-point is CONSTRUCTED, not inherited. This section used to pin
+# PATH=/usr/bin:/bin and rely on gh not being installed there: true on the
+# authoring host, guaranteed nowhere, and on a host carrying /usr/bin/gh these
+# cases would sail past validation toward real GitHub calls and a state-dir write
+# -- with no --dry-run and --max-issues defaulting to 1, that reaches a live
+# claude invocation. So the harness now BUILDS the PATH (see NEST_BIN below):
+# symlinks for exactly the commands the driver legitimately needs, and
+# deliberately no gh. `gh` is first in the driver's own `for c in gh jq git` loop,
+# so its absence is what every reached-validation case observes, and that absence
+# is now a property of a directory this file created rather than of the host.
 
 NEST_LITERAL='--skill-dir is inside --repo-path'
 NEST_ROOT="$(cd "$(dirname "$DRIVER")/.." && pwd)"
@@ -369,9 +379,44 @@ NEST_SKILL="$NEST_ROOT/skills/agent-session"
 NEST_TMP="$(mktemp -d)"
 trap 'rm -rf "$TMPD" "$NEST_TMP"' EXIT
 
+# The constructed PATH. Symlinks for the commands the driver legitimately reaches
+# before (and at) its required-command loop, and NO gh.
+#
+# `date` is here because log() calls it at agent-session-driver.sh:64, and the
+# containment warning goes through log(); without it the cases still assert
+# correctly but every run prints `date: command not found` twice, which is noise a
+# future reader would have to re-derive as harmless. jq/git/python3 are the rest
+# of what the driver requires, so a case that reaches the loop fails on gh
+# SPECIFICALLY rather than on whichever check happened to come first.
+#
+# bash is resolved HERE, against the ambient PATH, and invoked by absolute path
+# below. The driver's `#!/usr/bin/env bash` shebang would otherwise be resolved
+# against the constructed PATH and die with `env: bash: No such file or directory`
+# before the script ran at all -- measured, not theorised.
+NEST_BIN="$NEST_TMP/bin"
+mkdir -p "$NEST_BIN"
+NEST_BASH="$(command -v bash)"
+if [ -z "$NEST_BASH" ]; then
+  printf 'harness precondition: bash not found on PATH\n' >&2; exit 1
+fi
+for _c in date jq git python3; do
+  _p="$(command -v "$_c")"
+  if [ -z "$_p" ]; then
+    printf 'harness precondition: %s not found on PATH (needed to build the hermetic bin dir)\n' "$_c" >&2
+    exit 1
+  fi
+  ln -sf "$_p" "$NEST_BIN/$_c"
+done
+# The one thing that must NOT be there. Asserted rather than assumed, because the
+# entire section's meaning depends on it and a stray symlink would make every
+# reached-validation case proceed to a live run instead of stopping.
+if [ -e "$NEST_BIN/gh" ]; then
+  printf 'harness precondition: gh must not exist in the constructed bin dir\n' >&2; exit 1
+fi
+
 _nest_run() { # $1 = cwd, rest = driver args; sets NEST_ERR and NEST_RC
   local cwd="$1"; shift
-  NEST_ERR="$( ( cd "$cwd" && PATH=/usr/bin:/bin "$DRIVER" "$@" ) 2>&1 >/dev/null )"
+  NEST_ERR="$( ( cd "$cwd" && PATH="$NEST_BIN" "$NEST_BASH" "$DRIVER" "$@" ) 2>&1 >/dev/null )"
   NEST_RC=$?
 }
 
@@ -429,9 +474,49 @@ _nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
   --skill-dir "$NEST_SKILL" --repo-path "$NEST_ROOT/driver" --state-dir "$NEST_TMP/s-sibling"
 check "a sibling directory is not containment" "no-warn gh-check" "$(_nest_verdict)"
 
+# The "unrelated checkout" is constructed too. This named $HOME/devel/decafclaw,
+# which exists on exactly one machine; anywhere else the driver died earlier at
+# `--repo-path does not exist` and the case failed for a reason that has nothing
+# to do with containment. It failed LOUDLY rather than passing vacuously -- the
+# combined verdict is what saved it, since asserting only _nest_warned would have
+# read `no-warn` from a run that never reached the containment check at all.
+mkdir -p "$NEST_TMP/unrelated-checkout/skills"
 _nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
-  --skill-dir "$NEST_SKILL" --repo-path "$HOME/devel/decafclaw" --state-dir "$NEST_TMP/s-other"
+  --skill-dir "$NEST_SKILL" --repo-path "$NEST_TMP/unrelated-checkout" --state-dir "$NEST_TMP/s-other"
 check "an unrelated checkout is not containment" "no-warn gh-check" "$(_nest_verdict)"
+
+# The hermeticity guard. Two honest limitations, both worth stating in place.
+#
+# 1. It does NOT discriminate against the form it replaced -- with PATH pinned to
+#    /usr/bin:/bin the old code also ignored an ambient gh. What it catches is the
+#    plausible FUTURE regression: making the constructed dir a PREFIX
+#    (PATH="$NEST_BIN:$PATH") rather than the whole PATH, which reads as harmless
+#    and silently restores host-dependence.
+#
+# 2. It is NOT mutation-tested, deliberately, and this is the interesting part.
+#    Applying that mutation makes the harness non-hermetic BY DEFINITION, so on any
+#    host with a real gh -- including the authoring one -- the nest cases stop being
+#    validation probes and become live driver runs. Attempted once: it selected a
+#    real issue and created a worktree before it was killed. Verifying this guard by
+#    mutation therefore requires doing the exact thing the guard exists to prevent.
+#    Do not "just try it" to confirm it works.
+#
+#    The design property IS demonstrable, just not from inside this suite: run the
+#    driver with PATH=<dir containing a stubbed gh>:/usr/bin:/bin and it passes
+#    validation, passes the required-command loop, writes the state dir and enters
+#    the select stage -- which is what the old pinned PATH would have done on a host
+#    carrying /usr/bin/gh. Recorded in the PR for issue #18 rather than automated,
+#    because automating it means keeping a live-run trigger in the suite.
+mkdir -p "$NEST_TMP/ambient"
+printf '#!/bin/bash\nexit 0\n' > "$NEST_TMP/ambient/gh"
+chmod +x "$NEST_TMP/ambient/gh"
+_nest_saved_path="$PATH"
+PATH="$NEST_TMP/ambient:$PATH"
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions --allow-nested-skill-dir \
+  --skill-dir "$NEST_SKILL" --repo-path "$NEST_ROOT" --state-dir "$NEST_TMP/s-ambient"
+PATH="$_nest_saved_path"
+check "an ambient gh cannot reach the driver" "warned gh-check" "$(_nest_verdict)"
+check "  and no state dir is created"         "absent"          "$(_nest_made "$NEST_TMP/s-ambient")"
 
 # /a/bc is a string prefix match against /a/b and a path prefix match against
 # neither. This is what catches a naive [[ $SKILL_DIR == $REPO_PATH* ]].
