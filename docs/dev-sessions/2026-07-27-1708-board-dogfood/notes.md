@@ -544,3 +544,38 @@ And the run's own meta-observation, which is a real design question: **a review 
 freeze can only ever produce follow-ups for anything touching the oracle.** Two of Copilot's three
 findings were structurally unfixable in-run for that reason. Is that the intended cost, or should
 review be solicited *earlier* — against the freeze commit, before implementation?
+
+## Follow-up decisions after the #4 run
+
+**Untriaged run-filed issues → later batch `triage`, not `pr.md` stamping.** Les's call, and it holds
+on three grounds: `triage` already exists for exactly this; PR time is the worst-informed moment to
+derive criteria (the filing agent just hit a wall, and the follow-up is incidental to its task) and
+the most expensive; and `pr.md` already links the follow-up from the gate's `reason` field, so **no
+`pr.md` change is needed at all.**
+
+**But "later" was not a plan, and the gap was measurable.** Verified against this repo's own board:
+
+```
+repo lmorchard/agent-sessions: read 10 open issues
+  ... 8 lines ...
+eligible: 2
+```
+
+Ten read, eight accounted for. **#11 and #12 produced no line at all.** An untriaged issue renders as
+*nothing* — fifth instance of "a null must never render as a positive."
+
+Sharper: the driver's own select-stage comment already commits to *"one line per excluded candidate
+with its reason,"* but the marker filter runs **one stage upstream** of the code that honours it, and
+the `no issues carry the marker` message only prints when the count is *zero*. The partial case is
+silent. So this is an existing principle applied at the wrong stage, not a new rule. Filed as **#13**.
+
+Stakes are low, which is why it is a reporting fix rather than a gating one: a marker-less issue
+**cannot be driven**, so the failure mode is work sitting unnoticed, not work driven badly.
+
+**#12** filed from the freeze-review conversation: nothing currently validates the check author. The
+Copilot-on-a-draft-PR mechanism was rejected as too much ceremony, with the unattended-waiting blocker
+recorded so it is not re-proposed. The option worth betting on is a **mechanical check-linter** rather
+than a reviewer — several of the seven catalogued bad-check instances are detectable *shapes*
+(`grep -q <literal> <file>`; an exit code both branches share; a hardcoded path outside the repo; a
+pinned count where a relative invariant is meant), and mechanical detectors have consistently
+outperformed exhortations in this project.
