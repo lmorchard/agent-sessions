@@ -112,6 +112,12 @@ for c in gh jq git; do
   command -v "$c" >/dev/null || die "required command not found: $c"
 done
 
+# The gate parser is Python (see GATE_PY below for why). Plain `python3`, not
+# `uv` -- gate.py imports only the standard library so this script stays
+# portable to a GHA runner, as the header claims. `uv` is a test-time tool only.
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+command -v "$PYTHON_BIN" >/dev/null || die "required command not found: $PYTHON_BIN"
+
 # Every path must be absolute before we go any further. The invoke stage runs in
 # a subshell that cd's to --repo-path, so a relative path resolved at startup
 # silently points somewhere else by the time it is used -- which is exactly how
@@ -163,25 +169,6 @@ parked_numbers() {
   jq -r '.issue' "$PARKED_LOG" 2>/dev/null | sort -u
 }
 
-# Anchored tier extraction. The anchor is load-bearing: #585's tier paragraph
-# contains the string "needs-review" in prose, so an unanchored match reads
-# both tiers and the issue looks ambiguous when it is not.
-TIER_JQ='
-def tierof:
-  [ (. // "") | split("\n")[] | select(test("^##[[:space:]]*Tier[[:space:]]*:")) ] as $lines
-  | ([ $lines[] | select(test("auto-ok")) ] | length) as $a
-  | ([ $lines[] | select(test("needs-review")) ] | length) as $n
-  | if   ($lines | length) == 0 then "missing"
-    elif $a > 0 and $n > 0     then "conflict"
-    elif $a > 0                then "auto-ok"
-    elif $n > 0                then "needs-review"
-    else                            "unparsed"
-    end;
-.[]
-| select(.body != null and (.body | contains($marker)))
-| [ (.number | tostring), (.body | tierof), (.title | gsub("\t"; " ")) ]
-| @tsv
-'
 
 # Open PRs, once. An express PR carries "Closes #N"; a branch may also carry the
 # number. Match on both rather than assuming which.
@@ -235,7 +222,7 @@ select_issues() {
   parked="$(parked_numbers || true)"
 
   local candidates
-  candidates="$(printf '%s' "$issues_json" | jq -r --arg marker "$MARKER" "$TIER_JQ")"
+  candidates="$(printf '%s' "$issues_json" | "$PYTHON_BIN" "$GATE_PY" tier-batch --marker "$MARKER")"
 
   if [ -z "$candidates" ]; then
     say "no issues carry the marker -- nothing for this driver to consider."
@@ -286,71 +273,35 @@ EOF
 # completes and when it stops for a designed escalation. The oracle is the PR's
 # gate block.
 
-extract_gate() { # stdin = PR body; stdout = the yaml inside the gate block
-  awk -v m="$GATE_MARKER" '
-    index($0, m) { found=1; next }
-    found && /^```/ { if (!open) { open=1; next } else { exit } }
-    found && open { print }
-  '
-}
+# Gate parsing and classification live in driver/gate.py, not here.
+#
+# They used to be bash functions, and driver/test-driver.sh hand-copied them to
+# test them -- because you cannot import a function from a script that runs main
+# at the bottom. The copies drifted: the test's classify_outcome was 15 lines to
+# the driver's 53, with zero ci-staleness awareness, so given one identical gate
+# block the driver returned `ci-stale` and the thing the suite tested returned
+# `gate-eligible`. The suite graded a replica that called a stale-CI PR eligible
+# for auto-merge exactly where the shipped code voided it.
+#
+# gate.py is importable, so its tests exercise what ships and the divergence is
+# unrepresentable. It is stdlib-only on purpose -- invoked with plain `python3`,
+# never `uv`, so this script stays portable to a GHA runner as the header claims.
+# `uv` is only for running the tests.
+#
+# Rule: bash for orchestration, Python for parsing and classification.
+GATE_PY="$(cd "$(dirname "$0")" && pwd)/gate.py"
 
-gate_field() { # $1 = field, stdin = gate yaml
-  grep -m1 "^$1:" | sed "s/^$1:[[:space:]]*//" || true
-}
-
-# classify_outcome <gate-yaml> -> "outcome<TAB>reason"
-classify_outcome() {
-  local gate="$1" verdict reason
-  if [ -z "$(printf '%s' "$gate" | tr -d '[:space:]')" ]; then
-    printf 'no-gate\tPR exists but carries no %s block\n' "$GATE_MARKER"; return 0
-  fi
-  verdict="$(printf '%s\n' "$gate" | gate_field verdict)"
-  reason="$(printf '%s\n' "$gate"  | gate_field reason)"
-
-  # A CI result is a claim about a commit, and the gate block outlives the commit.
-  # If the `ci` row records a sha (`ci: 2/2 pass @ <sha>`) and it is not the current
-  # head, the row describes something that no longer ships -- so the verdict resting
-  # on it is void. Checking this is NOT re-deriving the gate: it is asking whether
-  # the block still refers to the PR in front of us. Observed: a run graded CI, then
-  # force-pushed amended docs, and published eligible-for-auto-merge on a head whose
-  # lint-and-test was pending.
-  # Anchoring the sha on a literal `@` made this silently un-runnable. #722's run
-  # wrote `ci: 2/2 pass (js-test, lint-and-test) on f42c0f1` -- a correct sha behind
-  # the word "on" instead of "@" -- so nothing matched, `_cisha` came out empty, and
-  # the staleness check was skipped without a word. The sha was right that time; the
-  # mechanism that verifies it was off, which is the same "a null renders as a
-  # positive" shape as `clean` hiding an absent diff. Match a bare 7+ hex token
-  # anywhere in the row instead of a delimiter the template cannot enforce, and when
-  # there is genuinely no sha, SAY so rather than reading it as current.
-  if [ -n "$GATE_HEAD_SHA" ]; then
-    _cirow="$(printf '%s\n' "$gate" | gate_field ci)"
-    _cisha="$(printf '%s\n' "$_cirow" | grep -oE '\b[0-9a-f]{7,40}\b' | head -1)"
-    if [ -z "$_cisha" ] && [ -n "$(printf '%s' "$_cirow" | tr -d '[:space:]')" ] \
-       && [ "$_cirow" != "no checks configured" ]; then
-      say "  WARNING: ci row carries no parseable sha ('$_cirow') -- staleness"
-      say "           UNCHECKED, not verified current. pr-body-template.md requires it."
-    fi
-    if [ -n "$_cisha" ] && [ "${GATE_HEAD_SHA#"$_cisha"}" = "$GATE_HEAD_SHA" ]; then
-      printf 'ci-stale\tgate ci row was graded at %s but the head is now %s -- verdict "%s" rests on a commit that no longer ships\n' \
-        "$_cisha" "${GATE_HEAD_SHA:0:8}" "$verdict"
-      return 0
-    fi
-  fi
-
-  case "$verdict" in
-    eligible-for-auto-merge)
-      printf 'gate-eligible\t%s\n' "${reason:-all gate rows satisfied}" ;;
-    human-merge-required)
-      printf 'gate-human\t%s\n' "${reason:-no reason given (pr.md requires one)}" ;;
-    pending)
-      # pr-body-template.md: pending means the run had not derived the verdict.
-      # Not actionable.
-      printf 'incomplete\tverdict still pending -- run did not reach the gate\n' ;;
-    "")
-      printf 'no-gate\tgate block present but has no verdict field\n' ;;
-    *)
-      printf 'no-gate\tunrecognised verdict value: %s\n' "$verdict" ;;
-  esac
+GATE_JSON=""
+GATE_BLOCK=""
+classify_pr_body() { # $1 = PR body, $2 = head sha. Prints "outcome<TAB>reason".
+  GATE_JSON="$("$PYTHON_BIN" "$GATE_PY" classify --head-sha "${2:-}" <<<"$1")"
+  GATE_BLOCK="$(printf '%s' "$GATE_JSON" | jq -r '.gate')"
+  # Warnings are the parser's "a null must never render as a positive" channel;
+  # surface them here rather than letting them die inside the JSON.
+  printf '%s' "$GATE_JSON" | jq -r '.warnings[]?' | while IFS= read -r w; do
+    say "  WARNING: $w"
+  done
+  printf '%s' "$GATE_JSON" | jq -r '[.outcome, .reason] | @tsv'
 }
 
 # A stream can carry MORE THAN ONE result message: a successful one, then a
@@ -528,12 +479,12 @@ run_issue() { # $1 = issue number
     else
       prnum="$(printf '%s' "$prline" | cut -f1)"
       prurl="$(printf '%s' "$prline" | cut -f2)"
-      gate="$(gh pr view "$prnum" --repo "$REPO" --json body -q .body 2>/dev/null | extract_gate || true)"
+      _body="$(gh pr view "$prnum" --repo "$REPO" --json body -q .body 2>/dev/null || true)"
       GATE_HEAD_SHA="$(gh pr view "$prnum" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || true)"
-      printf '%s\n' "$gate" > "$rundir/gate.yaml"
       IFS="$(printf '\t')" read -r outcome reason <<EOF
-$(classify_outcome "$gate")
+$(classify_pr_body "$_body" "$GATE_HEAD_SHA")
 EOF
+      printf '%s\n' "$GATE_BLOCK" > "$rundir/gate.yaml"
     fi
   fi
 
@@ -659,12 +610,12 @@ if [ -n "$CLASSIFY_ONLY" ]; then
   else
     prnum="$(printf '%s' "$prline" | cut -f1)"
     prurl="$(printf '%s' "$prline" | cut -f2)"
-    gate="$(gh pr view "$prnum" --repo "$REPO" --json body -q .body 2>/dev/null | extract_gate || true)"
+    _body="$(gh pr view "$prnum" --repo "$REPO" --json body -q .body 2>/dev/null || true)"
     GATE_HEAD_SHA="$(gh pr view "$prnum" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || true)"
-    [ "$rundir" != "(none)" ] && printf '%s\n' "$gate" > "$rundir/gate.yaml"
     IFS="$(printf '\t')" read -r outcome reason <<EOF
-$(classify_outcome "$gate")
+$(classify_pr_body "$_body" "$GATE_HEAD_SHA")
 EOF
+    [ "$rundir" != "(none)" ] && printf '%s\n' "$GATE_BLOCK" > "$rundir/gate.yaml"
   fi
 
   say "  outcome  $outcome"

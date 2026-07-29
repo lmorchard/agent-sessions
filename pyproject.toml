@@ -1,0 +1,18 @@
+[project]
+name = "agent-sessions-driver"
+version = "0.1.0"
+description = "Gate-block parsing and classification for the agent-session board driver"
+requires-python = ">=3.11"
+# Deliberately empty. driver/gate.py imports only the standard library so the
+# driver stays portable to a GHA runner, as its header claims. pytest is a *dev*
+# dependency of the tests, never of the shipped parser -- enforced by C5
+# (`python3 -I -S -c "import gate"`, which sees no site-packages).
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["driver"]
+python_files = ["test_*.py"]
+addopts = "-q"

@@ -1,6 +1,6 @@
 # Frozen acceptance checks — issue #9 (gate parser extraction)
 
-Frozen at: (recorded in the follow-up commit — a commit cannot contain its own hash)
+Frozen at: `22897d4` (recorded in the following commit — a commit cannot contain its own hash)
 Issue: https://github.com/lmorchard/agent-sessions/issues/9
 Tier: `needs-review` — two legs: the issue's own hand-run hazard, and dependency addition (pytest + uv).
 

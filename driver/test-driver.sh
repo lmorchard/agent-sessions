@@ -17,37 +17,25 @@ ok()   { PASS=$((PASS+1)); printf '  ok    %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  FAIL  %s\n     expected: %s\n     actual:   %s\n' "$1" "$2" "$3"; }
 check(){ [ "$2" = "$3" ] && ok "$1" || bad "$1" "$2" "$3"; }
 
-# Source the driver's functions without running main. The driver runs main at
-# the bottom, so we extract just the parser functions we want to test.
+# NO REPLICAS. These call the shipped parser, driver/gate.py, through the same
+# CLI the driver itself uses. This file used to hand-copy extract_gate,
+# gate_field, classify_outcome and TIER_JQ -- and the copies drifted, so the
+# suite graded a 15-line classify_outcome with no ci-staleness awareness while
+# the driver shipped 53 lines with it. Behavioural coverage of the parser lives
+# in driver/test_gate.py, which imports the module; these wrappers keep the
+# bash-side end-to-end assertions honest.
 GATE_MARKER='<!-- agent-session:gate -->'
+GATE_PY="$(cd "$(dirname "$0")" && pwd)/gate.py"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 
-extract_gate() {
-  awk -v m="$GATE_MARKER" '
-    index($0, m) { found=1; next }
-    found && /^```/ { if (!open) { open=1; next } else { exit } }
-    found && open { print }
-  '
+_classify() { # $1 = PR body, $2 = head sha (optional)
+  "$PYTHON_BIN" "$GATE_PY" classify --head-sha "${2:-}" <<<"$1"
 }
-gate_field() { grep -m1 "^$1:" | sed "s/^$1:[[:space:]]*//" || true; }
-classify_outcome() {
-  local gate="$1" verdict reason
-  if [ -z "$(printf '%s' "$gate" | tr -d '[:space:]')" ]; then
-    printf 'no-gate\tPR exists but carries no %s block\n' "$GATE_MARKER"; return 0
-  fi
-  verdict="$(printf '%s\n' "$gate" | gate_field verdict)"
-  reason="$(printf '%s\n' "$gate"  | gate_field reason)"
-  case "$verdict" in
-    eligible-for-auto-merge) printf 'gate-eligible\t%s\n' "${reason:-all gate rows satisfied}" ;;
-    human-merge-required)    printf 'gate-human\t%s\n' "${reason:-no reason given (pr.md requires one)}" ;;
-    pending)                 printf 'incomplete\tverdict still pending -- run did not reach the gate\n' ;;
-    "")                      printf 'no-gate\tgate block present but has no verdict field\n' ;;
-    *)                       printf 'no-gate\tunrecognised verdict value: %s\n' "$verdict" ;;
-  esac
-}
-
-outcome_of() { printf '%s' "$1" | extract_gate | { gate="$(cat)"; classify_outcome "$gate"; } | cut -f1; }
-reason_of()  { printf '%s' "$1" | extract_gate | { gate="$(cat)"; classify_outcome "$gate"; } | cut -f2; }
-
+outcome_of() { _classify "$1" "${2:-}" | jq -r '.outcome'; }
+reason_of()  { _classify "$1" "${2:-}" | jq -r '.reason'; }
+tier_of()    { "$PYTHON_BIN" "$GATE_PY" tier <<<"$1" | jq -r '.tier'; }
+budget_reclass() { "$PYTHON_BIN" "$GATE_PY" budget-reclass \
+                     --outcome "$1" --cost "$2" --budget "$3" | jq -r '.outcome'; }
 # --- C3: the classifier reads the verdict from the gate block ---------------
 
 echo "classify: verdict values"
@@ -112,27 +100,8 @@ check "prose mentioning a verdict does not override the block" "gate-human" "$(o
 
 echo "select: anchored tier extraction"
 
-TIER_JQ='
-def tierof:
-  [ (. // "") | split("\n")[] | select(test("^##[[:space:]]*Tier[[:space:]]*:")) ] as $lines
-  | ([ $lines[] | select(test("auto-ok")) ] | length) as $a
-  | ([ $lines[] | select(test("needs-review")) ] | length) as $n
-  | if   ($lines | length) == 0 then "missing"
-    elif $a > 0 and $n > 0     then "conflict"
-    elif $a > 0                then "auto-ok"
-    elif $n > 0                then "needs-review"
-    else                            "unparsed"
-    end;
-.[]
-| select(.body != null and (.body | contains($marker)))
-| [ (.number | tostring), (.body | tierof) ] | @tsv
-'
 MARKER='<!-- agent-session:spec -->'
 
-tier_of() { # $1 = body text
-  jq -n -c --arg b "$1" '[{number:1, body:$b}]' \
-    | jq -r --arg marker "$MARKER" "$TIER_JQ" | cut -f2
-}
 
 # This is #585's real shape: an auto-ok heading, and a tier PARAGRAPH that
 # mentions needs-review in prose. Unanchored matching reads this as a conflict.
@@ -160,18 +129,30 @@ check "both tiers on heading lines -> conflict"            "conflict"     "$(tie
 check "tier heading naming neither -> unparsed"            "unparsed"     "$(tier_of "$MARKER
 
 ## Tier: undecided")"
-check "no marker -> not a candidate at all"                ""             "$(tier_of "## Tier: \`auto-ok\`
-No marker here.")"
+# A marker-less issue is dropped by selection, which is NOT the same as tiering
+# it `missing`. Assert the selection path (tier-batch), not the single-body tier.
+candidates_of() { # stdin = gh issue list JSON array -> TSV rows
+  "$PYTHON_BIN" "$GATE_PY" tier-batch --marker "$MARKER"
+}
+check "no marker -> not a candidate at all"                ""             \
+  "$(jq -n -c '[{number:1, title:"t", body:"## Tier: `auto-ok`\nNo marker here."}]' | candidates_of)"
+check "marker but no tier heading -> missing, not dropped"  "1	missing	t" \
+  "$(jq -n -c --arg m "$MARKER" '[{number:1, title:"t", body:($m + "\nno heading")}]' | candidates_of)"
 
 # --- a CI row graded on a stale commit must void the verdict ----------------
 
 echo "ci-stale: a gate ci row is a claim about a commit"
 
-# Mirrors the driver's extraction + comparison exactly.
-ci_sha_of() { printf '%s\n' "$1" | gate_field ci | grep -oE '\b[0-9a-f]{7,40}\b' | head -1; }
-is_stale() { # $1 = ci row value, $2 = current head
-  local cisha; cisha="$(ci_sha_of "ci: $1")"
-  if [ -n "$cisha" ] && [ "${2#"$cisha"}" = "$2" ]; then printf 'stale\n'; else printf 'current\n'; fi
+# Through the real parser, not a mirror. The old version of this block defined
+# local ci_sha_of/is_stale helpers annotated "Mirrors the driver's extraction +
+# comparison exactly" -- with nothing enforcing that. It did not mirror it.
+is_stale() { # $1 = ci row value, $2 = current head -> stale|current
+  local body="$GATE_MARKER
+\`\`\`yaml
+verdict: eligible-for-auto-merge
+ci: $1
+\`\`\`"
+  [ "$(outcome_of "$body" "$2")" = "ci-stale" ] && printf 'stale\n' || printf 'current\n'
 }
 
 check "sha matching the head is current"      "current" "$(is_stale "2/2 pass @ e8f0338" "e8f03389abcdef")"
@@ -193,17 +174,22 @@ check "  and is judged stale when it should be"  "stale" \
 check "check names are not mistaken for a sha"   "current" \
   "$(is_stale "2/2 pass (js-test, lint-and-test)" "e8f03389abcdef")"
 
-if grep -q 'ci row carries no parseable sha' "$DRIVER"; then
-  ok "driver warns when no sha is parseable instead of reading it as current"
-else
-  bad "unparseable sha is reported" "warning present in driver" "absent"
-fi
-
-if grep -q "ci-stale" "$DRIVER"; then
-  ok "driver emits a ci-stale outcome"
-else
-  bad "ci-stale outcome" "present in driver" "absent"
-fi
+# These two used to be `grep -q "<literal>" "$DRIVER"` -- which passes if the
+# string appears anywhere, comments included. findings.md calls that "a spelling
+# check, not a test". Now they assert behaviour through the shipped parser.
+_warn_count() { # $1 = ci row -> number of warnings the parser emits
+  _classify "$GATE_MARKER
+\`\`\`yaml
+verdict: eligible-for-auto-merge
+ci: $1
+\`\`\`" "e8f03389abcdef" | jq -r '.warnings | length'
+}
+check "unparseable sha warns instead of reading as current" "1" \
+  "$(_warn_count "2/2 pass (js-test, lint-and-test)")"
+check "a parseable sha does not warn"                       "0" \
+  "$(_warn_count "2/2 pass @ e8f03389abcdef")"
+check "'no checks configured' does not warn"                "0" \
+  "$(_warn_count "no checks configured")"
 
 # --- paths survive the cd into the target repo -----------------------------
 

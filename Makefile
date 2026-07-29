@@ -4,12 +4,13 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help check driver-check driver-test dry-run run loop skill-readonly
+.PHONY: help check driver-check driver-test gate-test dry-run run loop skill-readonly
 
 help:
 	@echo "check            run every check (driver-check + driver-test + skill-readonly)"
 	@echo "driver-check     assert the driver has no executable merge path"
-	@echo "driver-test      fixture tests for the classifier and tier filter"
+	@echo "driver-test      bash fixture tests (runs gate-test first)"
+	@echo "gate-test        pytest over driver/gate.py -- imports it, never restates it"
 	@echo "skill-readonly   assert the hosted run cannot write to the skill directory"
 	@echo "dry-run          selection only against $(REPO); no claude invocation"
 	@echo "run              one real unattended run (nothing merges)"
@@ -30,8 +31,19 @@ driver-check:
 	fi; \
 	echo "driver-check: no executable merge path in $(DRIVER)"
 
-driver-test:
+# Two suites, one parser. driver/test_gate.py IMPORTS driver/gate.py rather than
+# restating it -- which is the whole point of extracting it. test-driver.sh used
+# to hand-copy the parsers, the copies drifted, and the suite ended up grading a
+# replica that called a stale-CI PR eligible for auto-merge where the shipped
+# code voided it.
+#
+# `uv` runs the tests; the driver itself calls plain `python3`, because gate.py is
+# stdlib-only and must stay portable to a GHA runner.
+driver-test: gate-test
 	@bash driver/test-driver.sh
+
+gate-test:
+	@uv run --quiet pytest driver/test_gate.py
 
 # Replaces move 3's `skill-untouched` guard, which pinned skills/ to a snapshot to
 # prove the driver needed no skill edit. That claim is now verified and permanently

@@ -316,3 +316,82 @@ longer matches the anchor — leaving exactly one `## Tier:` line. Verified: `el
 append a second one. `intake`/`triage` write-back should say so, since re-tiering after a decision is
 a normal event and the obvious way to do it produces a body the driver refuses to read. That is a
 skill-wording change, so it belongs on the board rather than in an unmeasured edit — candidate #10.
+
+## Step 6 — the gate parser extracted (issue #9)
+
+Frozen checks in [checks.md](checks.md); frozen at `22897d4`, all six demonstrated failing before
+any implementation existed.
+
+### The hazard #9 named is real, and it fails silently
+
+Tested before building anything, since it gates whether this issue can ever be driver-run:
+
+| Write strategy | Effect on a running script |
+|---|---|
+| **truncate-and-rewrite in place** (`cat >`, Python `open(w)`) | the running script executed **`REPLACED-B` and `REPLACED-C` — lines that did not exist when it started.** Exit 0. |
+| **atomic replace via rename** (`mv`) | unaffected; the process keeps its original inode |
+
+**So the hazard is real and it is worse than "corrupt": exit 0, no error, no signal — it silently
+ran different code than it started with.** Another null rendering as a positive.
+
+The mitigation is not "know your editor's write strategy" — it is **`exec` from a snapshot copy**,
+which `handoff-restructure.md` proposed and this confirms. Recorded as the answer to #9's open
+question.
+
+### What shipped
+
+- **`driver/gate.py`** — stdlib-only, importable. `extract_gate`, `gate_field`, `gate_fields`,
+  `ci_sha`, `classify`, `tier_of`, `tier_batch`, `budget_reclass`, plus a CLI
+  (`classify` / `tier` / `tier-batch` / `budget-reclass`) emitting normalised JSON.
+- **`driver/test_gate.py`** — 45 pytest cases that **import** the module. Defines no parsing logic.
+- **The driver** calls `classify_pr_body` (one `python3` invocation) and `tier-batch` for selection.
+  Plain `python3`, never `uv`, so the GHA-portability claim in its header stays true.
+- **`test-driver.sh`** — all replicas deleted; its helpers now shell out to the same CLI the driver
+  uses. 47 → **49 assertions**, 0 failed.
+- **`pyproject.toml` + `uv.lock`**, dev-group pytest. Runtime `dependencies = []`.
+- **`make gate-test`**, a `driver-test` prerequisite. `make` stays the operator interface.
+
+### I created a second divergence mid-refactor, and a test caught it
+
+Removing `TIER_JQ` from `test-driver.sh` while leaving it in the driver would have left **two tier
+implementations** — the exact defect being fixed, reintroduced one field over. Caught by the bash
+assertion `no marker -> not a candidate at all` failing. Fixed by adding `tier-batch` to `gate.py`
+and deleting `TIER_JQ` from the driver entirely.
+
+Worth noting *why* it was caught: that assertion encoded a distinction I would have flattened —
+**a marker-less issue is *dropped* by selection, which is not the same as `missing`** (specced but
+carrying no `## Tier:` line, a real defect worth reporting). `tier_batch` preserves both.
+
+### Two source-greps converted to real tests
+
+`grep -q '<literal>' "$DRIVER"` — *"a spelling check, not a test"* per `findings.md` — replaced with
+behavioural assertions through the parser CLI. Net effect on the eight such assertions: **two down,
+six remain.**
+
+### The mutation test is the evidence the work mattered
+
+Narrowing `gate.py`'s ci-sha regex `{7,40}` → `{40}`:
+
+```
+pytest:  6 failed, 39 passed
+bash:    44 passed, 5 failed
+```
+
+**Before this change, the same mutation to the driver's regex left `driver-test` entirely green.**
+That was the defect. Restored: 45 pytest / 49 bash, 0 failed.
+
+### The amendment path fired, on my own frozen check
+
+C3 asserted "exactly one implementation site" but checked it with `grep -rl`, which cannot tell an
+implementation from a mention — so after the extraction it failed on **a comment** and on **test
+expected-values** while zero code sites outside `gate.py` produced a verdict. **Inert-content false
+positive, third instance in this project**, written hours after re-reading the warning about it.
+
+Stopped rather than edited, stated the case, Les confirmed. **Classified an amendment, not a
+clarification** — the both-trees table is in `checks.md` A1. The intuitive read ("the check never
+matched its intent") is the same reasoning #668 used to publish `amendments: none`, and it is a
+story always available to whoever wrote the check. Cost was zero here, which is exactly why it was
+the right case to honour the policy on rather than carve its first exception.
+
+The amended check was itself mutation-tested: a simulated code-level producer is caught, a
+comment-only mention is ignored.
