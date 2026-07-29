@@ -307,12 +307,22 @@ for the open phase-3 decision in `design.md`: ITIL's answer to *when may this be
 which is exactly what a gate list that grows by one per session lacks.
 
 ## Unverified flags (confirm before relying)
-~~The entire "Leads not yet surveyed" section above — recalled, never fetched.~~ →
-**Leads 1-3 fetched and verified in move 7** (two claims refuted; see above). **Lead 4 (PIT /
-Stryker) was never fetched** and remains recall. promptfoo's caching behaviour is documented but
-not empirically confirmed here.
-OpenHands SWE-bench % and MAX_ITERATIONS default; all Devin/Sweep/Zencoder/Factory
-capability claims; the autonomy-research percentage findings (~80% safeguarded / ~73%
-human-in-loop / ~0.8% irreversible); Tessl beta status; any pricing/version/date. The two
-Anthropic posts fetched directly (harness, autonomy) are solid; other Anthropic posts
-cited from summaries are consistent but unfetched.
+
+**Resolved since the original survey:** ~~the entire "Leads not yet surveyed" section — recalled,
+never fetched~~ → **leads 1–3 were fetched and verified in move 7**, and two of the three recorded
+claims were refuted (see above).
+
+**Still unverified:**
+
+- **Lead 4 (PIT / Stryker)** — never fetched; still model recall.
+- **promptfoo's caching behaviour** — documented in its CLI reference, but not empirically confirmed
+  here. It matters: the default would silently void a variance study.
+- From the 2026-07-23 pass: OpenHands' SWE-bench % and `MAX_ITERATIONS` default; all
+  Devin / Sweep / Zencoder / Factory capability claims; the autonomy-research percentages
+  (~80% safeguarded / ~73% human-in-loop / ~0.8% irreversible); Tessl beta status; **any pricing,
+  version number or date.**
+- From move 5's pass: OpenSpec, Composio AO, Kiro's 2026 SMT-solver work, SpecRoute — leads, not
+  facts.
+
+**Solid:** the two Anthropic posts fetched directly (harness, autonomy). Other Anthropic posts cited
+from summaries are consistent but unfetched.

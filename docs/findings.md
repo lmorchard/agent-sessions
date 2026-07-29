@@ -73,7 +73,7 @@ merge.
 
 ### 2. A null must never render as a positive
 
-Four instances, and it keeps arriving through a different door.
+**Six instances**, and it keeps arriving through a different door.
 
 1. **`clean` vs `clean-by-substitute`** — the tamper vocabulary had no way to say *there was
    nothing to diff*, so a null rendered as a pass (move 2).
@@ -85,6 +85,14 @@ Four instances, and it keeps arriving through a different door.
    `@`; the real gate line used no delimiter, so nothing matched and staleness went unchecked on a
    PR about to be called eligible (move 5). **First time it was the verifier itself that became a
    null rather than a value.**
+5. **An untriaged issue rendered as nothing at all.** The driver reported `read 10 open issues` and
+   then accounted for eight; marker-less issues produced **no line** — not even a skip reason. The
+   driver's own select-stage comment already promises "one line per excluded candidate with its
+   reason," but the marker filter runs one stage upstream of the code that honours it, and only the
+   *zero* case printed (move 7, board #13).
+6. **The permission-denial detector counted its own regex.** Driving this repo put the detector's
+   pattern text into the stream, where it matched it — 3 denials reported, **1 genuine**. Could only
+   surface in a self-referential run.
 
 ### 3. Brittle absolutes encoding relative invariants
 
@@ -406,6 +414,9 @@ the entries most likely to be silently re-broken.**
 | **pytest exits 5 on empty collection.** `no tests ran` is a *failed check*, not a pass — a mechanical detector, not an exhortation. It bit twice in one session (a nonexistent file, then a mangled shell loop) and `tail -1` hid it both times. | move 2b |
 | **npm 11 prunes 27 nested optional `@esbuild/*` platform entries that npm 10 records**, so `npm install` rewrites `package-lock.json` deterministically. A *verification* target must not run a command whose job is to mutate — use **`npm ci`**, which cannot write the lockfile and additionally fails when `package.json` and the lockfile disagree. | decafclaw #716 → #717 |
 
+| **A hard line-wrap inside a code fence misleads readers.** It is what misled Copilot into a wrong review comment on #638. Test commands in their line-wrapped form. | move 2 |
+| **Editing a running bash script can silently change what it executes — and it fails *open*.** bash reads a script incrementally, so a **truncate-and-rewrite in place** (`cat >`, Python's `open(w)`) makes the running process continue into replacement text: measured, a script went on to execute two lines that **did not exist when it started**, exiting 0 with no error and no signal. An **atomic replace via rename** (`mv`) is unaffected, because the process keeps its original inode. **Measured for this harness: Claude Code's `Write` and `Edit` both change the inode** (`363717959 → 363717969`, `363717979 → 363718025`), so they are safe. Do not rely on that — the general mitigation is to `exec` from a snapshot copy rather than to know every editor's write strategy. | move 7, verified both directions |
+
 **A live hazard this closed for decafclaw but not in general: when the project gates dirty the
 tree, two things downstream read the mess as signal.** The tamper check's *"no collateral edits"*
 substitute would score a gate-rewritten lockfile as a collateral edit, and `pr.md` step 4's
@@ -426,8 +437,6 @@ is now ignored. Two things worth keeping:
 - **Knowing the hazard demonstrably does not prevent it.** This is the second occurrence, both by
   the same person, the second within an hour of re-reading the note. **`git add -A` in a repo the
   tooling writes to is the problem, not the operator's memory** — stage explicit paths.
-| **A hard line-wrap inside a code fence misleads readers.** It is what misled Copilot into a wrong review comment on #638. Test commands in their line-wrapped form. | move 2 |
-| **Editing a running bash script can silently change what it executes — and it fails *open*.** bash reads a script incrementally, so a **truncate-and-rewrite in place** (`cat >`, Python's `open(w)`) makes the running process continue into replacement text: measured, a script went on to execute two lines that **did not exist when it started**, exiting 0 with no error and no signal. An **atomic replace via rename** (`mv`) is unaffected, because the process keeps its original inode. **Measured for this harness: Claude Code's `Write` and `Edit` both change the inode** (`363717959 → 363717969`, `363717979 → 363718025`), so they are safe. Do not rely on that — the general mitigation is to `exec` from a snapshot copy rather than to know every editor's write strategy. | move 7, verified both directions |
 
 ### Operational figures
 
@@ -452,6 +461,25 @@ is now ignored. Two things worth keeping:
   was the actual bug.**
 
 ---
+
+## Two patterns about how errors get caught here
+
+**Mechanisms catch the author; care does not.** Across moves 6–7, roughly **nine** errors that
+confident reasoning had produced were caught by something mechanical — triage scanners caught an
+unverified claim being repeated as fact, a tier rationale that over-claimed, a "live instance" note
+gone stale within the hour, an undercount of eight assertions as two, and the classifier divergence;
+a bash assertion caught a *second* divergence being created mid-refactor; the driver's `CONFLICT`
+state caught a bad write-back; the one-day-old amendment policy caught a frozen check. **The single
+error with no mechanism watching it — `git add -A` — went uncaught until after it was pushed.** The
+catch rate tracked the presence of a mechanism, not the presence of care.
+
+**Self-created staleness has no trigger.** `CLAUDE.md` said all of `driver/` was drivable. True when
+written — then the classifier moved into `driver/gate.py` four hours later, which made it false, and
+nobody noticed until it came up for an unrelated reason. This is *not* the staleness a
+re-verification pass catches: inherited stale claims get audited, but **a claim you falsify yourself,
+in the same session, by doing ordinary work, is invisible.** The mitigation has to attach to the
+*change* — moving oracle-bearing code should prompt "what did that just invalidate?" — not to a
+periodic audit.
 
 ## Two operating rules that are not about code
 

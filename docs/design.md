@@ -105,8 +105,15 @@ issues into autonomy tiers for free.
 3. **Agent SDK** (Python/TS) — full programmatic loop w/ hooks + subagents. **Overkill for
    decafclaw**: it's *already* an agent runtime with its own hooks/subagents/workflow
    engine. Building a second orchestrator to drive the first is redundant.
-4. **Hooks** — `PreToolUse` can hard-block even under `bypassPermissions`; guardrails, not
-   the primary loop.
+4. **Hooks** — `PreToolUse` is the guardrail layer rather than the primary loop.
+
+   **Unverified, flagged rather than fixed:** this entry used to assert a hook can hard-block *even
+   under `bypassPermissions`*. That came from the same 2026-07-23 research pass whose own note below
+   records that several of its specifics could not be verified, and it has **no entry in
+   `findings.md`'s ledger** — unlike every other CLI fact the driver relies on. It is also not
+   load-bearing for the current host, which runs `--permission-mode dontAsk`, not
+   `bypassPermissions`. A triage scanner caught this being repeated as fact in issue #1. **Verify it
+   before designing against it.**
 
 Note on trusting research: the first-pass research subagent produced a wall of confident
 detail; several specifics ("Claude Code Routines," a C-compiler blog's cost figures,
@@ -132,7 +139,12 @@ output is exactly what weak oracles produce.
 **Safety:** avoid `--dangerously-skip-permissions` / `bypassPermissions`. Scoped
 `--allowedTools` + `dontAsk` gets ~95% of the autonomy with a real floor under it.
 
-## The two-skill system
+## The two-skill system (the original sketch — architecture superseded)
+
+**Read this for the reasoning, not the shape.** It shipped as **one skill with a multi-mode
+dispatcher**, not two skills — see [What is built](#what-is-built), which explains why. The grilling
+mapping below still describes how `intake` actually works, which is why the section is kept.
+
 
 ### intake skill (grilling-derived, human-in-loop)
 
@@ -228,7 +240,7 @@ them is what makes "is this a skill-authoring project?" feel like a confusing qu
 |  | `skills/agent-session/` | `driver/` + `Makefile` |
 |---|---|---|
 | What it is | the reusable artifact — a Claude Code skill, `dev-session` lineage | this repo's autonomy infrastructure, the unattended burndown loop |
-| Roughly | ~1,880 lines of markdown | ~1,100 lines of bash |
+| Roughly | ~1,940 lines of markdown | ~1,190 lines of bash + ~530 of Python |
 | Its oracle | micro-tests and dogfooding | fixture tests and mutation testing |
 | Who reads it | any project that installs the skill | only this repo |
 
@@ -300,63 +312,61 @@ specific cheat: **making a criterion go green by deleting the coverage that cont
 which leaves every criterion passing and the suite green, and only a guard notices.
 
 
-## Current state (2026-07-27, end of move 5)
+## Current state
 
-**The skill is complete and all four routing paths have real-run evidence.**
+**Deliberately short.** The enumerable facts live where they cannot rot — the backlog on
+[the board](https://github.com/users/lmorchard/projects/9), per-run provenance in `.driver-state/runs.jsonl`, a plain-language summary in
+[../README.md](../README.md). This section carries only what none of those hold: what is proven, and
+what is not.
 
-| Path | Evidence |
-|---|---|
-| `auto-ok` → `eligible-for-auto-merge` | #586 → PR #665 · #585 → PR #699 · #710 → PR #714 · #668 → PR #719 · #656 → PR #722 |
-| `auto-ok` → `human-merge-required` | #638 → PR #659 (unresolved threads it must not self-resolve) |
-| `needs-review` → `human-merge-required` | #649 → PR #686 (risk-gated diff, surfaced exactly once) |
-| Designed stop before the gate | starnet #129, halted at Phase 0 on a vacuous criterion |
+*(The previous version was a dated snapshot and had gone three moves stale — it still said "seven
+PRs, six merged." That is the failure mode a hand-maintained state block always has, so this one is
+written to have less to be wrong about.)*
 
-**Seven PRs have gone through the skill, and six are merged** — #659, #665, #686, #699, #714 and
-#719, every one merged by Les, by hand, usually within hours of the run. Only #722 is still open.
-*(Earlier handoffs said "eight PRs, nothing merged." Both halves are stale; the count could only be
-reconciled to seven, and the merges are real.)*
+**Proven.** All four routing paths have real-run evidence. **Eight PRs have gone through the skill
+and all eight are merged** — every one by a human, by hand, usually within hours. The driver runs
+against two repositories including a multi-issue loop; its gate parsing and classification are an
+importable Python module whose tests import it rather than restate it. This repo now tracks its own
+backlog with its own tooling.
 
-That matters more than a bookkeeping correction: **the loop lands work.** What has not been
-automated is the merge *click*, not the outcome. Phase 3 buys the click.
+**Not proven:**
 
-**The board-driver runs.** `driver/agent-session-driver.sh` — five stages (`select` → `invoke` →
-`classify` → `record` → `report`), host-agnostic by construction (no `$HOME` assumptions, every
-path a flag, all state under one `--state-dir`). It needed **zero** skill changes, and that is
-enforced rather than asserted by `make skill-readonly`. The multi-issue loop has run for real
-(`--max-issues 2` over #668 and #656, $22.96).
-
-**Nothing merges by machine.** Both terminal verdicts mean *park the PR and move on*; only budgets
-and failures stop the loop. `eligible-for-auto-merge` is a finding, not an instruction.
-
-**Genuinely not yet proven:**
-
-- **Phase 3 (conditional auto-merge)** — untouched, and gated on three things (see the roadmap).
-- **`ci-stale` has never fired on a real PR.** Fixture tests only — verified against `runs.jsonl`,
-  which contains no `ci-stale` outcome.
+- **Phase 3 (conditional auto-merge)** — untouched, gated on two board items plus the open decision
+  below.
+- **`ci-stale` has never fired on a real PR** — fixture tests only ([#6](https://github.com/lmorchard/agent-sessions/issues/6)).
 - **Multi-phase `execute` with real implementer subagents.** Every run so far has been small: #586
-  was two greps on a 4-line diff, #585 a 4-line deletion. They tested the *chain* and the *driver*,
-  not the *work*. decafclaw **#625** is the specced `needs-review` vehicle and has never been driven.
+  was two greps on a 4-line diff. decafclaw #625 is the specced vehicle, never driven
+  ([#7](https://github.com/lmorchard/agent-sessions/issues/7)), and blocked on a write-capable dispatch grant.
 
-## Roadmap
+## Roadmap → it lives on the board now
 
-Reconciled against the repo on 2026-07-27. Every entry below was re-verified, not copied — the
-previous list had a **5-of-11 stale rate**, and this pass found four more. What was dropped and why
-is at the end, because "this was checked and closed" is the part that rots invisibly.
+**The backlog is not maintained here any more.** It is on [project 9](https://github.com/users/lmorchard/projects/9) as issues carrying
+criteria, guards, a tier, and the check results that were actually run.
 
-### Blocking phase 3 (conditional auto-merge)
+Move 7 moved it there because prose is a bad backlog, and this section proved the point twice: it was
+reconciled at a **5-of-11 stale rate**, then rotted again within two days — one item was done, one had
+been resolved, and the numbering had a gap where a removed item used to be.
 
-1. **The `PreToolUse` merge-block hook.** Verified absent — the driver only *references* it
-   (`agent-session-driver.sh:47`, `:488`). A hard precondition for any **unwatched** host, because
-   deny rules are prefix-matched and `gh api` stays reachable. Rider: the denial detector greps the
-   permission layer's phrasing only, so a hook block would go **uncounted** — teach it when the
-   hook lands.
-2. **The adjacent-evidence sweep.** Nine instances of "a gate row satisfied by evidence adjacent
-   to what it names," and only the ninth was found by looking rather than by an unattended run
-   stumbling into it. See
-   [findings.md § 1](findings.md#1-a-row-satisfied-by-evidence-adjacent-to-what-it-names--open-gap).
-   Phase 3 converts each remaining one into an automatic merge.
+| Theme | Issue |
+|---|---|
+| `PreToolUse` merge-block hook — **blocks phase 3** | [#1](https://github.com/lmorchard/agent-sessions/issues/1) |
+| Adjacent-evidence sweep — **blocks phase 3** | [#2](https://github.com/lmorchard/agent-sessions/issues/2) |
+| GHA host | [#3](https://github.com/lmorchard/agent-sessions/issues/3) |
+| `parked.jsonl` — no un-park record, and per-machine | [#5](https://github.com/lmorchard/agent-sessions/issues/5) |
+| `ci-stale` firing on a real PR | [#6](https://github.com/lmorchard/agent-sessions/issues/6) |
+| Multi-phase `execute` (vehicle: decafclaw #625) | [#7](https://github.com/lmorchard/agent-sessions/issues/7) |
+| Nothing validates the frozen checks before they lock | [#12](https://github.com/lmorchard/agent-sessions/issues/12) |
+| Driver silently drops marker-less issues | [#13](https://github.com/lmorchard/agent-sessions/issues/13) |
 
-**Open decision (Les's): the shape of this list.** It has grown by roughly one gate per session —
+**Not on the board, because it is another project's call:** decafclaw **#566** carries three open
+questions for a human — a loop would have to pick the design rather than implement one.
+
+What stays below is what a board cannot hold: an open *decision*, and two lists whose entire purpose
+is to stop things being reopened or re-added.
+
+### The open decision
+
+**Les's call: does the phase-3 gate list get a finite exit condition?** It has grown by roughly one gate per session —
 first the CI hole, then the merge-block hook, then the amendment policy (**now settled**, see
 Resolved decisions) and the sweep. Each addition has been a correct call individually. A finite
 exit condition would be better than a list that grows as fast as it is worked. *Not* an argument to
@@ -376,50 +386,6 @@ Two inputs for that decision, both verified from primary sources in move 7
   check applied after a verdict is published. Our gate derives a verdict and *then* asks whether the
   commit still ships; theirs cannot reach the question. That ordering is cheap to adopt and would
   make one whole class of `ci-stale` unreachable.
-
-### Hosting
-
-4. **The GHA host, and a durable park mechanism that survives a host change.** Verified: no
-   `.github/` exists in this repo, and the park list is `./.driver-state/parked.jsonl` — relative
-   to cwd, therefore per-machine.
-5. ~~**A guard against `--repo-path` containing `--skill-dir`.**~~ **DONE** — issue #4, move 8.
-   Landed as a *warning plus an opt-in refusal*, not the absolute refusal this entry assumed:
-   triage found that `SKILL := $(CURDIR)/skills/agent-session`, so pointing the driver at **this**
-   repo — the drivable `driver/`/`docs/`/`Makefile` work — *is* the nested configuration, and an
-   absolute refusal would have foreclosed it. The self-modification hazard this entry names was
-   already covered by `DENIED_TOOLS`, which is assembled from `SKILL_DIR` unconditionally; what the
-   guard actually buys is fail-fast on a **typo**. Mutation-testability is structural: the eleven
-   new cases invoke the shipped driver as a subprocess, so deleting the guard flips them.
-
-   **Consequence for dogfooding:** driving *this* repo now requires `--allow-nested-skill-dir`.
-   No shipped `make` target is affected — `run` defaults `REPO_PATH` to decafclaw, and `dry-run`
-   passes no skill dir at all — but a hand-assembled self-run needs the flag.
-
-### Driver state correctness
-
-6. **`parked.jsonl` lies, and about more issues than previously recorded.** It is append-only with
-   no un-park record. Verified live: stale `parked` entries exist for **#585 (twice), #710 and
-   #656** — all four later reached `gate-eligible` in `runs.jsonl`. Moot in practice today (#585
-   and #710 are closed; #656 has an open PR, so selection skips it anyway), but any future
-   selection logic that trusts the park list is reading a state file that is wrong about four
-   issues.
-
-### Evidence gaps
-
-7. **A real multi-phase `execute` run.** Vehicle: decafclaw **#625** — verified open, tier
-   `needs-review` by trigger 2, four criteria and four guards, never driven.
-8. **`ci-stale` firing on a real PR.**
-9. **A decision on decafclaw #566.** Verified still open and still carrying three explicit open
-   questions for the human; a loop would have to pick the design rather than implement one.
-
-### Policy to settle
-
-10. **The Agent-tool deviation.** `intake.md` step 2 and `triage.md` step 2 both dispatch
-    subagents; the operator's standing instruction forbids the Agent tool unless asked, so research
-    runs inline and the token-heavy reading lands in the main context — the exact cost the step
-    exists to avoid. Taken as a named deviation three times now (moves 4b, 5, and this session).
-    **This is a standing property of how the skill runs here, not an incident.** Decide it
-    deliberately rather than re-discovering it mid-run.
 
 ### Declined, with reasons — do not reopen without new evidence
 
@@ -528,10 +494,7 @@ Closed, but the *reasoning* is still load-bearing.
 
 ---
 
-**Next: move 7** — put this roadmap on a GitHub board and dogfood the skill's front half on it.
-Brief in [handoff-restructure.md](archive/handoff-restructure.md). Board **yes**, board-driver **not yet**:
-`make skill-readonly` makes this the one repo the driver must not run in, because here the
-implementer's work product *is* the skill. The partition is already available through trigger 2 —
-mark `skills/` risk-gated in `CLAUDE.md` and skill issues tier themselves `needs-review` without
-touching a skill file. The `driver/` half stays drivable, and the gate-parser extraction is its
-first real issue.
+**Where to go next.** The backlog is on [the board](https://github.com/users/lmorchard/projects/9).
+[findings.md](findings.md) has the durable lessons and the verified gotchas. [usage.md](usage.md) is
+how to run any of it. Moves 1–5 are chronicled in [archive/build-log.md](archive/build-log.md); moves
+6 onward in their session notes under [dev-sessions/](dev-sessions/).
