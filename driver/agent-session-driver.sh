@@ -18,6 +18,17 @@ set -euo pipefail
 MARKER='<!-- agent-session:spec -->'
 GATE_MARKER='<!-- agent-session:gate -->'
 
+# Park state lives on the ISSUE, as a label, and this is the whole name of it.
+#
+# It used to live in ./.driver-state/parked.jsonl, which was wrong twice over: the
+# file is append-only with no un-park record, so every entry it ever produced went
+# stale the moment a later run succeeded (all three effective entries were), and it
+# is a gitignored path relative to cwd, so a host change silently un-parked
+# everything. A label is durable, scoped to the target repo -- parked.jsonl records
+# no repo at all -- and visible on the issue, where a human decides whether to
+# --retry. See issue #5, decision D2.
+PARK_LABEL='driver-parked'
+
 # --- defaults --------------------------------------------------------------
 
 REPO=""
@@ -66,7 +77,8 @@ agent-session-driver.sh --repo <owner/name> --skill-dir <path> --repo-path <path
   --max-issues <n>        issues per invocation (default 1)
   --max-budget-usd <amt>  per-run ceiling (default 10)
   --timeout <seconds>     per-run wall clock (default 5400)
-  --state-dir <path>      run log + park list (default ./.driver-state)
+  --state-dir <path>      run history + per-run transcripts (default ./.driver-state).
+                          Park state is NOT here: it is a label on the issue.
   --board <owner/number>  optional; advisory board-column reporting
   --model <name>          optional; passed to claude
   --dry-run               selection only; no claude invocation
@@ -76,7 +88,7 @@ agent-session-driver.sh --repo <owner/name> --skill-dir <path> --repo-path <path
                           DENIED_TOOLS), but the nesting is usually a typo, so it
                           must be opted into. Pointing the driver at its own repo
                           is the legitimate case the flag exists for.
-  --retry <n>             un-park issue n for this invocation
+  --retry <n>             ignore issue n's park label for this invocation
   --classify-only <n>     classify + record issue n from live PR state; no
                           claude invocation. Recovers the outcome of a run whose
                           driver died after the run itself finished.
@@ -209,9 +221,97 @@ touch "$RUNS_LOG" "$PARKED_LOG"
 # yields zero must say why, or "no eligible work" and "my query is broken"
 # print identically.
 
-parked_numbers() {
-  [ -s "$PARKED_LOG" ] || return 0
-  jq -r '.issue' "$PARKED_LOG" 2>/dev/null | sort -u
+# Reads the issues JSON on stdin -- the same payload select_issues already fetched,
+# so the park list costs no extra API call and cannot disagree with the queue it
+# filters.
+#
+# The name is load-bearing: the frozen check in driver/test-park-state.sh extracts
+# THIS function by name with sed and runs it, so a rename fails the check closed
+# rather than leaving it grading a copy. Do not mirror this logic in a test file.
+parked_numbers() { # issues json on stdin -> one parked issue number per line
+  jq -r --arg label "$PARK_LABEL" \
+     '.[]? | select((.labels // []) | any(.name == $label)) | .number' 2>/dev/null | sort -u
+}
+
+# The label carries no reason, so the reason comes from the run history -- which is
+# what runs.jsonl was always for, and the one part of the old design worth keeping:
+# the ledger is history, the label is current state, and conflating those two is the
+# bug this replaced.
+#
+# Best effort by design. On a fresh host the label is present and the history is
+# not, and saying so beats printing an empty reason -- a blank reason is how "parked
+# for a good reason" and "parked by a bug" come to look identical.
+# --- park state: the writes ------------------------------------------------
+#
+# The label is the state. parked.jsonl is still appended, as HISTORY: every line it
+# holds was true when it was written -- "at time T, issue N was parked with this
+# reason" -- and the bug was never the file, it was reading that history as current
+# state. Nothing reads it for selection now, and park_reason() reads runs.jsonl.
+#
+# One routine for both call sites. The parking case list used to be duplicated, at
+# the normal path and again in --classify-only recovery, and the recovery copy is
+# exactly how #656 acquired the stale record that made this issue. A fix that
+# touched one site would have reproduced the bug it closed.
+
+park_label_add() { # $1 = issue number
+  # The label has to exist before it can be applied, and `gh label create` exits 1
+  # when it already does (verified, not assumed) -- hence the discard. Never fatal:
+  # losing a recorded outcome over a label write would be the worse failure. Never
+  # silent either, because a failed add leaves the issue selectable, which is the
+  # exact wrong-in-the-optimistic-direction this issue is about.
+  gh label create "$PARK_LABEL" --repo "$REPO" --color FBCA04 \
+     --description "the agent-session driver parked this issue" >/dev/null 2>&1 || true
+  gh issue edit "$1" --repo "$REPO" --add-label "$PARK_LABEL" >/dev/null 2>&1 \
+    || say "  WARNING: could not add the $PARK_LABEL label to #$1 -- it stays selectable"
+}
+
+park_label_remove() { # $1 = issue number
+  # Unconditional: `--remove-label` on an issue that lacks the label exits 0 with no
+  # error (verified), so reading the labels first would spend an API call to prevent
+  # nothing.
+  gh issue edit "$1" --repo "$REPO" --remove-label "$PARK_LABEL" >/dev/null 2>&1 \
+    || say "  WARNING: could not remove the $PARK_LABEL label from #$1 -- it stays parked"
+}
+
+apply_park_state() { # $1 = issue, $2 = outcome, $3 = ts, $4 = reason
+  case "$2" in
+    parked|failed|incomplete|no-gate)
+      # `repo` is recorded because this file is kept for auditing and one state dir
+      # serves several repos -- runs.jsonl already mixes two. Its absence in the old
+      # records is a defect this PR's own rationale cites against the file, so
+      # continuing to omit it while quoting it would be incoherent. Nothing reads
+      # this for selection either way.
+      jq -n -c --arg issue "$1" --arg repo "$REPO" --arg ts "$3" \
+               --arg outcome "$2" --arg reason "$4" \
+        '{issue:($issue|tonumber), repo:$repo, parked_at:$ts, outcome:$outcome, reason:$reason}' \
+        >> "$PARKED_LOG"
+      park_label_add "$1"
+      say "  parked -- excluded from future selection unless --retry $1"
+      ;;
+    gate-eligible|gate-human)
+      # A verdict means the run got somewhere, so an earlier park no longer holds.
+      # These are exactly the outcomes the driver already declines to park.
+      park_label_remove "$1"
+      ;;
+  esac
+  # budget-exhausted, driver-fault and ci-stale deliberately match neither arm.
+  # Parking a budget problem hides a recoverable config fault behind a skip reason
+  # on a perfectly good issue; un-parking on one would claim progress that did not
+  # happen. Keeping budget-exhausted out of the first list is guard G3.
+}
+
+park_reason() { # $1 = issue number -> the latest recorded reason for it
+  local r=""
+  if [ -s "$RUNS_LOG" ]; then
+    r="$(jq -r --arg n "$1" --arg repo "$REPO" \
+         'select(.issue == ($n|tonumber) and .repo == $repo) | .reason // empty' \
+         "$RUNS_LOG" 2>/dev/null | tail -1)"
+  fi
+  if [ -n "$r" ]; then
+    printf '%s\n' "$r"
+  else
+    printf '%s\n' "carries the $PARK_LABEL label; no local run record on this host"
+  fi
 }
 
 
@@ -255,8 +355,10 @@ ELIGIBLE=""
 select_issues() {
   say "== select =="
   local issues_json total
+  # `labels` is what carries the park state -- see PARK_LABEL. Requesting it here
+  # rather than in a second query is why the park list costs no extra API call.
   issues_json="$(gh issue list --repo "$REPO" --state open --limit 500 \
-                   --json number,title,body 2>/dev/null || echo '[]')"
+                   --json number,title,body,labels 2>/dev/null || echo '[]')"
   total="$(printf '%s' "$issues_json" | jq 'length')"
   say "repo $REPO: read $total open issues"
   [ "$total" -eq 500 ] && say "WARNING: hit the 500 limit; the queue read may be truncated"
@@ -264,7 +366,7 @@ select_issues() {
   load_board
   local prs parked
   prs="$(fetch_open_prs)"
-  parked="$(parked_numbers || true)"
+  parked="$(printf '%s' "$issues_json" | parked_numbers || true)"
 
   local candidates
   candidates="$(printf '%s' "$issues_json" | "$PYTHON_BIN" "$GATE_PY" tier-batch --marker "$MARKER")"
@@ -288,7 +390,7 @@ select_issues() {
     elif [ "$tier" = "unparsed" ];     then reason="tier: '## Tier:' line present but names neither tier"
     elif [ -n "$prline" ];             then reason="already has an open PR: $(printf '%s' "$prline" | cut -f2)"
     elif printf '%s\n' "$parked" | grep -qx "$n" && [ "$RETRY" != "$n" ]; then
-      reason="parked: $(jq -r --arg n "$n" 'select(.issue==($n|tonumber)) | .reason' "$PARKED_LOG" | tail -1)"
+      reason="parked: $(park_reason "$n")"
     fi
 
     if [ -n "$reason" ]; then
@@ -559,14 +661,7 @@ EOF
       session_id:$session, outcome:$outcome, reason:$reason, pr:$pr, run_dir:$rundir}' \
     >> "$RUNS_LOG"
 
-  case "$outcome" in
-    parked|failed|incomplete|no-gate)
-      jq -n -c --arg issue "$n" --arg ts "$ts" --arg outcome "$outcome" --arg reason "$reason" \
-        '{issue:($issue|tonumber), parked_at:$ts, outcome:$outcome, reason:$reason}' \
-        >> "$PARKED_LOG"
-      say "  parked -- excluded from future selection unless --retry $n"
-      ;;
-  esac
+  apply_park_state "$n" "$outcome" "$ts" "$reason"
 
   # The outcome is recorded, so the in-flight marker has done its job.
   rm -f "$STATE_DIR/inflight.json"
@@ -677,14 +772,7 @@ EOF
       recovered:true}' \
     >> "$RUNS_LOG"
 
-  case "$outcome" in
-    parked|failed|incomplete|no-gate)
-      jq -n -c --arg issue "$n" --arg ts "$ts" --arg outcome "$outcome" --arg reason "$reason" \
-        '{issue:($issue|tonumber), parked_at:$ts, outcome:$outcome, reason:$reason}' \
-        >> "$PARKED_LOG"
-      say "  parked -- excluded from future selection unless --retry $n"
-      ;;
-  esac
+  apply_park_state "$n" "$outcome" "$ts" "$reason"
 
   rm -f "$STATE_DIR/inflight.json"
   say ""

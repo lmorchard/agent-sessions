@@ -477,6 +477,29 @@ Closed, but the *reasoning* is still load-bearing.
   **Write-capable `execute` dispatch is a separate, narrower grant and is NOT covered** — and the
   grant must be asymmetric, because the verifier's value comes from being structurally unable to
   edit what it grades. Roadmap item 7 (#625) stays blocked on it.
+- **Where park state lives** → **decided 2026-07-29 (#5): a `driver-parked` label on the issue.**
+  This **revises D1 in part**, and the revision is the interesting half. Triage had settled D1 —
+  derive the park list from the latest outcome per issue in `runs.jsonl` — and the handoff said not
+  to re-litigate it. What reopened it was a different question: *where does the durable store live?*
+  D1 answered correctness and left the store under `--state-dir`, so the durability criterion
+  absorbed from #3 had **no named mechanism**, and `plan.md`'s rule is that a missing load-bearing
+  decision is a stop, not a guess.
+
+  What the label buys that the ledger could not: selection now consults **no local state at all**
+  (marker, tier, open PRs, board column and the park bit are all GitHub); **repo scoping is
+  structural**, where a ledger-derived list needed a filter, since `parked.jsonl` recorded no `repo`
+  and `runs.jsonl` already mixes two; and a **GHA host needs nothing carried in or committed back**,
+  where a tracked ledger would have meant a bot commit per run plus a race between concurrent runs.
+
+  D1's objection — a second record type can drift — still holds in general, and is weaker for a
+  mutable single bit than for an append-only log: the last-record-wins fragility that caused the bug
+  cannot recur. The framing that survives, and the one the old design lacked: **the ledger is
+  history, the label is current state**, and conflating those two *was* the bug. `runs.jsonl` still
+  supplies the skip reason, which is the half of D1 that was right.
+
+  Cost, paid knowingly: the write side came back (there is an un-park action again), and the driver
+  became a GitHub **writer** for the first time. `CLAUDE.md` bounds that — issue metadata, never
+  issue or PR content.
 - **The amendment trigger's tree** → both trees; see the entry above.
 - **Language split in `driver/`** → **bash for orchestration, Python for parsing and
   classification.** Orchestration means flags, process control, and invoking `gh`/`git`/`claude`;

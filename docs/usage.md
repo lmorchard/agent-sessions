@@ -147,7 +147,12 @@ queue depth with `ISSUES=`.
 ### What "eligible" means
 
 Open **and** carries the marker **and** its anchored `## Tier:` line says `auto-ok` **and** no
-open PR references it **and** it isn't parked.
+open PR references it **and** it doesn't carry the `driver-parked` label.
+
+Every one of those is read from GitHub, which is the point: selection consults **no local state**,
+so it answers the same way on any machine. The park bit used to be the exception — a gitignored
+`parked.jsonl` relative to cwd, append-only with no un-park record, so it was both per-machine and
+wrong about every issue it named (#5).
 
 The board column is **advisory** — it's reported but doesn't gate. That's deliberate: the column
 answers *does a human want this*, the marker answers *can this be attempted unattended*, and on
@@ -170,7 +175,11 @@ zero must say why — otherwise "no work available" and "my query is broken" loo
 | `budget-exhausted` | ≥95% of budget spent with no verdict | **no** — and it stops the loop |
 | `driver-fault` | the invocation never reached the agent | **no** |
 
-Parked issues are skipped by future selection until `--retry <n>`.
+Parking **adds the `driver-parked` label** to the issue; reaching a verdict (`gate-eligible` or
+`gate-human`) **removes** it. So a parked issue is skipped by future selection until either a later
+run reaches a verdict, `--retry <n>` ignores the label for one invocation, or you take the label off
+by hand — which you can do from the issue page, because the state is visible there rather than
+buried in a state file.
 
 `budget-exhausted` and `driver-fault` are deliberately never parked: both are recoverable
 configuration problems, and parking would hide them behind a skip reason on a perfectly good
@@ -206,7 +215,15 @@ Under `<state-dir>/runs/<issue>-<timestamp>/`:
 | `denials.txt` | permission denials, if any |
 | `child.pid` | for orphan detection |
 
-Plus `runs.jsonl` (one record per run) and `parked.jsonl` in the state dir.
+Plus two append-only logs in the state dir, both **history rather than state**:
+
+| File | What it is |
+|---|---|
+| `runs.jsonl` | one record per run — outcome, cost, session id, PR. Supplies the skip line's reason. |
+| `parked.jsonl` | one record per park *event*. Nothing reads it; selection reads the label. |
+
+That distinction is the fix in #5. Every `parked.jsonl` line was true when written — *at time T,
+issue N was parked* — and the bug was reading an append-only history as current state.
 
 ---
 
