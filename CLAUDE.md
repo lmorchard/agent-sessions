@@ -8,7 +8,7 @@ middle can run unattended, with a human only at the ends where judgment lives.
 **[docs/findings.md](docs/findings.md)** — the durable lessons: recurring defect classes, the
 evidence ledger, the instrument rules, and the verified command gotchas. **Read the gotchas before
 writing any flag list, gate row or `gh` query**; several are the opposite of what the flag names
-suggest. [docs/build-log.md](docs/build-log.md) is the chronology — provenance only, nothing reads
+suggest. [docs/build-log.md](docs/archive/build-log.md) is the chronology — provenance only, nothing reads
 it to decide. [docs/prior-art.md](docs/prior-art.md) has the external survey. This file is
 conventions + gotchas only.
 

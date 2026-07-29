@@ -10,10 +10,10 @@ What replaced it, by job:
 
 | What this file used to carry | Where it lives now |
 |---|---|
-| per-run provenance — issue, outcome, cost, PR | **`.driver-state/runs.jsonl`**, machine-readable, and [design.md](design.md)'s current-state table |
-| a move's narrative account | that session's `notes.md` under [dev-sessions/](dev-sessions/) |
+| per-run provenance — issue, outcome, cost, PR | **`.driver-state/runs.jsonl`**, machine-readable, and [design.md](../design.md)'s current-state table |
+| a move's narrative account | that session's `notes.md` under [dev-sessions/](../dev-sessions/) |
 | decisions and their reasoning | the **issue body** on the board — a decision in a comment is invisible to every downstream mode |
-| durable rules | **[findings.md](findings.md)** |
+| durable rules | **[findings.md](../findings.md)** |
 
 ## What this file is still good for
 
@@ -32,15 +32,15 @@ Entries are frozen as written on the day, so anything time-sensitive has decayed
   Test totals, line counts and suite sizes are all stale.
 - **"Still unexercised" claims.** The amendment path is described here as never having fired after
   five runs; it has since fired twice, and the policy governing it is settled — see
-  [design.md](design.md).
+  [design.md](../design.md).
 - **Queue and board snapshots.** This project now tracks work on
   [a board](https://github.com/users/lmorchard/projects/9); any queue state written below is a
   historical reading.
 - **Pending lists.** These were reconciled during move 6 — four entries turned out already closed
-  and one had lost its referent entirely. [design.md](design.md)'s roadmap is the live list.
+  and one had lost its referent entirely. [design.md](../design.md)'s roadmap is the live list.
 
-For current state read [design.md](design.md); for the rules read [findings.md](findings.md); for
-how to run any of it read [usage.md](usage.md).
+For current state read [design.md](../design.md); for the rules read [findings.md](../findings.md); for
+how to run any of it read [usage.md](../usage.md).
 
 ### Move 1 dogfood — starnet #129, stopped at Phase 0 (2026-07-24)
 
@@ -87,7 +87,7 @@ Three findings, all from *running* things rather than reading them:
    skipped, 2 warnings, 69s.
 3. **Criteria vs. guards** — #638 honestly reduces to **one criterion + three guards**, and there
    was nowhere to put guards. The split this produced is now part of the contract in
-   [design.md](design.md#criteria-vs-regression-guards).
+   [design.md](../design.md#criteria-vs-regression-guards).
 
 Also noted: the chosen mechanism (per-test marks) is what *keeps* the issue `auto-ok` — the
 `pyproject.toml` alternative touches build/CI config, which the risk-gated list pulls toward
@@ -358,7 +358,7 @@ its own frozen spec.
 reviewed this" is self-satisfiable in this setup. Doesn't affect #686's verdict; does constrain what a
 board-driver can infer.
 
-**Move 2 is done.** The brief at [handoff-express.md](archive/handoff-express.md) is now a record of that
+**Move 2 is done.** The brief at [handoff-express.md](handoff-express.md) is now a record of that
 run rather than a task. Its central bet paid off: fresh context *was* load-bearing, not hygiene —
 running `express` cold through the marker is what surfaced findings 1, 2, and 6, none of which the
 context that wrote the criteria could have hit.
@@ -372,7 +372,7 @@ broken commands but means they carry no behavioural evidence.
 
 Queue: #585 (`auto-ok`) remains ready — now earmarked as the board-driver's first vehicle.
 
-**Next session: the board-driver (move 3).** Brief at [handoff-board-driver.md](archive/handoff-board-driver.md).
+**Next session: the board-driver (move 3).** Brief at [handoff-board-driver.md](handoff-board-driver.md).
 Fresh context is load-bearing again, for a sharper reason than last time: the driver's job is to decide
 what to trust about the skill *from outside it*, and the context that built the skill knows which rules
 are load-bearing by memory rather than by evidence — the exact bias the driver must not inherit.
@@ -444,7 +444,7 @@ scenarios deferred until there's something worth hardening.
 
 ### Move 3 — the board-driver, built and run (2026-07-25)
 
-Session artifacts: [dev-sessions/2026-07-25-0926-board-driver/](dev-sessions/2026-07-25-0926-board-driver/)
+Session artifacts: [dev-sessions/2026-07-25-0926-board-driver/](../dev-sessions/2026-07-25-0926-board-driver/)
 (`spec.md` answers the four questions, `notes.md` has the run account).
 
 **Built:** `driver/agent-session-driver.sh` — five stages (`select` → `invoke` → `classify` →
@@ -783,7 +783,7 @@ substitute**. A merge-gate row routinely satisfied by a substitute is measurably
 runs its cited command — the same erosion 4a fixed for CI, arriving through a different door. I also
 hit it myself and pushed a bad lockfile commit to decafclaw's main before reverting it.
 
-**Next session was measurement (move 5)** — see below. Brief was at [handoff-measurement.md](archive/handoff-measurement.md).
+**Next session was measurement (move 5)** — see below. Brief was at [handoff-measurement.md](handoff-measurement.md).
 Fresh context is load-bearing for a sharper reason than before: this session's context got four things
 wrong while confident about all of them — a fabricated measurement reported as fact, a guard that could
 not fail, a gate row its own driver could not satisfy, and a bad commit pushed to another repo's
@@ -793,7 +793,7 @@ confidence-to-correctness calibration, and measurement is the instrument that ca
 
 ### Move 5 — the discriminate rule, measured and CUT (2026-07-27)
 
-Session artifacts: [dev-sessions/2026-07-27-1403-measurement/](dev-sessions/2026-07-27-1403-measurement/)
+Session artifacts: [dev-sessions/2026-07-27-1403-measurement/](../dev-sessions/2026-07-27-1403-measurement/)
 — `microtest/results.md` is the full account, `microtest/results/` the raw per-rep JSON, and every
 variant is *derived* from the shipped file by `build-variants.py` rather than hand-copied.
 

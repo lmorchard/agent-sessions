@@ -2,7 +2,7 @@
 
 **The durable, still-governing lessons.** If you are picking this project up cold, read
 [design.md](design.md) then this file, and stop there. The chronology in
-[build-log.md](build-log.md) is provenance; nothing here requires reading it.
+[build-log.md](archive/build-log.md) is provenance; nothing here requires reading it.
 
 This file exists because the diary grew: every move produced lessons that outlived their run, and
 they had nowhere to live except the narrative that produced them. **A lesson belongs here the

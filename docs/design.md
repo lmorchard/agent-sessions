@@ -9,7 +9,7 @@ Two companion files, split out of this one in move 6:
 - **[findings.md](findings.md)** — the durable lessons: recurring defect classes, the evidence
   ledger, the instrument rules, and the verified command gotchas. **Read it second, and read it
   before writing any flag list or gate row.**
-- **[build-log.md](build-log.md)** — the chronological account of moves 1–5, **closed**. Read it for
+- **[build-log.md](archive/build-log.md)** — the chronological account of moves 1–5, **closed**. Read it for
   the incidents that produced the rules in `findings.md`, not for state; per-run provenance now lives
   in `.driver-state/runs.jsonl` and a move's account in its session `notes.md`.
 - **[usage.md](usage.md)** — the operator's guide: commands, outcomes, run artifacts, recovery.
