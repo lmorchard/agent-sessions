@@ -46,12 +46,25 @@ the project's CLAUDE.md marks off-limits."* For this repo that is:
   run; this line is its **intake-time counterpart**, and it takes effect without any skill file
   being touched.
 
+- **`driver/gate.py` — the oracle, and therefore off-limits too.** As of 2026-07-28 this module is
+  what classifies a run's outcome (`classify_pr_body`, called at `agent-session-driver.sh:485` and
+  `:616`). **An issue whose work edits it is editing the code that grades its own run** — the
+  implementer authoring its own oracle, one level removed from the skill. The `skills/**` rule does
+  not cover it, and this line was added because the move-7 partition missed it: `driver/` was
+  wholly drivable before the classifier moved there.
+
 Plus the standing defaults trigger 2 already names: auth/authorization, secrets, data
 migration/deletion, deploy/infra/CI config, dependency changes.
 
-**Everything else here is drivable** — `driver/`, `docs/`, `Makefile`. That partition is the only
-reason this repo can dogfood its own front half at all: skill-wording work routes to a human, and
-driver/doc work does not.
+**The rest of `driver/`, plus `docs/` and `Makefile`, is drivable.** That partition is the only
+reason this repo can dogfood itself at all: skill-wording and oracle work routes to a human,
+orchestration and doc work does not.
+
+**Residual risk, stated rather than gated away.** `agent-session-driver.sh` still contains the
+outcome *routing* — the parking case lists, the budget reclassification thresholds — and a run could
+in principle edit those to flatter its own record. Path granularity cannot express "this file except
+its classification path," so this is not gated. The mitigations are the 49-assertion fixture suite,
+`make driver-check`, and running watched. Revisit if a run ever touches that routing.
 
 ## Governing principle
 
