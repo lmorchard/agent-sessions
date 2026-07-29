@@ -127,6 +127,26 @@ project's CLAUDE.md marks off-limits. A perfectly-tested auth change still deser
 Write the resulting tier into the issue body with its reason. A tier label is a convenience index
 for querying; the body is authoritative.
 
+### The heading format is part of the contract
+
+Downstream selection reads the tier by anchoring on `^## Tier:` and taking the tier token **from that
+heading line**. So the section must be written:
+
+```
+## Tier: auto-ok
+```
+
+or `## Tier: needs-review`, with the reason in prose beneath it. Three ways to get this wrong, each of
+which makes a correctly-tiered issue unreadable or ambiguous:
+
+- **`## Tier` with no colon** — does not match the anchor at all; the issue reads as having no tier.
+- **The tier token only in the paragraph below** — the heading line is all that is read.
+- **Both tier words on the heading line** (e.g. a `[auto-ok | needs-review]` placeholder) — reads as a
+  conflict, and a conflict is surfaced rather than resolved, so the issue is skipped.
+
+**Exactly one such heading per body.** When a decision changes a tier, the revised heading **replaces**
+the old one — see the write-back steps in `phases/intake.md` and `phases/triage.md`.
+
 ## Examples
 
 **The full reduction** — wish → criteria → tier. *"Make the export button handle big datasets

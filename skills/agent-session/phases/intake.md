@@ -87,9 +87,14 @@ exception, and needs no rule here: `acceptance-criteria.md`'s trigger 1 already 
    - *New:* `gh issue create` with body = `<!-- agent-session:spec -->` + spec; title from
      the Goal (<70 chars); apply the tier label (`--label`); add to the board's Ready
      column if configured.
-   - *Existing (augment):* `gh issue edit <n>` — prepend the marker, replace/append the
-     spec sections, apply the tier label. **Preserve the original author's text**; augment,
-     don't overwrite intent.
+   - *Existing (augment):* `gh issue edit <n>` — prepend the marker, add the spec sections,
+     apply the tier label. **Preserve the original author's text**; augment, don't overwrite
+     intent.
+   - **The `## Tier:` heading is the one section you replace rather than add.** A body with two
+     `## Tier:` headings reads as a conflict and the issue is skipped — so when a decision revises a
+     tier, edit the existing heading in place. Superseded *reasoning* can be kept, but only under a
+     heading the anchor does not match (e.g. `### Original tier assessment (superseded)`). Format per
+     `acceptance-criteria.md` → "The heading format is part of the contract".
 
 11. **Report** the issue URL, the tier + reason, and the resume command.
 

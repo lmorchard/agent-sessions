@@ -72,6 +72,16 @@ criteria), and you do the part that does (ratify). See
    `intake`'s Design-decisions step with it — the body, not a comment; comments are invisible
    to every downstream mode.
 
+   **The `## Tier:` heading is replaced, never added twice.** An issue that already carries one — and
+   a re-tiered issue always does — gets that heading edited in place. Two `## Tier:` headings read as
+   a conflict and the issue is skipped, silently from the author's side. Keep superseded reasoning
+   only under a heading the anchor does not match. Format per `acceptance-criteria.md` → "The heading
+   format is part of the contract".
+
+   **Verify the write-back rather than trusting it:** re-read each edited body and confirm the
+   author's original text survives as a substring of it, and that exactly one `## Tier:` heading
+   remains. Both failures are invisible by eye on a long body.
+
 6. **Report** a summary: scanned N, already-specified M, augmented K (with tiers), left
    under-specified (and why — e.g. needs a design decision only the user can make).
 
