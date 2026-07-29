@@ -340,6 +340,107 @@ else
   bad "failed branch consults the stream" "has_success_result in the rc!=0 guard" "absent"
 fi
 
+# --- a skill dir nested inside the target checkout -------------------------
+
+echo "nested skill-dir: the flags must not be able to describe a self-editing run"
+
+# The hosted run cd's into --repo-path and is granted --add-dir on --skill-dir.
+# If the skill lives INSIDE the checkout, the run's own working tree contains the
+# instructions grading it, and the Edit/Write deny rules assembled from SKILL_DIR
+# are the only thing standing between the implementer and its own oracle. That
+# configuration reads as entirely ordinary from the flags alone -- nothing about
+# `--skill-dir ./skills/agent-session --repo-path .` looks wrong -- which is
+# exactly why startup has to say so rather than leave it to the deny rules.
+#
+# Every case here invokes the SHIPPED driver as a subprocess, never a restatement
+# of its validation. PATH is pinned to /usr/bin:/bin, which on this host carries
+# jq, git and python3 but NOT gh, so any configuration that survives validation
+# dies at the required-command check: no network, no claude, no state dir. The
+# exit status cannot discriminate -- the guarded and unguarded paths both exit 2
+# -- so every case asserts the stderr text instead.
+
+NEST_LITERAL='--skill-dir is inside --repo-path'
+NEST_ROOT="$(cd "$(dirname "$DRIVER")/.." && pwd)"
+NEST_SKILL="$NEST_ROOT/skills/agent-session"
+
+# Its own temp dir rather than sharing $TMPD, so this section does not silently
+# depend on sitting below the block that creates it. The trap names both; each is
+# set long before EXIT fires.
+NEST_TMP="$(mktemp -d)"
+trap 'rm -rf "$TMPD" "$NEST_TMP"' EXIT
+
+_nest_run() { # $1 = cwd, rest = driver args; sets NEST_ERR and NEST_RC
+  local cwd="$1"; shift
+  NEST_ERR="$( ( cd "$cwd" && PATH=/usr/bin:/bin "$DRIVER" "$@" ) 2>&1 >/dev/null )"
+  NEST_RC=$?
+}
+
+# Reduce the run to a short comparable token, but derive it from the real stderr
+# with a literal substring match -- the assertion is on the message, not on a
+# constant the harness made up.
+_nest_warned()  { case "$NEST_ERR" in *"$NEST_LITERAL"*) printf 'warned\n' ;; *) printf 'no-warn\n' ;; esac; }
+_nest_reached() { case "$NEST_ERR" in *'required command not found: gh'*) printf 'gh-check\n' ;;
+                                      *) printf 'stopped-early\n' ;; esac; }
+_nest_verdict() { printf '%s %s\n' "$(_nest_warned)" "$(_nest_reached)"; }
+_nest_first()   { printf '%s\n' "${NEST_ERR%%$'\n'*}"; }
+_nest_made()    { [ -d "$1" ] && printf 'created\n' || printf 'absent\n'; }
+
+# C1. The skill directory of this very repo, inside this very repo.
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir "$NEST_SKILL" --repo-path "$NEST_ROOT" --state-dir "$NEST_TMP/s-nested"
+check "nested --skill-dir warns with the literal message" "warned" "$(_nest_warned)"
+check "  and exits 2"                                     "2"      "$NEST_RC"
+check "  and does not create the state dir"               "absent" "$(_nest_made "$NEST_TMP/s-nested")"
+
+# C2. The degenerate containment case: a directory contains itself.
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir "$NEST_SKILL" --repo-path "$NEST_SKILL" --state-dir "$NEST_TMP/s-same"
+check "identical --skill-dir and --repo-path warn the same way" "warned" "$(_nest_warned)"
+
+# C3. Containment is a fact about resolved paths, not about argument strings. A
+# comparison done on the raw arguments passes both of these straight through.
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir ./skills/agent-session --repo-path . --state-dir "$NEST_TMP/s-rel"
+check "relative paths still detect containment" "warned" "$(_nest_warned)"
+
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir "$NEST_ROOT/driver/../skills/agent-session" --repo-path "$NEST_ROOT" \
+  --state-dir "$NEST_TMP/s-dotdot"
+check ".. in the path still detects containment" "warned" "$(_nest_warned)"
+
+# C4. The escape hatch still warns -- an operator who opts in should see what
+# they opted into in the log, not a silent pass.
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions --allow-nested-skill-dir \
+  --skill-dir "$NEST_SKILL" --repo-path "$NEST_ROOT" --state-dir "$NEST_TMP/s-allow"
+check "--allow-nested-skill-dir proceeds past validation" "gh-check" "$(_nest_reached)"
+check "  and warns on the way through"                    "warned"   "$(_nest_warned)"
+
+# The control probe. Not a criterion: it proves the message assertions above are
+# real discriminators rather than a token the harness always prints.
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir /nope --repo-path "$NEST_ROOT" --state-dir "$NEST_TMP/s-nope"
+check "a missing --skill-dir still reports its own error" \
+  "error: --skill-dir does not exist: /nope" "$(_nest_first)"
+
+# The three false-positive guards. These pass today and must keep passing: a
+# containment check that refuses ordinary layouts is worse than none, because the
+# operator learns to reach for --allow-nested-skill-dir by reflex.
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir "$NEST_SKILL" --repo-path "$NEST_ROOT/driver" --state-dir "$NEST_TMP/s-sibling"
+check "a sibling directory is not containment" "no-warn gh-check" "$(_nest_verdict)"
+
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir "$NEST_SKILL" --repo-path "$HOME/devel/decafclaw" --state-dir "$NEST_TMP/s-other"
+check "an unrelated checkout is not containment" "no-warn gh-check" "$(_nest_verdict)"
+
+# /a/bc is a string prefix match against /a/b and a path prefix match against
+# neither. This is what catches a naive [[ $SKILL_DIR == $REPO_PATH* ]].
+mkdir -p "$NEST_TMP/a/b" "$NEST_TMP/a/bc/phases"
+: > "$NEST_TMP/a/bc/phases/express.md"
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir "$NEST_TMP/a/bc" --repo-path "$NEST_TMP/a/b" --state-dir "$NEST_TMP/s-prefix"
+check "a string prefix that is not a path prefix is not containment" "no-warn gh-check" "$(_nest_verdict)"
+
 # --- syntax ----------------------------------------------------------------
 
 echo "syntax"

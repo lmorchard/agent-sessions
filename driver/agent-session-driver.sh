@@ -30,6 +30,7 @@ RUN_TIMEOUT=5400
 STATE_DIR="./.driver-state"
 BOARD=""
 DRY_RUN=0
+ALLOW_NESTED=0
 RETRY=""
 CLASSIFY_ONLY=""
 MODEL=""
@@ -69,6 +70,12 @@ agent-session-driver.sh --repo <owner/name> --skill-dir <path> --repo-path <path
   --board <owner/number>  optional; advisory board-column reporting
   --model <name>          optional; passed to claude
   --dry-run               selection only; no claude invocation
+  --allow-nested-skill-dir
+                          proceed when --skill-dir resolves inside --repo-path.
+                          The run cannot write skill files either way (see
+                          DENIED_TOOLS), but the nesting is usually a typo, so it
+                          must be opted into. Pointing the driver at its own repo
+                          is the legitimate case the flag exists for.
   --retry <n>             un-park issue n for this invocation
   --classify-only <n>     classify + record issue n from live PR state; no
                           claude invocation. Recovers the outcome of a run whose
@@ -92,6 +99,7 @@ while [ $# -gt 0 ]; do
     --retry)          RETRY="${2:?}"; shift 2 ;;
     --classify-only)  CLASSIFY_ONLY="${2:?}"; shift 2 ;;
     --dry-run)        DRY_RUN=1; shift ;;
+    --allow-nested-skill-dir) ALLOW_NESTED=1; shift ;;
     -h|--help)        usage; exit 0 ;;
     *)                die "unknown argument: $1 (try --help)" ;;
   esac
@@ -106,6 +114,43 @@ if [ "$DRY_RUN" -eq 0 ] && [ -z "$CLASSIFY_ONLY" ]; then
   [ -d "$SKILL_DIR" ] || die "--skill-dir does not exist: $SKILL_DIR"
   [ -d "$REPO_PATH" ] || die "--repo-path does not exist: $REPO_PATH"
   [ -f "$SKILL_DIR/phases/express.md" ] || die "no phases/express.md under $SKILL_DIR"
+
+  # Containment is a fact about RESOLVED paths, not about the argument strings --
+  # `--skill-dir ./skills/agent-session --repo-path .` is the nested case and the
+  # two strings share no prefix at all. abspath() below runs too late and only
+  # prepends $PWD; it does not fold `.`/`..`. So resolve both here, with the shell
+  # builtin rather than realpath, which is not in the required-command loop.
+  #
+  # CDPATH= because SKILL_DIR really can still be relative at this point, and a
+  # relative `cd` with CDPATH set resolves against it AND echoes the destination,
+  # which would corrupt the capture.
+  #
+  # This does NOT protect the skill files: DENIED_TOOLS is assembled from
+  # SKILL_DIR unconditionally, so a nested run still cannot write them. What it
+  # catches is a MISTYPED --skill-dir that silently aims the deny rules at paths
+  # the run legitimately needs. Pointing the driver at its own repo is nested and
+  # correct -- which is why this is an opt-in refusal and not a hard error.
+  #
+  # `-d` is not enough to guarantee the cd succeeds -- a directory without the
+  # execute bit passes -d and cannot be entered. Without the `|| die` that would
+  # abort under `set -e` with no message at all, which is the confusing failure
+  # this whole check exists to replace.
+  skill_real="$(CDPATH= cd -- "$SKILL_DIR" && pwd -P)" \
+    || die "cannot resolve --skill-dir: $SKILL_DIR"
+  repo_real="$(CDPATH= cd -- "$REPO_PATH" && pwd -P)" \
+    || die "cannot resolve --repo-path: $REPO_PATH"
+  # The trailing slash on the subject is what makes this a PATH-prefix test
+  # rather than a string one: without it, --repo-path /a/b matches /a/bc. It also
+  # makes the degenerate equal case match, since `*` matches the empty string.
+  case "$skill_real/" in
+    "$repo_real"/*)
+      log "WARNING: --skill-dir is inside --repo-path: the run's work product would be the instructions grading it"
+      log "  skill: $skill_real"
+      log "  repo:  $repo_real"
+      [ "$ALLOW_NESTED" -eq 1 ] || \
+        die "--skill-dir is inside --repo-path (pass --allow-nested-skill-dir to proceed)"
+      ;;
+  esac
 fi
 
 for c in gh jq git; do

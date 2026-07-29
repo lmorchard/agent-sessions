@@ -378,9 +378,18 @@ Two inputs for that decision, both verified from primary sources in move 7
 4. **The GHA host, and a durable park mechanism that survives a host change.** Verified: no
    `.github/` exists in this repo, and the park list is `./.driver-state/parked.jsonl` — relative
    to cwd, therefore per-machine.
-5. **A guard against `--repo-path` containing `--skill-dir`.** Verified absent. That is precisely
-   the self-modification configuration, and today it is reachable by typo. Small and mechanical.
-   Mutation-test it: the guard is worthless unless removing it makes a named test fail.
+5. ~~**A guard against `--repo-path` containing `--skill-dir`.**~~ **DONE** — issue #4, move 8.
+   Landed as a *warning plus an opt-in refusal*, not the absolute refusal this entry assumed:
+   triage found that `SKILL := $(CURDIR)/skills/agent-session`, so pointing the driver at **this**
+   repo — the drivable `driver/`/`docs/`/`Makefile` work — *is* the nested configuration, and an
+   absolute refusal would have foreclosed it. The self-modification hazard this entry names was
+   already covered by `DENIED_TOOLS`, which is assembled from `SKILL_DIR` unconditionally; what the
+   guard actually buys is fail-fast on a **typo**. Mutation-testability is structural: the eleven
+   new cases invoke the shipped driver as a subprocess, so deleting the guard flips them.
+
+   **Consequence for dogfooding:** driving *this* repo now requires `--allow-nested-skill-dir`.
+   No shipped `make` target is affected — `run` defaults `REPO_PATH` to decafclaw, and `dry-run`
+   passes no skill dir at all — but a hand-assembled self-run needs the flag.
 
 ### Driver state correctness
 
