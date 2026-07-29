@@ -26,10 +26,11 @@ The dominant defect class, and the one the merge gate exists to prevent. A gate 
 check cites a specific mechanism; something *near* that mechanism supplies the answer; the row
 reports true. Nothing lies, and the row means nothing.
 
-**Every instance below is fixed. The gap is not the instances — it is that nobody has ever
-looked.** Eight of the nine were found by an unattended run stumbling into them; exactly one was
-found by looking. So the number remaining is **unknown**, and phase 3 converts each remaining one
-into an automatic merge.
+**Nine of the ten below are fixed; the tenth is open. The gap is not the instances — it is that
+nobody has ever looked.** Eight of the ten were found by an unattended run stumbling into them; **two
+were found by looking**, and both of those came from *verifying a change rather than auditing the
+code*. So the number remaining is **unknown**, and phase 3 converts each remaining one into an
+automatic merge.
 
 **The sweep that has never been done:** enumerate every gate row, guard and manifest check, and ask
 of each *"what could satisfy this that is not the thing it names?"* Tracked as
@@ -51,10 +52,18 @@ to the rate at which they arrive.
 | 7 | Three independent unattended runs reported `project-gates` satisfied **by substitute**, having run `make check`'s four steps natively because `make check` itself was unpassable. | move 4c | fixed |
 | 8 | `amendments: none` was true only under one of two readings of the amendment policy. The policy now names both trees, and under it #668 was an amendment. | move 5 (#668) | closed 2026-07-27 |
 | 9 | **The driver's test suite tests a replica of the classifier, not the classifier.** `test-driver.sh` hand-copies driver logic — one helper is annotated *"Mirrors the driver's extraction + comparison exactly"* with nothing enforcing that — and it has **already diverged**: `classify_outcome` is 53 lines in the driver and 15 in the copy, with **zero `ci-stale` awareness** in the copy. | verified 2026-07-27 | closed by [#9](https://github.com/lmorchard/agent-sessions/issues/9) |
+| 10 | **`pr_for_issue` matches a bare `#N` anywhere in an open PR's body, title or branch name**, so a PR that merely *mentions* an issue removes it from selection. The function's own comment says *"an express PR carries `Closes #N`"* and the code never requires the keyword. A docs PR listing six issue numbers hid six issues; `closingIssuesReferences` was empty on it. | verified 2026-07-29 | open, [#23](https://github.com/lmorchard/agent-sessions/issues/23) |
 
 **The tell:** the row names a command, and the evidence offered is not that command's output.
 **The fix, every time:** make the row cite a command that is actually run, and make its failure
 mode distinguishable from its success mode.
+
+**Instance 10 adds a direction the first nine did not have: this class can cost *liveness*, not just
+correctness.** Nine of them made a check wrongly report *true*, which a later stage or a reader could
+still catch. This one makes eligible work wrongly report *absent*, and nothing downstream looks — the
+driver idles while printing a skip reason that reads as true. It is also **self-amplifying in this
+repo specifically**: the matcher keys on issue numbers appearing in prose, so the more the project
+documents its own triage, the more of its own backlog it hides.
 
 **Instance 9 was the worst of the nine, and it is worth keeping the evidence.** Running both
 classifiers over one identical gate block (`ci: 2/2 pass @ 0d08b2d`, head `e8f03389abcdef`) gave:
