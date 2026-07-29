@@ -395,3 +395,68 @@ the right case to honour the policy on rather than carve its first exception.
 
 The amended check was itself mutation-tested: a simulated code-level producer is caught, a
 comment-only mention is ignored.
+
+## Step 7 — prior-art leads 1-3, fetched (2026-07-28)
+
+`prior-art.md` labelled these **unverified model recall, never fetched**. Fetched primary sources.
+**Two of the three recorded claims did not survive.** Lead 4 (PIT/Stryker) left unfetched — ranked
+lowest value, and the practice is already habitual here.
+
+### Lead 1 — the hoped-for payoff is not there
+
+Mechanism **confirmed**: SLSA provenance binds via in-toto `subject` + `digest`
+(`sha256`/`sha512`/`gitCommit`); threat (F) requires *"the provenance's `subject` matches the hash of
+the package."*
+
+The valuable half is **refuted.** The lead asked whether their threat model already enumerates the
+substitution/staleness failures we keep finding one run at a time. Checked the provenance spec **and**
+the dedicated threats page: **attestation-applied-to-the-wrong-artifact is not modelled, staleness is
+not covered, and adjacent-evidence satisfaction is not a threat entry.** The model is
+build-artifact-centric; ours is a verification-time problem, and the standards hand it to "the
+consumer."
+
+**So we are not behind a literature here** — #2's sweep must enumerate its own. What *does* transfer
+is the shape, and it produced a new candidate instance: **`project-gates` records a local
+`make check` and names no commit at all** — an unbound claim of exactly the form the `ci` row used to
+be.
+
+### Lead 2 — promptfoo fits, and its default would have destroyed the study
+
+`--repeat <number>` gives reps; multiple `prompts:` give control-vs-treatment; `-o` exports
+`jsonl`/`json`/`csv` so **per-rep raw outputs survive for hand-reading** — the one thing move 5 could
+not do without. Plausibly replaces the hand-rolled harness.
+
+**But promptfoo caches LLM responses by default.** `--repeat 15` without `--no-cache` returns
+identical cached results, so a study whose metric **is variance** would report zero variance with
+every arm looking perfectly consistent. The instrument's default silently destroys the measurement
+while appearing to work — "a null must never render as a positive," one level up. Also
+`PROMPTFOO_STRIP_RESPONSE_OUTPUT` discards model outputs, a second way to lose the thing that must be
+read. *Documented, not run — verify empirically before adopting.*
+
+**DSPy refuted as the wrong instrument.** It optimises prompts toward an aggregate metric until
+quality converges (0.41 → 0.63 F1). A tally-only reading of move 5 would have concluded the opposite
+of the truth, so a tool that reports convergence is the wrong shape for this project's question.
+
+### Lead 3 — confirmed, and it sharpens our own design
+
+**The most transferable line in the whole survey:** *"Renovate only automerges branches which are
+up-to-date and green."* Up-to-date is our `ci-stale` guard — but they make it a **precondition of
+automerging** rather than a post-hoc check on a verdict already published. Our gate derives the
+verdict and *then* asks whether the commit still ships. Theirs cannot reach the question.
+
+`minimumReleaseAge` is a deliberate wait-before-acting as *policy* rather than a poll — compare move
+4c, where "wait for CI to settle" had to become `gh pr checks --watch` because every polling
+mechanism was denied.
+
+**Partly refuted:** no pre-approved-low-risk-category exists; Renovate scopes automerge via
+`packageRules` on the change's *nature*, not a durable per-item label.
+
+**ITIL sharpens a real weakness in our tiering.** A standard change is pre-authorized on three
+conditions *together*: documented procedure, risk formally accepted in advance, and **prior runs have
+proven the outcome predictable** — and the governance body pre-approves the **template, not the
+instance**. Our `auto-ok` is stamped **per issue** on its own criteria. We have no notion of *"this
+class of change is safe because N instances landed cleanly."*
+
+That is the answer to the phase-3 open decision's actual question: ITIL's *when may this be
+automatic* is **evidence-based and finite**, which is exactly what a gate list growing by one per
+session lacks. Both this and Renovate's ordering point are now recorded in `design.md`'s roadmap.

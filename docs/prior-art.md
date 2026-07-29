@@ -203,74 +203,114 @@ generic gates. Not fetched and therefore not repeated here: OpenSpec's star coun
 state machine, Composio AO's autonomous PR lifecycle, Kiro's 2026 SMT-solver requirements analysis,
 SpecRoute. Each is a lead, not a fact.
 
-## Leads not yet surveyed (added 2026-07-27, move 5) — ALL UNVERIFIED
+## Leads 1-3 — SURVEYED AND VERIFIED (move 7, 2026-07-28)
 
-Everything above was surveyed when this project was a **skill**. It has since grown a harness, a
-machine-readable merge gate, and a measurement practice, and those have prior art nobody went
-looking for. Each lead below is paired with the **specific unsolved problem** it might answer —
-that pairing is the only reason to chase any of them.
+Fetched primary sources. **Two of the three recorded claims did not survive**, which is the point of
+fetching. What each lead was paired with — a specific unsolved problem — is kept, and answered.
 
-**None of this was fetched.** It is model recall at the end of a long session, in a repo whose
-central lesson is that confident recall is unreliable. The root URLs are high-confidence; the
-*claims about what they contain* are exactly where to expect error. Treat these as search terms,
-not findings.
+Lead 4 (PIT / Stryker, mutation testing) remains unfetched and was ranked lowest value; the practice
+is already habitual here.
 
-### 1. Claim-binding — the recurring defect class already has a literature
-**in-toto** <https://in-toto.io/> · **SLSA** <https://slsa.dev/>
+### 1. Claim-binding — mechanism CONFIRMED, the valuable half REFUTED
 
-Supply-chain attestation formats exist to make a claim *bound to the digest of the thing it
-describes*, on the theory that an unbound claim is merely a nearby assertion. **That is the
-adjacent-evidence defect class** ([findings.md § 1](findings.md#1-a-row-satisfied-by-evidence-adjacent-to-what-it-names--open-gap),
-nine instances as of move 6) — `tamper: clean` hiding an absent diff, `ci: 2/2 pass` describing a
-commit that no longer ships. `ci: … @ <sha>` is a hand-rolled mini-attestation, and
-"make the value carry what it describes" was independently rediscovered here.
+Sources: [SLSA provenance v1.0](https://slsa.dev/spec/v1.0/provenance) ·
+[SLSA threats v1.0](https://slsa.dev/spec/v1.0/threats)
 
-*Chase first:* whether the `agent-session:gate` block should **be** an attestation rather than
-resemble one, and whether their threat model already enumerates the substitution/staleness
-failures this project keeps finding one run at a time. Highest-value lead of the four.
+**Confirmed:** provenance binds a claim to what it describes via in-toto's **`subject`** field
+carrying a **`digest`** (`sha256`, `sha512`, `gitCommit`). Threat **(F) "Tamper with artifact after
+CI/CD"** is mitigated by requiring *"the provenance's `subject` matches the hash of the package."*
+So the mechanical idea is real and standardised.
 
-*Partially validated already:* **Bernstein** (see the comparison section above) ships signed
-lineage plus an HMAC-chained audit log a reviewer can verify **offline without rerunning it** — the
-attestation idea, in this exact domain, today. Read that before designing anything.
+**Refuted — and this was the hoped-for payoff.** The recorded lead asked *"whether their threat model
+already enumerates the substitution/staleness failures this project keeps finding one run at a
+time."* **It does not.** Checked both the provenance spec and the dedicated threats page:
 
-### 2. Instruction evaluation — the measurement cost limit
-**DSPy** <https://github.com/stanfordnlp/dspy> · **promptfoo** <https://promptfoo.dev/>
+- an attestation **applied to a different artifact than the one it describes** — not modelled; the
+  spec assumes the verifier applies it correctly,
+- **staleness**, where provenance correctly describes a commit that is no longer what ships — not
+  covered,
+- **verification satisfied by adjacent-but-different evidence** — not enumerated as a threat.
 
-Move 5 cost ~$50 and half a session to ablate **one** section of instruction text, hand-rolled
-from `claude -p` + `jq` + bash. About six of the skill's rules remain unmeasured, and that price
-is the standing reason they may stay that way. DSPy's premise — treat prompt text as parameters
-optimised against a metric rather than prose to be argued about — is the automated form of what
-move 5 did by hand; eval harnesses like promptfoo target the run-N-variants-and-compare loop
-directly.
+The model is **build-artifact-centric**; ours is a **verification-time** problem, and the standards
+push it onto "the consumer." **So this project is not behind a literature here.** The sweep (#2)
+cannot crib a threat list; it has to enumerate its own.
 
-*Chase first:* whether either can drive a **control-vs-treatment ablation with per-rep outputs
-readable by hand**, since reading every rep is where all of move 5's value came from — a harness
-that only reports aggregate scores would have concluded the opposite of the truth.
+**What does transfer, and it is actionable.** `subject` + `digest` validates the shape we
+independently reached with `ci: … @ <sha>`: *make the value carry the digest of what it describes.*
+Generalised, that is a question the sweep should ask of **every** row, not just `ci` — and one
+answer is already visible. **`project-gates` records a local `make check` and names no commit at
+all**, so it is an unbound claim of exactly the shape the `ci` row used to be. Candidate instance
+for #2.
 
-### 3. Change classification and bot-merge policy — phase 3
-**ITIL "standard change"** (no single canonical URL) · **Renovate** <https://docs.renovatebot.com/>
+### 2. Instruction evaluation — promptfoo CONFIRMED with a trap; DSPy is the wrong tool
 
-`auto-ok` / `needs-review` is structurally the decades-old **standard vs. normal change**
-distinction: a standard change is pre-approved because it is low-risk, repeatable and
-well-understood, and bypasses the review board *by policy*. Separately, Renovate and Dependabot
-are the shipping, narrow, **successful** version of unattended PR generation with conditional
-auto-merge — they have a real policy language for "when may a bot merge?"
+Sources: [promptfoo CLI](https://www.promptfoo.dev/docs/usage/command-line/) ·
+[promptfoo configuration](https://www.promptfoo.dev/docs/configuration/parameters/) ·
+[DSPy](https://dspy.ai/)
 
-*Chase first:* Renovate's automerge configuration surface. Phase 3 has now receded three times and
-its gate list grows by roughly one per session; someone has already had to design this decision
-surface for a constrained domain, and the shape of what they chose to make configurable is the
-useful part.
+**promptfoo confirmed fit for purpose.** `--repeat <number>` ("Number of times to run each test")
+gives reps per case; multiple `prompts:` entries against one test set give control-vs-treatment;
+`-o` exports `jsonl`/`json`/`csv`, so **per-rep raw outputs survive for reading by hand** — the one
+requirement move 5 could not do without. It could plausibly replace this project's hand-rolled
+`claude -p` + `jq` + bash harness.
 
-### 4. Mutation testing — a name for a practice already in use
-**PIT** <https://pitest.org/> · **Stryker** <https://stryker-mutator.io/>
+**The trap, and it would have invalidated the study silently.** *promptfoo caches LLM responses by
+default.* `--repeat 15` without `--no-cache` returns **identical cached results** — so a study whose
+metric **is variance** would report zero variance and every arm would look perfectly consistent.
+That is this project's "a null must never render as a positive," one level up: the instrument's
+default setting destroys the measurement while appearing to work. Move 5's entire value was in the
+8/15-vs-15/15 spread. Related: `PROMPTFOO_STRIP_RESPONSE_OUTPUT` discards model outputs from
+results — a second way to lose exactly what must be read.
 
-*"Mutate the thing the guard guards and watch it fail"* — arrived at here after three guards
-shipped unable to fail — is test adequacy via mutation, and it has tooling and vocabulary. Lowest
-value of the four, because the practice is already habitual; worth it only for the vocabulary and
-for whatever the literature says about **where mutation testing misleads**.
+*(Documented, not yet run here. If promptfoo is adopted, verify the cache behaviour empirically
+first — same discipline as every other claim in this file.)*
+
+**DSPy refuted as the wrong instrument.** Its premise is *"Program, don't prompt"* — express tasks as
+structured signatures and let it *"tune your prompts automatically until quality converges,"*
+demonstrated by aggregate movement (0.41 → 0.63 F1). It optimises toward a score; it is not an
+ablation tool that preserves per-example outputs for human reading. **A tally-only reading of move
+5's study would have concluded the opposite of the truth**, so an optimiser that reports convergence
+is precisely the wrong shape for this project's question.
+
+### 3. Change classification and bot-merge policy — CONFIRMED, and it sharpens our own design
+
+Sources: [Renovate configuration options](https://docs.renovatebot.com/configuration-options/) ·
+ITIL 4 change enablement (see Sources below)
+
+**Renovate's policy surface is real**: `automerge`, `automergeType` (`branch`/`pr`/`pr-comment`),
+`automergeStrategy`, `automergeSchedule`, `minimumReleaseAge`, `ignoreTests`, `platformAutomerge`,
+and `packageRules` for scoping.
+
+**The single most transferable line found in this whole survey:** *"Renovate only automerges branches
+which are **up-to-date and green**."* Up-to-date is exactly our `ci-stale` guard — and they treat it
+as a **precondition of automerging**, not as a post-hoc validity check on a verdict already
+published. Our gate derives a verdict and *then* asks whether the commit still ships. Theirs cannot
+reach the question. Worth weighing for phase 3.
+
+Also notable: `minimumReleaseAge` is a deliberate **wait before acting** expressed as policy rather
+than a poll — compare move 4c, where "wait for CI to settle" had to become `gh pr checks --watch`
+because every polling mechanism was denied.
+
+**Partly refuted:** there is **no pre-approved-low-risk-category concept**. Renovate scopes automerge
+through `packageRules` on the *nature* of the change (minor/patch yes, major no), not via a durable
+per-item label.
+
+**And ITIL sharpens a real weakness in our tiering.** A standard change is low-risk, repeatable and
+**pre-authorized**, requiring three things together: the procedure is fully documented, the risk is
+**formally accepted in advance**, and **prior runs have proven the outcome predictable**. Crucially,
+**the governance body pre-approves the *template*, not the instance.**
+
+Our `auto-ok` is stamped **per issue**, by intake, on that issue's own criteria. We have no notion of
+*"this kind of change is auto-ok because N prior instances of it landed cleanly."* That gap matters
+for the open phase-3 decision in `design.md`: ITIL's answer to *when may this be automatic* is
+**"when prior runs have proven the outcome predictable"** — a finite, evidence-based exit condition,
+which is exactly what a gate list that grows by one per session lacks.
 
 ## Unverified flags (confirm before relying)
-**The entire "Leads not yet surveyed" section above** — recalled, never fetched.
+~~The entire "Leads not yet surveyed" section above — recalled, never fetched.~~ →
+**Leads 1-3 fetched and verified in move 7** (two claims refuted; see above). **Lead 4 (PIT /
+Stryker) was never fetched** and remains recall. promptfoo's caching behaviour is documented but
+not empirically confirmed here.
 OpenHands SWE-bench % and MAX_ITERATIONS default; all Devin/Sweep/Zencoder/Factory
 capability claims; the autonomy-research percentage findings (~80% safeguarded / ~73%
 human-in-loop / ~0.8% irreversible); Tessl beta status; any pricing/version/date. The two

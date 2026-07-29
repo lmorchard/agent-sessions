@@ -359,6 +359,20 @@ exit condition would be better than a list that grows as fast as it is worked. *
 rewrite the phased rollout, and note the premise is weaker than it looks: the PRs **do** land, by
 hand and quickly.
 
+Two inputs for that decision, both verified from primary sources in move 7
+([prior-art.md](prior-art.md#leads-1-3--surveyed-and-verified-move-7-2026-07-28)):
+
+- **ITIL supplies the finite exit condition this list lacks.** A "standard change" is pre-authorized
+  on three conditions together: documented procedure, risk formally accepted **in advance**, and
+  **prior runs have proven the outcome predictable.** The governance body pre-approves the
+  *template*, not the instance. Our `auto-ok` is stamped **per issue** on its own criteria, so we
+  have no notion of *"this class of change is safe because N instances landed cleanly"* — which is
+  precisely an evidence-based stopping rule rather than a growing list of gates.
+- **Renovate treats "up-to-date and green" as a *precondition* of automerging**, not as a validity
+  check applied after a verdict is published. Our gate derives a verdict and *then* asks whether the
+  commit still ships; theirs cannot reach the question. That ordering is cheap to adopt and would
+  make one whole class of `ci-stale` unreachable.
+
 ### Hosting
 
 4. **The GHA host, and a durable park mechanism that survives a host change.** Verified: no
