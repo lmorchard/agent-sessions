@@ -1,6 +1,6 @@
 # Move 7 — put the roadmap on a board, dogfood the front half
 
-Brief: [handoff-restructure.md](../../handoff-restructure.md) § "Move 7". Input: the reconciled
+Brief: [handoff-restructure.md](../../archive/handoff-restructure.md) § "Move 7". Input: the reconciled
 roadmap in [design.md](../../design.md#roadmap), produced by move 6.
 
 ## The shape

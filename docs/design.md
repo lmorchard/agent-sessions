@@ -510,6 +510,15 @@ Closed, but the *reasoning* is still load-bearing.
   grant must be asymmetric, because the verifier's value comes from being structurally unable to
   edit what it grades. Roadmap item 7 (#625) stays blocked on it.
 - **The amendment trigger's tree** → both trees; see the entry above.
+- **Language split in `driver/`** → **bash for orchestration, Python for parsing and
+  classification.** Orchestration means flags, process control, and invoking `gh`/`git`/`claude`;
+  parsing and classification live in `driver/gate.py`. Decided in move 7 and it explicitly argues
+  *against* rewriting the driver in Python: the defects it hit — `Edit(` matching inside
+  `NotebookEdit(`, an `@`-anchored sha regex, `head -1` on a leading blank line — were
+  **under-specified pattern matching, which recurs in any language.** The measured reason to act was
+  different: `test-driver.sh` hand-copied the classifier and had already diverged, so the suite
+  graded a replica. **`gate.py` must stay stdlib-only** so the driver remains portable to a runner
+  that has no `uv`; pytest is a dev dependency of its *tests* only.
 - **Board column vocabulary** → **read `gh project field-list`, never the doc.** The three actively
   managed boards use `Backlog / Ready / In progress / In review / Done`, which is what the skill
   transitions through; `gh project create` applies no template and yields a bare
@@ -519,7 +528,7 @@ Closed, but the *reasoning* is still load-bearing.
 ---
 
 **Next: move 7** — put this roadmap on a GitHub board and dogfood the skill's front half on it.
-Brief in [handoff-restructure.md](handoff-restructure.md). Board **yes**, board-driver **not yet**:
+Brief in [handoff-restructure.md](archive/handoff-restructure.md). Board **yes**, board-driver **not yet**:
 `make skill-readonly` makes this the one repo the driver must not run in, because here the
 implementer's work product *is* the skill. The partition is already available through trigger 2 —
 mark `skills/` risk-gated in `CLAUDE.md` and skill issues tier themselves `needs-review` without

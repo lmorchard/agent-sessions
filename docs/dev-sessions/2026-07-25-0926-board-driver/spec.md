@@ -4,7 +4,7 @@ The unattended loop that picks the next eligible issue, runs `agent-session expr
 stops at the merge gate. It lives **above** the skill: orchestration that invokes the skill, each
 run a fresh context. Nothing in `skills/agent-session/` changes for it to work.
 
-Task brief: [../../handoff-board-driver.md](../../handoff-board-driver.md). State of the skill:
+Task brief: [../../handoff-board-driver.md](../../archive/handoff-board-driver.md). State of the skill:
 [../../design.md](../../design.md).
 
 ## Non-negotiables

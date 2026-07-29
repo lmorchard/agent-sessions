@@ -329,7 +329,7 @@ its own frozen spec.
 reviewed this" is self-satisfiable in this setup. Doesn't affect #686's verdict; does constrain what a
 board-driver can infer.
 
-**Move 2 is done.** The brief at [handoff-express.md](handoff-express.md) is now a record of that
+**Move 2 is done.** The brief at [handoff-express.md](archive/handoff-express.md) is now a record of that
 run rather than a task. Its central bet paid off: fresh context *was* load-bearing, not hygiene —
 running `express` cold through the marker is what surfaced findings 1, 2, and 6, none of which the
 context that wrote the criteria could have hit.
@@ -343,7 +343,7 @@ broken commands but means they carry no behavioural evidence.
 
 Queue: #585 (`auto-ok`) remains ready — now earmarked as the board-driver's first vehicle.
 
-**Next session: the board-driver (move 3).** Brief at [handoff-board-driver.md](handoff-board-driver.md).
+**Next session: the board-driver (move 3).** Brief at [handoff-board-driver.md](archive/handoff-board-driver.md).
 Fresh context is load-bearing again, for a sharper reason than last time: the driver's job is to decide
 what to trust about the skill *from outside it*, and the context that built the skill knows which rules
 are load-bearing by memory rather than by evidence — the exact bias the driver must not inherit.
@@ -754,7 +754,7 @@ substitute**. A merge-gate row routinely satisfied by a substitute is measurably
 runs its cited command — the same erosion 4a fixed for CI, arriving through a different door. I also
 hit it myself and pushed a bad lockfile commit to decafclaw's main before reverting it.
 
-**Next session was measurement (move 5)** — see below. Brief was at [handoff-measurement.md](handoff-measurement.md).
+**Next session was measurement (move 5)** — see below. Brief was at [handoff-measurement.md](archive/handoff-measurement.md).
 Fresh context is load-bearing for a sharper reason than before: this session's context got four things
 wrong while confident about all of them — a fabricated measurement reported as fact, a guard that could
 not fail, a gate row its own driver could not satisfy, and a bad commit pushed to another repo's

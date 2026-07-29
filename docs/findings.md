@@ -427,6 +427,7 @@ is now ignored. Two things worth keeping:
   the same person, the second within an hour of re-reading the note. **`git add -A` in a repo the
   tooling writes to is the problem, not the operator's memory** — stage explicit paths.
 | **A hard line-wrap inside a code fence misleads readers.** It is what misled Copilot into a wrong review comment on #638. Test commands in their line-wrapped form. | move 2 |
+| **Editing a running bash script can silently change what it executes — and it fails *open*.** bash reads a script incrementally, so a **truncate-and-rewrite in place** (`cat >`, Python's `open(w)`) makes the running process continue into replacement text: measured, a script went on to execute two lines that **did not exist when it started**, exiting 0 with no error and no signal. An **atomic replace via rename** (`mv`) is unaffected, because the process keeps its original inode. **Measured for this harness: Claude Code's `Write` and `Edit` both change the inode** (`363717959 → 363717969`, `363717979 → 363718025`), so they are safe. Do not rely on that — the general mitigation is to `exec` from a snapshot copy rather than to know every editor's write strategy. | move 7, verified both directions |
 
 ### Operational figures
 
