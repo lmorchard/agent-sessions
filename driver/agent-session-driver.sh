@@ -360,16 +360,53 @@ select_issues() {
   issues_json="$(gh issue list --repo "$REPO" --state open --limit 500 \
                    --json number,title,body,labels 2>/dev/null || echo '[]')"
   total="$(printf '%s' "$issues_json" | jq 'length')"
-  say "repo $REPO: read $total open issues"
+
+  # tier-batch moved AHEAD of the count line, which used to print first. The count
+  # line is where the marker-less issues get accounted for, and the complement
+  # cannot be taken before the candidate list exists. It reads only issues_json,
+  # so nothing below it was depended on.
+  local candidates
+  candidates="$(printf '%s' "$issues_json" | "$PYTHON_BIN" "$GATE_PY" tier-batch --marker "$MARKER")"
+
+  # The marker-less set is the COMPLEMENT of what tier-batch emitted -- never a
+  # second jq implementation of the marker test. A hand-copied predicate is the
+  # drift this suite was already burned by once (test-driver.sh:19-25 used to
+  # replicate extract_gate); the complement replicates nothing, so it cannot
+  # disagree with the filter it is reporting on.
+  local specced_nums markerless_nums markerless_list n_markerless m
+  specced_nums="$(printf '%s' "$candidates" | cut -f1 | tr '\n' ' ')"
+  # `. as $n` before the select is load-bearing, not a style choice: in
+  # `index(f)`, f is evaluated against index's OWN input, so the tempting
+  # `index(.)` searches the keep-list for itself, matches every time, and
+  # silently yields an empty complement -- i.e. it reports "nothing missing"
+  # no matter what. Binding the number first is what makes the test a test.
+  markerless_nums="$(printf '%s' "$issues_json" | jq -r --arg keep "$specced_nums" '
+      ($keep | split(" ") | map(select(length > 0))) as $k
+      | .[] | .number | tostring | . as $n
+      | select(($k | index($n)) == null)')"
+
+  # No cap and no "+N more". A truncated list would reintroduce exactly the
+  # failure this reporting exists to fix -- a null rendering as a positive -- one
+  # level up. If the list is long enough to be unwieldy, that IS the message.
+  n_markerless=0
+  markerless_list=""
+  for m in $markerless_nums; do
+    n_markerless=$(( n_markerless + 1 ))
+    markerless_list="${markerless_list:+$markerless_list, }#$m"
+  done
+
+  if [ "$n_markerless" -gt 0 ]; then
+    say "repo $REPO: read $total open issues ($(( total - n_markerless )) carry the marker;" \
+        "$n_markerless do not: $markerless_list -- run triage)"
+  else
+    say "repo $REPO: read $total open issues"
+  fi
   [ "$total" -eq 500 ] && say "WARNING: hit the 500 limit; the queue read may be truncated"
 
   load_board
   local prs parked
   prs="$(fetch_open_prs)"
   parked="$(printf '%s' "$issues_json" | parked_numbers || true)"
-
-  local candidates
-  candidates="$(printf '%s' "$issues_json" | "$PYTHON_BIN" "$GATE_PY" tier-batch --marker "$MARKER")"
 
   if [ -z "$candidates" ]; then
     say "no issues carry the marker -- nothing for this driver to consider."
