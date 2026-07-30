@@ -572,6 +572,148 @@ case "$Q_OUT" in
 esac
 rm -rf "$Q_TMP"
 
+# --- a partly-marked queue must still account for its unmarked issues -------
+#
+# tier-batch drops a marker-less issue before the reporting loop ever sees it, so
+# the ONLY thing the select stage says about it today is the open-issue count it
+# is silently included in. That is fine when nothing carries the marker -- the
+# zero case has its own message -- and invisible when something does: the queue
+# reads "eligible: 1" and the operator has no way to tell one marker-less issue
+# from none. Same failure shape the SKIP-with-a-reason lines exist to prevent, one
+# filter earlier.
+#
+# Both cases invoke the SHIPPED driver as a subprocess against an offline `gh`
+# stub, like the query section above, and both read its STDOUT only. Stdout is
+# where say() writes and stderr is where log() writes its `HH:MM:SSZ` timestamps
+# -- and a timestamp is digits, which a needle looking for a bare issue number
+# cannot tell from an issue number. Capturing 2>&1 here would make assertion (a)
+# passable by the clock.
+
+echo "select: a mixed queue must account for its marker-less issues"
+
+M_TMP="$(mktemp -d)"
+mkdir -p "$M_TMP/bin"
+
+# The same field-list-honoring stub as the query section: it is the only stub
+# shape under which what the driver asks for changes what it sees.
+cat > "$M_TMP/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+fields=""; prev=""
+for a in "$@"; do [ "$prev" = "--json" ] && fields="$a"; prev="$a"; done
+case "$*" in
+  "issue list"*) jq --arg f "$fields" \
+                    '[.[] | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' \
+                    "$STUB_DIR/issues.json" ;;
+  "pr list"*)    printf '%s' '[]' ;;
+  *)             exit 0 ;;
+esac
+STUB
+chmod +x "$M_TMP/bin/gh"
+
+_marker_run() { # serves $M_TMP/issues.json to one dry run -> the run's stdout
+  # A fresh mktemp state dir per run, so neither case can read the other's state
+  # (or a stale ./.driver-state from the repo it is invoked in). Under $M_TMP so
+  # the section still cleans up after itself.
+  local state; state="$(mktemp -d "$M_TMP/state.XXXXXX")"
+  STUB_DIR="$M_TMP" PATH="$M_TMP/bin:$PATH" \
+    bash "$DRIVER" --repo stub/repo --dry-run --state-dir "$state" 2>/dev/null
+}
+
+# The issue numbers are derived AT RUN TIME, which is the point: a literal in the
+# driver's source cannot satisfy a needle it cannot know. Both are forced to four
+# digits, and that is load-bearing rather than tidy -- for two numbers of equal
+# length, "is a substring of" collapses to "is equal to", so rejecting the equal
+# case is sufficient to guarantee neither number can be found inside the other.
+# Without that, a 4-digit marker-less number sitting inside a 5-digit eligible one
+# would satisfy (a) and fail (b) for reasons that have nothing to do with the
+# driver.
+M_WITH=$(( 1000 + RANDOM % 9000 ))
+M_WITHOUT=$(( 1000 + RANDOM % 9000 ))
+while [ "$M_WITHOUT" -eq "$M_WITH" ]; do M_WITHOUT=$(( 1000 + RANDOM % 9000 )); done
+
+# Titles are deliberately digit-free. Every other number the select stage prints
+# in a no-board dry run is single-digit (the open count, the eligible count), so a
+# four-digit needle has nowhere else in this output to match by accident.
+jq -n -c --arg m "$MARKER" --argjson a "$M_WITH" --argjson b "$M_WITHOUT" \
+  '[{number:$a, title:"marked and tiered", body:($m + "\n\n## Tier: `auto-ok`\n"), labels:[]},
+    {number:$b, title:"never went through intake", body:"An ordinary bug report.\n", labels:[]}]' \
+  > "$M_TMP/issues.json"
+
+M_OUT="$(_marker_run)"
+_m_flat() { printf '%s' "$M_OUT" | tr '\n' '|' | cut -c1-240; }
+
+# The liveness probe, first, and NOT one of the criterion's assertions. It is what
+# distinguishes "the driver reached the reporting loop and said nothing about the
+# marker-less issue" from "the stub served nothing / the driver died at
+# validation" -- two states an absent needle looks identical from. A check that
+# can fail for the wrong reason will later pass for the wrong reason.
+#
+# AMENDED (A1, see this session's checks.md). This was exact equality against the
+# whole line, which pinned the very line the spec's design decision requires the
+# work to change -- "a parenthetical appended to the existing `read N open issues`
+# line ... Rejected: a separate line". No implementation could satisfy both, so the
+# frozen set was self-contradictory rather than merely strict. Containment on the
+# count preserves everything the probe was built to distinguish (served-two vs
+# served-nothing vs died-at-validation) and stops it asserting a format the
+# criterion deliberately does not constrain -- the same reasoning as (a) below.
+case "$(printf '%s\n' "$M_OUT" | grep '^repo stub/repo:' || true)" in
+  *"read 2 open issues"*)
+    ok "probe: the stub served both issues to the select stage" ;;
+  *)
+    bad "probe: the stub served both issues to the select stage" \
+        "a 'repo stub/repo:' line containing 'read 2 open issues'" "$(_m_flat)" ;;
+esac
+
+# (a) The number is reported at all. Deliberately the weakest possible needle --
+# the bare number, no `#`, no surrounding wording -- because the criterion
+# constrains that the issue is ACCOUNTED FOR, not how the line is worded. Pinning
+# a format here would fail an implementation that is correct and phrased
+# differently, and (b) is what stops the bare number from passing in the wrong
+# role.
+case "$M_OUT" in
+  *"$M_WITHOUT"*) ok "(a) the marker-less issue number appears in select output" ;;
+  *)              bad "(a) the marker-less issue number appears in select output" \
+                      "$M_WITHOUT somewhere in stdout" "$(_m_flat)" ;;
+esac
+
+# (b) ...and is not reported as eligible. Asserted as "no line containing
+# ELIGIBLE contains that number", not as "the string `ELIGIBLE #<n>` is absent":
+# the latter is satisfiable by a change in spacing, which would let the driver
+# announce a marker-less issue as eligible while this stayed green.
+check "(b) no ELIGIBLE line names the marker-less issue" "" \
+  "$(printf '%s\n' "$M_OUT" | grep 'ELIGIBLE' | grep -F "$M_WITHOUT" || true)"
+
+# (c) ...and reporting it does not make it count. Matched as a whole line rather
+# than as a substring, because the needle `eligible: 1` is a prefix of
+# `eligible: 12`.
+check "(c) the run still reports one eligible issue" "eligible: 1" \
+  "$(printf '%s\n' "$M_OUT" | grep '^eligible:' || true)"
+
+# --- G1: the zero-marker message survives whatever reports the partial case ---
+#
+# A guard, not a criterion: it passes today and must keep passing. The obvious way
+# to implement the above is to move the marker-less accounting into the reporting
+# loop -- which the zero-marker path returns before reaching, so the specific
+# regression is that "no issues carry the marker" gets replaced by a bare list of
+# skipped numbers and the queue-is-empty case stops being legible as such.
+
+echo "select: the zero-marker message is not swallowed by partial reporting"
+
+G_WITHOUT=$(( 1000 + RANDOM % 9000 ))
+jq -n -c --argjson b "$G_WITHOUT" \
+  '[{number:$b, title:"never went through intake", body:"An ordinary bug report.\n", labels:[]}]' \
+  > "$M_TMP/issues.json"
+
+G_OUT="$(_marker_run)"
+case "$G_OUT" in
+  *"no issues carry the marker"*) ok "G1 an all-marker-less queue still says no issues carry the marker" ;;
+  *)                              bad "G1 an all-marker-less queue still says no issues carry the marker" \
+                                      "no issues carry the marker" \
+                                      "$(printf '%s' "$G_OUT" | tr '\n' '|' | cut -c1-240)" ;;
+esac
+
+rm -rf "$M_TMP"
+
 # --- syntax ----------------------------------------------------------------
 
 echo "syntax"
