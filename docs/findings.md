@@ -477,9 +477,11 @@ tree, two things downstream read the mess as signal.** The tamper check's *"no c
 substitute would score a gate-rewritten lockfile as a collateral edit, and `pr.md` step 4's
 `git diff origin/main..HEAD` runs against a tree the gates themselves modified. The #585 run
 survived it, so **the exposure is not understood** — worth establishing before an unwatched host
-runs the gates and then judges the diff. The skill itself contains no `git add` (verified by grep),
-so it does not carry the specific hazard that bit us: `make check` dirtied the lockfile, a blanket
-`git add -A` swept it up, and it reached decafclaw's `main` before being reverted.
+runs the gates and then judges the diff. The skill itself contains no `git add` (re-verified by grep
+2026-07-29, still true) — but **that is a fact about the skill's text, not a bound on what a run
+does**, and a real run has since improvised `git add -A` anyway (fourth instance below). The hazard
+it describes: `make check` dirtied the lockfile, a blanket `git add -A` swept it up, and it reached
+decafclaw's `main` before being reverted.
 
 **It happened again, 2026-07-29, to the author of the paragraph above.** A blanket `git add -A`
 while the driver's `express` worktree was present committed `.worktrees/<branch>` as an **embedded
@@ -503,9 +505,37 @@ hour and survived writing it down twice. Damage was limited only because `.workt
 `runs.jsonl` record — which is itself the *"dies between invoking and classifying leaves no record"*
 failure, so the money spent is unknown.
 
+**A fourth instance, 2026-07-29 — and the first where the actor was a *run*, not the operator.** The
+unattended run on decafclaw #657 (PR #728, run dir `657-20260729T223955Z`) called `git add -A` twice:
+once for a self-review commit, once immediately before `git reset --soft origin/main` to squash. **No
+warning reached it.** Verified at the time: nothing about `git add` in decafclaw's `CLAUDE.md`, nothing
+in the machine's global `CLAUDE.md` (which *does* load, since `--bare` is unused), nothing in the skill,
+and **no deny rule for it in the driver**. So unlike the three instances above, this is not a prose
+warning that failed — it is a hazard with no mitigation on the run path at all.
+
+Three things worth keeping:
+
+- **The skill's silence is not a mitigation.** The paragraph above cites "the skill contains no
+  `git add`" as the reason the hazard isn't carried. That grep is still true and the inference from it
+  is wrong: a run reaches for `git add -A` unprompted, because it is the obvious way to stage.
+- **It was harmless by configuration, not by design.** decafclaw's worktrees live under `.claude/`,
+  which is gitignored there, so there was nothing sweepable in reach. PR #728's file list came back
+  exactly on scope. On a target repo without that ignore — or with any un-ignored stray artifact
+  present when the run stages — the same two commands sweep it.
+- **What caught it was reading the run's command stream**, not a check. That contrasts with the older
+  claim below that `git add -A` is the one error class with no mechanism watching it: reviewing
+  `stream.jsonl` for the commands a run actually issued *is* a mechanism, and a cheap one. It is
+  currently done by hand and nothing requires it.
+
+The mechanism-shaped fixes are narrow, because a run legitimately needs to stage *something*: deny the
+blanket forms specifically (`git add -A`, `git add .`, `git add :/`) rather than `git add` wholesale, or
+have the skill name the explicit-paths rule at the point of staging. Deny rules are prefix-matched, so
+the blanket forms are expressible; `Bash(git add:*)` would be too broad and would break the commit step.
+
 **What generalises is not "be careful."** It is that a hazard needs a *mechanism* — an ignore rule, a
 deny rule, a precondition that refuses — and that prose warnings, including ones you wrote yourself
-minutes earlier, have now failed three times in this project at changing behaviour. See also the rule
+minutes earlier, have now failed three times in this project at changing behaviour. The fourth instance
+above sharpens that rather than adding to the tally: **there was no warning to fail.** See also the rule
 about mutation-testing a guard that protects a dangerous state.
 
 ### Operational figures
