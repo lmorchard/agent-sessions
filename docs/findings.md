@@ -319,7 +319,9 @@ oracle it grades) is not ceremony. Four times it has caught the person who wrote
    applying the rule's *intent* rather than its letter. The verifier read it literally.
 2. **#586** — established that post-squash the freeze commit is a dangling local object, resolvable
    locally but not an ancestor of HEAD and unreachable from origin, so nobody else can reproduce
-   the tamper diff.
+   the tamper diff. *(The finding stands; the cause is gone — [#29](https://github.com/lmorchard/agent-sessions/issues/29)
+   removed `pr`'s squash for exactly this reason, so the freeze commit now ships with the branch. It
+   took three runs and 2026-07-29's #657 to act on what this verifier said in move 2.)*
 3. **#649** — reported a task unanswerable because there was no separate commit to diff. Correct:
    the review fix was uncommitted and the pushed PR did not contain it.
 4. **#710** — refuted the fabricated measurement above. **First time what it caught was a claim

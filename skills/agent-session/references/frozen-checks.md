@@ -86,8 +86,9 @@ Phase 0 of every plan, no implementation in it:
    cannot contain its own hash, so this is two commits, not one. The freeze commit (the first)
    is the tamper-diff baseline; the second just writes the sha down.
 
-   Re-anchor the sha if the branch is ever rebased, and run the tamper check before any squash
-   that would collapse the freeze commit away — see `phases/pr.md`.
+   Re-anchor the sha if the branch is ever rebased. **The freeze commit must remain an ancestor of
+   the pushed head** — nothing in `pr` may collapse it away, because a baseline absent from `origin`
+   turns the tamper diff into a self-report. See `phases/pr.md`.
 
 A **criterion's** check that *passes* at freeze means the behavior already exists — surface it,
 don't proceed. Either the criterion is already satisfied (the issue may be stale), the check
@@ -113,7 +114,7 @@ Unit tests written *for* a slice are a different thing and are freely editable �
 implementer's own scaffolding. Only what `Check files` lists is frozen.
 
 `checks.md` is frozen too, in one direction: **append only.** The sanctioned writes are the
-`Frozen at` sha, a logged amendment, and the pre-squash tamper verdict. Changing a CRITERION line
+`Frozen at` sha, a logged amendment, and the tamper verdict. Changing a CRITERION line
 or a CHECK command in it is editing the oracle, whatever the diff's size.
 
 ## Independent verification
@@ -138,10 +139,10 @@ green checks are not evidence until that diff is explained by a logged amendment
 **An empty `Check files` list makes this command meaningless rather than satisfied.** If that's
 the case, run the substitutes in "When the criteria are commands, not test files" below.
 
-Run this at the end of `execute`, and again in `pr` **before the squash** — a soft-reset squash
-collapses the freeze commit and the baseline stops being reachable from the branch, so the verdict
-recorded at that point is what the gate cites. It's two seconds and it's the difference between a
-claim and a check.
+Run this at the end of `execute`, and again in `pr` before pushing, so the verdict the gate cites was
+taken against the tree that ships. It's two seconds and it's the difference between a claim and a
+check — and because `pr` no longer rewrites history, the freeze commit ships with the branch and a
+reviewer can re-run the diff themselves rather than taking the recorded verdict on trust.
 
 ### When the criteria are commands, not test files
 
@@ -158,7 +159,7 @@ Three things substitute, and each must be run and recorded:
    empty — the freeze procedure itself writes the sha in a follow-up commit — so state it as an
    invariant, never as an equality: **no CRITERION line, CHECK command, or guard command may
    differ from the freeze version.** Sanctioned appends (the `Frozen at` sha, a logged amendment,
-   the pre-squash tamper verdict) are inert. A changed command is not — quote both sides.
+   the tamper verdict) are inert. A changed command is not — quote both sides.
 2. **Equality against the independent source.** The commands were copied verbatim from the issue,
    and the issue is a record the implementer did not write. Confirm each CHECK and guard command
    is byte-identical to the issue body's, whitespace and lookalike punctuation included — a smart
