@@ -460,6 +460,27 @@ _nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions --allow-nested-skill-dir 
 check "--allow-nested-skill-dir proceeds past validation" "gh-check" "$(_nest_reached)"
 check "  and warns on the way through"                    "warned"   "$(_nest_warned)"
 
+# C5 (issue #11). The root directory contains everything, so it is the one
+# --repo-path for which the answer is always "yes, nested" -- and it was the one
+# the guard never detected. `pwd -P` in / returns `/`, the only resolved path that
+# already ends in a slash, so appending another at agent-session-driver.sh:158
+# built the pattern `//*`. That matches no ordinary absolute path, so every path
+# read as OUTSIDE / and the warning never fired.
+#
+# Asserts the combined verdict, not the exit status: rc is 2 whether the guard
+# fires (die after the warning) or not (die at the required-command loop), so the
+# exit code cannot discriminate here. Only the message and the stop-point can,
+# which is exactly the pair _nest_verdict reduces -- `warned` for the literal
+# text, `stopped-early` for NOT having reached `required command not found: gh`.
+#
+# Safe to run only because NEST_BIN carries no gh: at the unfixed behaviour this
+# case sails through validation, and on a PATH with a real gh that is a live
+# driver run against a real issue. The constructed PATH is what makes this a
+# validation probe instead.
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir "$NEST_SKILL" --repo-path / --state-dir "$NEST_TMP/s-root"
+check "--repo-path / is containment, not a wildcard" "warned stopped-early" "$(_nest_verdict)"
+
 # The control probe. Not a criterion: it proves the message assertions above are
 # real discriminators rather than a token the harness always prints.
 _nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \

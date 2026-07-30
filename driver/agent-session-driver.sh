@@ -151,11 +151,23 @@ if [ "$DRY_RUN" -eq 0 ] && [ -z "$CLASSIFY_ONLY" ]; then
     || die "cannot resolve --skill-dir: $SKILL_DIR"
   repo_real="$(CDPATH= cd -- "$REPO_PATH" && pwd -P)" \
     || die "cannot resolve --repo-path: $REPO_PATH"
+  # The root directory is the one resolved path that ALREADY ends in a separator,
+  # so interpolating it below yields the pattern `//*` -- which matches no
+  # ordinary absolute path. Every path then reads as outside `/`, and the guard
+  # went silent on the one --repo-path that contains everything. Collapse that one
+  # value to the empty string so the pattern is `/*`.
+  #
+  # A separate variable, not an assignment back onto repo_real, because the
+  # warning below logs repo_real and `repo:  ` with nothing after it would be a
+  # worse message than the one this fixes. Only `/` is ever touched, so the
+  # /a/b-vs-/a/bc distinction the trailing slash buys is unaffected.
+  repo_prefix="$repo_real"
+  [ "$repo_prefix" = "/" ] && repo_prefix=""
   # The trailing slash on the subject is what makes this a PATH-prefix test
   # rather than a string one: without it, --repo-path /a/b matches /a/bc. It also
   # makes the degenerate equal case match, since `*` matches the empty string.
   case "$skill_real/" in
-    "$repo_real"/*)
+    "$repo_prefix"/*)
       log "WARNING: --skill-dir is inside --repo-path: the run's work product would be the instructions grading it"
       log "  skill: $skill_real"
       log "  repo:  $repo_real"
