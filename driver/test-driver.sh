@@ -647,9 +647,22 @@ _m_flat() { printf '%s' "$M_OUT" | tr '\n' '|' | cut -c1-240; }
 # marker-less issue" from "the stub served nothing / the driver died at
 # validation" -- two states an absent needle looks identical from. A check that
 # can fail for the wrong reason will later pass for the wrong reason.
-check "probe: the stub served both issues to the select stage" \
-  "repo stub/repo: read 2 open issues" \
-  "$(printf '%s\n' "$M_OUT" | grep '^repo stub/repo:' || true)"
+#
+# AMENDED (A1, see this session's checks.md). This was exact equality against the
+# whole line, which pinned the very line the spec's design decision requires the
+# work to change -- "a parenthetical appended to the existing `read N open issues`
+# line ... Rejected: a separate line". No implementation could satisfy both, so the
+# frozen set was self-contradictory rather than merely strict. Containment on the
+# count preserves everything the probe was built to distinguish (served-two vs
+# served-nothing vs died-at-validation) and stops it asserting a format the
+# criterion deliberately does not constrain -- the same reasoning as (a) below.
+case "$(printf '%s\n' "$M_OUT" | grep '^repo stub/repo:' || true)" in
+  *"read 2 open issues"*)
+    ok "probe: the stub served both issues to the select stage" ;;
+  *)
+    bad "probe: the stub served both issues to the select stage" \
+        "a 'repo stub/repo:' line containing 'read 2 open issues'" "$(_m_flat)" ;;
+esac
 
 # (a) The number is reported at all. Deliberately the weakest possible needle --
 # the bare number, no `#`, no surrounding wording -- because the criterion

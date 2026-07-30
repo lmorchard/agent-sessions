@@ -115,7 +115,57 @@ fix** that makes the marker-less issue a candidate. Only (a) discriminates.
 
 ## Amendments
 
-(Append-only. Empty — no amendment was made.)
+(Append-only.)
+
+### A1 — the liveness probe's exact-equality form, `driver/test-driver.sh`
+
+**Human-confirmed by Les, 2026-07-29.** The run stopped here rather than editing the frozen file, and
+`git diff 8438711 -- driver/test-driver.sh` was empty at the point it stopped.
+
+**What was wrong.** The probe asserted the *whole* select-stage count line by exact equality:
+
+```
+check "probe: the stub served both issues to the select stage" \
+  "repo stub/repo: read 2 open issues" \
+  "$(printf '%s\n' "$M_OUT" | grep '^repo stub/repo:' || true)"
+```
+
+The spec's ratified design decision requires the work to change exactly that line — *"a parenthetical
+appended to the existing `read N open issues` line … **Rejected:** a separate line."* So **no
+implementation could satisfy both**: the frozen set was self-contradictory, not merely strict. The
+probe was authored by this run's own check-author as scaffolding and is **not** one of the three
+assertions the issue froze.
+
+**What it says now.** Containment on `read 2 open issues` within the `repo stub/repo:` line. That
+preserves everything the probe existed to distinguish — served-two vs served-nothing vs
+died-at-validation — and stops it pinning a format the criterion deliberately leaves free, which is
+the same reasoning the neighbouring assertion (a) already states for itself.
+
+**Amendment, not clarification — established by running both wordings against both trees**, per
+`references/frozen-checks.md`:
+
+| | freeze tree (`8438711`) | implementation tree |
+|---|---|---|
+| old wording | probe passes | **probe FAILS** |
+| new wording | probe passes | probe passes |
+
+The verdict **differs at the implementation tree**, which is the amendment cell. (The freeze tree
+alone would have called this cosmetic — the exact trap that policy names.)
+
+**The amendment did not neuter the criterion.** Re-run at the freeze tree with the new wording,
+`(a) the marker-less issue number appears in select output` **still fails** — `expected: 8543
+somewhere in stdout`, actual a bare `read 2 open issues` line. So the frozen set still discriminates
+without the implementation; only the self-contradiction was removed. Implementation tree: **69 passed,
+0 failed**. Freeze tree: 68 passed, 1 failed.
+
+**Cost, paid as the policy requires:** this run is **downgraded to `needs-review`**. The issue's own
+tier remains `auto-ok` — the downgrade is a property of *this run*, because its oracle was edited
+after the freeze, not a re-tiering of the work.
+
+**Rejected alternative.** Overriding the design decision and reporting on a separate line, which
+would have kept the probe untouched and the run `auto-ok`. Declined: it would have an unattended run
+silently discard a human-ratified decision, which is a worse precedent than a logged amendment, and
+the issue body is the constraint.
 
 ## Pre-squash tamper verdict
 
