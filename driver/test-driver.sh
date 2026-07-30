@@ -463,9 +463,9 @@ check "  and warns on the way through"                    "warned"   "$(_nest_wa
 # C5 (issue #11). The root directory contains everything, so it is the one
 # --repo-path for which the answer is always "yes, nested" -- and it was the one
 # the guard never detected. `pwd -P` in / returns `/`, the only resolved path that
-# already ends in a slash, so appending another at agent-session-driver.sh:158
-# built the pattern `//*`. That matches no ordinary absolute path, so every path
-# read as OUTSIDE / and the warning never fired.
+# already ends in a slash, so the containment glob that appends a trailing slash to
+# the resolved --repo-path built the pattern `//*`. That matches no ordinary
+# absolute path, so every path read as OUTSIDE / and the warning never fired.
 #
 # Asserts the combined verdict, not the exit status: rc is 2 whether the guard
 # fires (die after the warning) or not (die at the required-command loop), so the

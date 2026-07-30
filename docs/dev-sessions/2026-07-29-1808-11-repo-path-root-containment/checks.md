@@ -95,8 +95,48 @@ catches a weakened oracle — a deleted assertion drops the count.
 
 ## Amendments
 
-(Append-only. **Empty** — no check was amended or clarified, so the tier takes no downgrade from
-this section.)
+(Append-only. **No check was amended or clarified**, so the tier takes no downgrade from this
+section. One post-review edit to the frozen file is recorded below because it *touched* the file, not
+because it reached a check.)
+
+### Post-review adjudication — a comment, human-confirmed by Les, 2026-07-30
+
+**Raised by** the Copilot review on PR #34, the run's single unresolved thread: the C5 comment
+hard-coded `agent-session-driver.sh:158`, which drifts as the driver changes and misleads a reader at
+`HEAD`. **The run declined to touch it** — correctly, the file is frozen and it was unattended.
+
+**Neither an amendment nor a clarification, and the run's own finding 4 said so first.** The tamper
+rule above is an invariant over *what the checks assert*; a comment asserts nothing. So this edit is
+**inert** with respect to every frozen check, and the amendment/clarification ledger takes no entry —
+only this record that the file was touched at all.
+
+**Established by running both wordings against both trees** rather than asserting inertness:
+
+| | freeze tree (`6f18f87`) | implementation tree |
+|---|---|---|
+| old comment | 64 passed, 1 failed | 65 passed, 0 failed |
+| new comment | 64 passed, 1 failed | 65 passed, 0 failed |
+
+Identical at both trees, so no verdict moved — which is the definition the policy gives, and it is
+why **this run keeps its tier and takes no downgrade** (contrast the sibling run on #13, where the
+verdict moved at the implementation tree and A1 cost a downgrade).
+
+**What changed.** The sentence now describes the location semantically — *"the containment glob that
+appends a trailing slash to the resolved `--repo-path`"* — instead of by line number. The past-tense
+explanation of the bug is unchanged.
+
+**Thread resolved** on the grounds that the run's own rule permits it: resolve only what you fixed.
+The gate block on PR #34 was **not** rewritten — it published `human-merge-required` as *the run's*
+verdict on the evidence the run had, and retroactively upgrading a published verdict after a human
+cleared the blocker is the shape of self-flattery the freeze exists to prevent. The adjudication is
+recorded here and as a PR comment; the merge decision stays with Les.
+
+**Left unfixed, deliberately** — the run's finding 3, that `CLAUDE.md`'s risk-gated section cites
+`agent-session-driver.sh:485` and `:616` for `classify_pr_body` when the calls are at `632`/`756` on
+`origin/main` and move to `644`/`768` here. It is the *same defect class* as the comment above, and
+one layer more embarrassing since it sits in the file that says no doc should state a fact a command
+can print. But `CLAUDE.md` is not on the drivable allowlist and widening this PR to reach it would
+mix a gated-path edit into a driver change. Raised with Les separately.
 
 ## Tamper verdict — recorded pre-squash
 
@@ -162,7 +202,8 @@ C1's scope. Fixing any of them in this run would mean the implementer widening i
    *before* this branch — on `origin/main` the calls are at `632` and `756` (definition at `443`).
    This change shifts them a further 12 lines, to `644` and `768`. Not caused here, and `CLAUDE.md`
    is not on the drivable allowlist, so a fix belongs to a human or a listed path.
-4. **The new case's comment cites `agent-session-driver.sh:158`**, which is where the pattern was
-   *at the freeze tree* — the sentence is past-tense and accurate as history, but a reader at `HEAD`
-   finds a comment line there. Not edited, because the file is frozen for this run and a comment
-   changes no assertion (so it is neither an amendment nor a clarification).
+4. ~~**The new case's comment cites `agent-session-driver.sh:158`**~~ — **RESOLVED 2026-07-30.** The
+   Copilot review raised the same point independently, and it was adjudicated by Les and fixed: the
+   comment now names the location semantically. The analysis here was right and is the reason it cost
+   no downgrade — a comment changes no assertion, so it is neither an amendment nor a clarification.
+   See the Amendments section above for the both-trees evidence.
