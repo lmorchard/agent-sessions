@@ -1,6 +1,6 @@
 # pr
 
-Self-review, squash, push, open a PR, run the review cycle, and **stop at the merge gate**.
+Self-review, push, open a PR, run the review cycle, and **stop at the merge gate**.
 
 Reads `references/frozen-checks.md` (gate condition), `references/pr-body-template.md` (body +
 gate block), `references/github-projects.md` (board hook).
@@ -16,16 +16,17 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
 
 ## Outputs
 
-- Squashed branch pushed; PR opened with per-criterion results and the `agent-session:gate` block
+- Branch pushed **with its freeze commit intact**; PR opened with per-criterion results and the
+  `agent-session:gate` block
 - Review comments assessed and worthwhile ones fixed
-- Final squash force-pushed (`--force-with-lease`), gate block refreshed
+- Review fixes pushed, gate block refreshed
 - **A gate verdict reported**: `eligible-for-auto-merge` or `human-merge-required` + reason
 
 ## Rebase and re-verify
 
 1. **Rebase onto `origin/main` first.** `git fetch origin && git rebase origin/main`. Sessions
    run long and main advances; pre-rebase, `git diff origin/main..HEAD` can show dozens of
-   unrelated files, drowning out your actual changes and corrupting both self-review and squash.
+   unrelated files, drowning out your actual changes and corrupting the self-review diff.
    Resolve conflicts now, not after the PR is open.
 
 2. **Re-run the criteria's checks and the guards after the rebase**, even if they were green
@@ -53,25 +54,24 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
 
    Fix what you find. This catches what a bot reviewer misses, and vice versa.
 
-## Squash and open
+## Push and open
 
-4. **Re-check `origin/main` immediately before squashing.** `git fetch origin && git log
-   --oneline main..origin/main`. Main may have advanced again since the rebase, and a
-   soft-reset-then-commit squash against a stale `origin/main` silently includes deletions of
-   files that landed in between (a sibling PR merging is enough). If new commits appear, redo
-   the rebase and re-verification.
+4. **Re-check `origin/main` immediately before pushing.** `git fetch origin && git log
+   --oneline main..origin/main`. Main may have advanced again since the rebase, and everything you
+   verified was verified against the older base. If new commits appear, redo the rebase and
+   re-verification.
 
-5. **Run the tamper check, then squash.** In this order, because `git reset --soft origin/main`
-   collapses the freeze commit away and the baseline becomes unreachable from the branch (the
-   object survives locally until GC, but not for a reviewer or CI). So: run
-   `git diff <freeze-sha> -- <check files>`, **record the verdict in `checks.md` and the gate
-   block** — that record is the durable evidence the gate cites, since the command won't be
-   reproducible afterwards. (Post-squash the freeze commit is a dangling local object: not an
-   ancestor of the branch and absent from `origin`, so nobody else can re-run it. The record *is*
-   the evidence.) If `Check files` is empty, run the substitutes from `frozen-checks.md`'s "When
-   the criteria are commands, not test files" instead and record `clean-by-substitute` + its basis;
-   the bare command proves nothing there. Then squash all branch commits into one with a comprehensive message,
-   and **push**.
+5. **Run the tamper check, record the verdict, and push the branch as-is.** Run
+   `git diff <freeze-sha> -- <check files>` and **record the verdict in `checks.md` and the gate
+   block**. If `Check files` is empty, run the substitutes from `frozen-checks.md`'s "When the
+   criteria are commands, not test files" instead and record `clean-by-substitute` + its basis; the
+   bare command proves nothing there.
+
+   **Do not squash the branch.** The freeze commit must stay an ancestor of the pushed head, because
+   that is what lets somebody other than the implementer re-run the tamper diff. `git reset --soft
+   origin/main` orphans it — the object survives locally until GC, but it is absent from `origin`, so
+   the recorded verdict becomes a claim the run made about itself rather than a command a reviewer can
+   check. Leave history alone and let the merge button decide its shape.
 
 6. **Open the PR** using `references/pr-body-template.md`. Title under 70 chars. Fill the
    **Acceptance criteria** table from the *independent verifier's* report — never from the
@@ -125,10 +125,13 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
     every gate row below sources from *the verifier's* run, not the implementer's. Fresh context,
     `checks.md` and the repo only, per `references/frozen-checks.md`.
 
-13. **Squash again and force-push** with `--force-with-lease` — it refuses if the remote has
-    commits you haven't fetched, preventing silent overwrites of work pushed from another
-    machine. Re-check `origin/main` first; main may have advanced during the poll-and-fix cycle.
-    **Refresh the gate block** so it describes the pushed state.
+13. **Push the review fixes.** Re-check `origin/main` first; main may have advanced during the
+    poll-and-fix cycle. **Refresh the gate block** so it describes the pushed state.
+
+    **Still no squash** — the freeze commit has to survive to the gate, and step 14's tamper row cites
+    a verdict that must stay re-runnable at the moment it is read. If a rebase became necessary here,
+    push with `--force-with-lease`, never bare `--force`: it refuses when the remote has commits you
+    haven't fetched, which prevents silently overwriting work pushed from another machine.
 
 ## Merge gate
 
@@ -139,7 +142,7 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
     | Every criterion with a check: `pass` | The independent verifier's report (step 12's, if it re-ran) |
     | Every human-judgment criterion: graded by a human | `checks.md` evidence + an actual human answer |
     | Every guard still `pass` | The verifier's report — a pass→fail flip is a regression you caused |
-    | Tamper diff clean, or every difference logged as an amendment | The verdict recorded at step 5 (pre-squash) — `clean-by-substitute` counts, bare `clean` on an empty `Check files` list does not |
+    | Tamper diff clean, or every difference logged as an amendment | The verdict recorded at step 5 — and still re-runnable, since the freeze commit is an ancestor of the pushed head. `clean-by-substitute` counts, bare `clean` on an empty `Check files` list does not |
     | Local project gates green | `make check` in the worktree |
     | CI checks on the pushed head all pass | `gh pr checks` — the query below. A local `make check` is **not** a substitute |
     | No unresolved review threads | The GraphQL query below — there is no `--json reviewThreads` field |
