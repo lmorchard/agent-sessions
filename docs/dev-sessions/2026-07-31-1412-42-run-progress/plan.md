@@ -115,13 +115,20 @@ Every read is `.get()`-guarded: a record whose `message` is absent or whose `con
 must not raise, for the same reason C2 exists.
 
 **Verification — automated:**
-- [ ] C1's check passes: `uv run pytest scripts/test_run_progress.py`
-- [ ] C2's check passes: same command (`test_partial_final_line_reports_every_complete_record`)
-- [ ] C3's check passes: same command (`test_empty_stream_is_not_started`,
+- [x] C1's check passes: `uv run pytest scripts/test_run_progress.py`
+- [x] C2's check passes: same command (`test_partial_final_line_reports_every_complete_record`)
+- [x] C3's check passes: same command (`test_empty_stream_is_not_started`,
       `test_missing_stream_is_not_started`)
-- [ ] The run collected 5 tests and exited 0 — **not** exit 5. Record the collected/passed count.
-- [ ] Guards still pass: `make check`, `bash driver/test-driver.sh`, `make driver-check`,
-      `python3 scripts/docs_check.py`
+- [x] The run collected 5 tests and exited 0 — **not** exit 5. `collected 5 items` /
+      `5 passed in 0.24s` / `EXIT=0`.
+- [x] Guards still pass: `make check` green (`driver-test` `112 passed, 0 failed`; park-state
+      `21 passed, 0 failed`; `driver-check`, `skill-readonly`, `docs-check`, `assertion-lint` green)
+
+Implemented at `a45068f`. Three narrowings from the plan's sketch, none of them widening the
+contract: `except OSError` rather than `except FileNotFoundError` (a missing run *directory* can
+raise `NotADirectoryError`, and both are the same fact); a bare JSON scalar on its own line counts
+as `skipped` rather than as a record; and `"key" in record` guards the last-wins assignments, so a
+later `result` that omits `total_cost_usd` cannot blank out a cost an earlier one reported.
 
 **Verification — manual:**
 - None. Every criterion here is a runnable check; that is why the tier is `auto-ok`.
@@ -187,15 +194,37 @@ open questions: no `--follow` flag in the driver, no driver-side heartbeat, no c
 driver prints on completion, no TUI or spinner, no tail of the full stream.
 
 **Verification — automated:**
-- [ ] C1/C2/C3's check still passes after the additions: `uv run pytest
-      scripts/test_run_progress.py`, 5 collected, exit 0
-- [ ] `make gate-test` runs the new file (its collected count rises by 5)
-- [ ] `make check` green
-- [ ] G1, by its own command: snapshot the state dir with `find` before and after a
-      `run_progress.py` invocation against a real run directory; the newer-than-marker set is empty
-- [ ] `python3 scripts/run_progress.py <a real run dir>` prints a digest with a non-zero turn count
-      (proves it works on a real 1 MB+ stream, not only on fixtures)
-- [ ] `python3 scripts/run_progress.py <an empty temp dir>` prints the not-started line, not `0 turns`
+- [x] C1/C2/C3's check still passes after the additions: `uv run pytest
+      scripts/test_run_progress.py`, 5 collected, `PYTEST_EXIT=0`
+- [x] `make gate-test` runs the new file — `63 passed`, against `58 passed` for the two-file
+      command it replaced. Exactly the 5 new tests.
+- [x] `make check` green, `MAKE_CHECK_EXIT=0`
+- [x] G1 — see the substitution note below. Verified over **the whole state dir**: 126 entries,
+      zero created / changed / re-stamped across a reader invocation.
+- [x] `python3 scripts/run_progress.py .driver-state/runs/657-20260729T223955Z` (a real 1.4 MB
+      stream) → `run 657-20260729T223955Z   turns 290   $16.69   35m49s`, plus the tool tally and
+      last-text lines
+- [x] `python3 scripts/run_progress.py <an empty dir>` → `not started -- no stream.jsonl yet`,
+      not `0 turns`
+
+Implemented at `412e52d`, plus `7bd1a8c` from self-review (below).
+
+**G1's literal command could not be run, and this is the substitute.** `find`, `touch` and `mkdir`
+are denied by this run's permission mode, so `find "$STATE_DIR" -newer <marker>` never executed. In
+its place, a Python `stat` snapshot of every entry under the run dir *and* under the whole state dir
+— `(st_mtime_ns, st_ctime_ns, st_size)` per path — taken before and after invoking the reader, and
+compared. Both sets came back identical: `run dir: 7 entries before, 7 after; changed-or-new: []`
+and `state dir: 126 entries before, 126 after; changed-or-new: []`. That is the property G1 names,
+established mechanically rather than by eye, and over a wider scope than the criterion asked for.
+Recorded as a substitution rather than as G1 passing verbatim, because a null must not render as a
+positive here either.
+
+**Self-review finding, fixed at `7bd1a8c`.** The Makefile comment claimed `make watch` "can be
+started before the run is," and the code exited 2 on the first tick when no run directory existed —
+so the poll never began. The code was the wrong half: polling for something not yet there is what
+watching is for. A one-shot read still exits 2; a `--watch` now waits and says what it is waiting
+for. An explicit `RUNDIR` that is not a directory still fails even under `--watch`, because a typo
+cannot fix itself.
 
 **Verification — manual:**
 - None required. The digest's exact wording is not a criterion, and the spec explicitly declines to
