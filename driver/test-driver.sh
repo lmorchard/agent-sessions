@@ -430,6 +430,90 @@ _nest_verdict() { printf '%s %s\n' "$(_nest_warned)" "$(_nest_reached)"; }
 _nest_first()   { printf '%s\n' "${NEST_ERR%%$'\n'*}"; }
 _nest_made()    { [ -d "$1" ] && printf 'created\n' || printf 'absent\n'; }
 
+# A CONSTRUCTED skill dir, for the cases that must survive validation ---------
+#
+# Four cases below need a --skill-dir that reaches the required-command loop. They
+# used to point at this very repo's skills/agent-session, which made their
+# stop-point a property of the developer's working tree the moment #36 added a
+# refusal for a skill dir with uncommitted changes: one stray edit under skills/ and
+# `gh-check` becomes `stopped-early`, failing a case that is about containment for a
+# reason that has nothing to do with containment. That is the same host-dependence
+# the constructed PATH above exists to remove, one input over.
+#
+# So those four run against a CLEAN, COMMITTED scratch repo laid out like the real
+# one: skills/agent-session/phases/express.md, plus a driver/ subdirectory so the
+# sibling case still has a genuine sibling to aim --repo-path at. Each case keeps its
+# meaning (containment / siblinghood / unrelated-checkout / ambient-gh) and its
+# expected verdict exactly; only the directory is constructed.
+#
+# The cases that die AT the containment check keep the real $NEST_SKILL. Realism is
+# worth something there and they never reach a later check.
+
+# Identity and signing are supplied per invocation rather than assumed: a host with
+# no user.email cannot commit at all, and one with commit.gpgsign=true would block
+# on a passphrase. init.defaultBranch only silences git's hint -- nothing here names
+# a branch, so an old git that ignores the option is fine.
+_nest_git() { git -c user.email=harness@example.invalid -c user.name='nest harness' \
+                  -c commit.gpgsign=false -c init.defaultBranch=main "$@"; }
+
+_nest_make_skill_repo() { # $1 = dir -> a clean committed repo shaped like this one
+  local d="$1"
+  mkdir -p "$d/skills/agent-session/phases" "$d/driver" || return 1
+  printf 'fixture copy of the express phase\n' > "$d/skills/agent-session/phases/express.md" || return 1
+  printf '#!/usr/bin/env bash\n# fixture stub, never executed\n' > "$d/driver/agent-session-driver.sh" || return 1
+  _nest_git init -q "$d"                             >/dev/null 2>&1 || return 1
+  _nest_git -C "$d" add -A                           >/dev/null 2>&1 || return 1
+  _nest_git -C "$d" commit -q -m 'fixture: clean skill dir' >/dev/null 2>&1 || return 1
+}
+
+_nest_skill_repo() { # $1 = name -> prints the path of a fresh clean fixture repo
+  local d="$NEST_TMP/$1"
+  if ! _nest_make_skill_repo "$d"; then
+    printf 'harness precondition: could not build skill-dir fixture %s\n' "$d" >&2
+    exit 1
+  fi
+  printf '%s\n' "$d"
+}
+
+_nest_porcelain() { _nest_git -C "$1" status --porcelain 2>&1 | tr '\n' '|'; }
+
+_nest_require_dirt() { # $1 = repo, $2 = substring git status must report
+  case "$(_nest_git -C "$1" status --porcelain 2>/dev/null)" in
+    *"$2"*) ;;
+    *) printf 'harness precondition: %s must report %s as changed; git status said [%s]\n' \
+         "$1" "$2" "$(_nest_porcelain "$1")" >&2; exit 1 ;;
+  esac
+}
+
+_nest_require_clean() { # $1 = repo
+  if [ -n "$(_nest_git -C "$1" status --porcelain 2>/dev/null)" ]; then
+    printf 'harness precondition: %s must have no uncommitted changes; git status said [%s]\n' \
+      "$1" "$(_nest_porcelain "$1")" >&2; exit 1
+  fi
+}
+
+# GIT_DIR/GIT_WORK_TREE in the ambient environment would redirect every git call
+# from here down -- the fixture builds AND whatever git the driver itself runs -- at
+# a repository this file did not create. The rest of the suite already assumes they
+# are unset; this says so out loud rather than inheriting it.
+if [ -n "${GIT_DIR:-}${GIT_WORK_TREE:-}" ]; then
+  printf 'harness precondition: GIT_DIR/GIT_WORK_TREE must not be set in the environment\n' >&2
+  exit 1
+fi
+
+NEST_FIX="$(_nest_skill_repo skillrepo-clean)"
+NEST_FIX_SKILL="$NEST_FIX/skills/agent-session"
+# Both halves of the layout asserted, because a silently-broken fixture is how these
+# cases would pass for the wrong reason -- and note the driver ALREADY has a message
+# that names phases/express.md ("no phases/express.md under <dir>"), which the #36
+# section below has to tell apart from a real naming.
+if [ ! -f "$NEST_FIX_SKILL/phases/express.md" ] || [ ! -d "$NEST_FIX/driver" ]; then
+  printf 'harness precondition: fixture %s must contain skills/agent-session/phases/express.md and driver/\n' \
+    "$NEST_FIX" >&2
+  exit 1
+fi
+_nest_require_clean "$NEST_FIX"
+
 # C1. The skill directory of this very repo, inside this very repo.
 _nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
   --skill-dir "$NEST_SKILL" --repo-path "$NEST_ROOT" --state-dir "$NEST_TMP/s-nested"
@@ -454,9 +538,12 @@ _nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
 check ".. in the path still detects containment" "warned" "$(_nest_warned)"
 
 # C4. The escape hatch still warns -- an operator who opts in should see what
-# they opted into in the log, not a silent pass.
+# they opted into in the log, not a silent pass. On $NEST_FIX rather than the real
+# repo (see the fixture note above): this is one of the four cases that must reach
+# the required-command loop, so its stop-point must not depend on whether the
+# developer happens to have uncommitted skill edits.
 _nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions --allow-nested-skill-dir \
-  --skill-dir "$NEST_SKILL" --repo-path "$NEST_ROOT" --state-dir "$NEST_TMP/s-allow"
+  --skill-dir "$NEST_FIX_SKILL" --repo-path "$NEST_FIX" --state-dir "$NEST_TMP/s-allow"
 check "--allow-nested-skill-dir proceeds past validation" "gh-check" "$(_nest_reached)"
 check "  and warns on the way through"                    "warned"   "$(_nest_warned)"
 
@@ -491,8 +578,12 @@ check "a missing --skill-dir still reports its own error" \
 # The three false-positive guards. These pass today and must keep passing: a
 # containment check that refuses ordinary layouts is worse than none, because the
 # operator learns to reach for --allow-nested-skill-dir by reflex.
+#
+# All three reach the required-command loop, so all three are on $NEST_FIX. The
+# sibling relationship is preserved by the fixture's own driver/ subdirectory --
+# skills/agent-session and driver/ are siblings there exactly as they are here.
 _nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
-  --skill-dir "$NEST_SKILL" --repo-path "$NEST_ROOT/driver" --state-dir "$NEST_TMP/s-sibling"
+  --skill-dir "$NEST_FIX_SKILL" --repo-path "$NEST_FIX/driver" --state-dir "$NEST_TMP/s-sibling"
 check "a sibling directory is not containment" "no-warn gh-check" "$(_nest_verdict)"
 
 # The "unrelated checkout" is constructed too. This named $HOME/devel/decafclaw,
@@ -503,7 +594,7 @@ check "a sibling directory is not containment" "no-warn gh-check" "$(_nest_verdi
 # read `no-warn` from a run that never reached the containment check at all.
 mkdir -p "$NEST_TMP/unrelated-checkout/skills"
 _nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
-  --skill-dir "$NEST_SKILL" --repo-path "$NEST_TMP/unrelated-checkout" --state-dir "$NEST_TMP/s-other"
+  --skill-dir "$NEST_FIX_SKILL" --repo-path "$NEST_TMP/unrelated-checkout" --state-dir "$NEST_TMP/s-other"
 check "an unrelated checkout is not containment" "no-warn gh-check" "$(_nest_verdict)"
 
 # The hermeticity guard. Two honest limitations, both worth stating in place.
@@ -534,7 +625,7 @@ chmod +x "$NEST_TMP/ambient/gh"
 _nest_saved_path="$PATH"
 PATH="$NEST_TMP/ambient:$PATH"
 _nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions --allow-nested-skill-dir \
-  --skill-dir "$NEST_SKILL" --repo-path "$NEST_ROOT" --state-dir "$NEST_TMP/s-ambient"
+  --skill-dir "$NEST_FIX_SKILL" --repo-path "$NEST_FIX" --state-dir "$NEST_TMP/s-ambient"
 PATH="$_nest_saved_path"
 check "an ambient gh cannot reach the driver" "warned gh-check" "$(_nest_verdict)"
 check "  and no state dir is created"         "absent"          "$(_nest_made "$NEST_TMP/s-ambient")"
@@ -546,6 +637,179 @@ mkdir -p "$NEST_TMP/a/b" "$NEST_TMP/a/bc/phases"
 _nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
   --skill-dir "$NEST_TMP/a/bc" --repo-path "$NEST_TMP/a/b" --state-dir "$NEST_TMP/s-prefix"
 check "a string prefix that is not a path prefix is not containment" "no-warn gh-check" "$(_nest_verdict)"
+
+# --- #36: a skill dir with uncommitted changes must not start a run ----------
+#
+#   https://github.com/lmorchard/agent-sessions/issues/36
+#
+# The hosted run is told to READ $SKILL_DIR and granted --add-dir on it, and what it
+# reads there is the instruction set grading its own work. If that directory sits in
+# a working tree with uncommitted edits to tracked files, the run is graded by text
+# that is in no commit: nothing in the PR, the ledger row or the gate block records
+# what it actually read, and the same invocation an hour later is a different run.
+# So startup has to refuse, and has to name what is modified -- an operator who is
+# told only "dirty" has to go find it.
+#
+# Same construction as the section above, for the same reasons: the SHIPPED driver as
+# a subprocess on the hermetic PATH, and assertions on stderr text plus stop-point
+# rather than exit status, because a refusal and the required-command loop both exit
+# 2.
+#
+# Every case here aims --repo-path at a directory that does NOT contain the skill
+# dir, so containment can never be what stops the run. That isolation is load
+# bearing: a case that could stop for either reason grades neither.
+
+echo "#36: a dirty skill dir must not be handed to a run"
+
+# The --repo-path for this section. A plain directory, like the unrelated-checkout
+# case above -- validation requires only that it exist.
+NEST_D_TARGET="$NEST_TMP/dirty-target"
+mkdir -p "$NEST_D_TARGET"
+
+# "Does stderr name the modified file", reduced to a token from a substring that
+# holds however the path is printed. `git status --porcelain` reports paths relative
+# to the REPO ROOT, so an implementation echoing its output prints
+# skills/agent-session/phases/express.md while one echoing "$SKILL_DIR/..." prints an
+# absolute path; `phases/express.md` sits inside both.
+#
+# The missing-fixture arm is not pedantry. The driver ALREADY emits a message naming
+# phases/express.md -- `no phases/express.md under <dir>` -- so a fixture that failed
+# to write the file would satisfy a naive substring match, and this section's central
+# check would go green on a driver that does nothing at all.
+_nest_named_dirty() {
+  case "$NEST_ERR" in
+    *'no phases/express.md under'*) printf 'missing-fixture\n' ;;
+    *'phases/express.md'*)          printf 'named\n' ;;
+    *)                              printf 'unnamed\n' ;;
+  esac
+}
+# Naming AND stop-point together, never either alone. `named` alone would be
+# satisfied by a driver that mentions the file and then runs anyway;
+# `stopped-early` alone would be satisfied by a driver that refuses for some
+# unrelated reason, or by a broken fixture path.
+_nest_dirty_verdict() { printf '%s %s\n' "$(_nest_named_dirty)" "$(_nest_reached)"; }
+
+# C1. A tracked file under the skill dir, modified in the working tree.
+D_DIRTY="$(_nest_skill_repo skillrepo-dirty)"
+printf 'an uncommitted local edit to the phase the run would read\n' \
+  >> "$D_DIRTY/skills/agent-session/phases/express.md"
+_nest_require_dirt "$D_DIRTY" 'skills/agent-session/phases/express.md'
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir "$D_DIRTY/skills/agent-session" --repo-path "$NEST_D_TARGET" \
+  --state-dir "$NEST_TMP/s-dirty"
+check "#36 C1 an uncommitted edit under --skill-dir refuses, naming the path" \
+  "named stopped-early" "$(_nest_dirty_verdict)"
+
+# C1, second shape: staged and not committed. Staging is not committing -- the
+# content still exists nowhere a reviewer can fetch it -- so `git diff` alone
+# (unstaged only) is a wrong answer here, and this is what says so.
+D_STAGED="$(_nest_skill_repo skillrepo-staged)"
+printf 'staged, but committed nowhere\n' >> "$D_STAGED/skills/agent-session/phases/express.md"
+_nest_git -C "$D_STAGED" add skills/agent-session/phases/express.md >/dev/null 2>&1
+_nest_require_dirt "$D_STAGED" 'skills/agent-session/phases/express.md'
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir "$D_STAGED/skills/agent-session" --repo-path "$NEST_D_TARGET" \
+  --state-dir "$NEST_TMP/s-staged"
+check "#36 C1 a staged-but-uncommitted edit is dirty too" \
+  "named stopped-early" "$(_nest_dirty_verdict)"
+
+# C2. THE POSITIVE CONTROL, and the reason it is written down as a criterion rather
+# than left implied: the cheapest way to green C1 is to refuse always, and that
+# bricks the driver. Identical fixture and identical edit -- committed rather than
+# left in the working tree -- and the run must go exactly as far as it does today.
+D_COMMITTED="$(_nest_skill_repo skillrepo-committed)"
+printf 'the same edit, this time committed\n' >> "$D_COMMITTED/skills/agent-session/phases/express.md"
+_nest_git -C "$D_COMMITTED" commit -q -a -m 'commit the edit' >/dev/null 2>&1
+_nest_require_clean "$D_COMMITTED"
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir "$D_COMMITTED/skills/agent-session" --repo-path "$NEST_D_TARGET" \
+  --state-dir "$NEST_TMP/s-committed"
+check "#36 C2 the same edit, committed, reaches the required-command loop as before" \
+  "unnamed gh-check" "$(_nest_dirty_verdict)"
+
+# G3 (a guard, passes today). A skill directory that is not inside a git repository
+# at all -- an unpacked tarball, a copy under /tmp. `git status` there does not print
+# nothing, it ERRORS, so an implementation that reads its output without consulting
+# its exit status sees a non-empty string ("fatal: not a git repository ...") and
+# refuses. A null must not render as a positive. Given its own case rather than left
+# implied by the not-a-git-repo-ness of some other fixture, because this is the arm
+# that turns a guard into an outage: the driver becomes unable to run against any
+# skill dir that is not a checkout.
+D_NOGIT="$NEST_TMP/skillrepo-nogit/skills/agent-session"
+mkdir -p "$D_NOGIT/phases"
+printf 'fixture copy of the express phase\n' > "$D_NOGIT/phases/express.md"
+# Asserted, not assumed: if $NEST_TMP ever landed inside a git repository this would
+# quietly stop being the not-a-repo case and start being a duplicate of C2.
+if _nest_git -C "$D_NOGIT" rev-parse --git-dir >/dev/null 2>&1; then
+  printf 'harness precondition: %s must not be inside a git repository\n' "$D_NOGIT" >&2
+  exit 1
+fi
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir "$D_NOGIT" --repo-path "$NEST_D_TARGET" --state-dir "$NEST_TMP/s-nogit"
+check "#36 G3 a skill dir outside any git repo still proceeds" \
+  "unnamed gh-check" "$(_nest_dirty_verdict)"
+
+# An untracked file under the skill dir is NOT dirt. Nothing about a stray scratch
+# file changes what the run is told to do -- the instructions it reads are all
+# tracked and all committed -- and `git status --porcelain` reports it anyway, with a
+# `??`. So the obvious one-liner (refuse on any porcelain output) fails here, which
+# is the whole reason this is a separate assertion: refusing would make the driver
+# unusable in any working directory carrying a scratch note.
+#
+# The needle is deliberately a DIFFERENT filename from the one _nest_named_dirty
+# looks for, so the `unnamed` half cannot be satisfied by the file simply not being
+# mentioned -- the `gh-check` half is what carries the assertion, and `unnamed` only
+# says nothing else went wrong.
+D_UNTRACKED="$(_nest_skill_repo skillrepo-untracked)"
+printf 'a scratch note nobody committed\n' > "$D_UNTRACKED/skills/agent-session/phases/scratch.md"
+_nest_require_dirt "$D_UNTRACKED" 'skills/agent-session/phases/scratch.md'
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir "$D_UNTRACKED/skills/agent-session" --repo-path "$NEST_D_TARGET" \
+  --state-dir "$NEST_TMP/s-untracked"
+check "#36 an untracked file under the skill dir is not dirt" \
+  "unnamed gh-check" "$(_nest_dirty_verdict)"
+
+# ...and the scope is UNDER the skill dir, not the whole repository. The skill dir of
+# this repo lives beside driver/, docs/ and the Makefile, every one of which is
+# routinely mid-edit while the driver is being run -- a whole-repo cleanliness test
+# would refuse almost every real invocation, which is a false positive expensive
+# enough to train the operator around the check.
+D_ELSEWHERE="$(_nest_skill_repo skillrepo-elsewhere)"
+printf '# an uncommitted edit OUTSIDE the skill dir\n' >> "$D_ELSEWHERE/driver/agent-session-driver.sh"
+_nest_require_dirt "$D_ELSEWHERE" 'driver/agent-session-driver.sh'
+_nest_require_clean_under_skill() { # $1 = repo -- the other half of the fixture's meaning
+  case "$(_nest_git -C "$1" status --porcelain -- skills 2>/dev/null)" in
+    '') ;;
+    *)  printf 'harness precondition: %s must be clean under skills/; git status said [%s]\n' \
+          "$1" "$(_nest_porcelain "$1")" >&2; exit 1 ;;
+  esac
+}
+_nest_require_clean_under_skill "$D_ELSEWHERE"
+_nest_run "$NEST_ROOT" --repo lmorchard/agent-sessions \
+  --skill-dir "$D_ELSEWHERE/skills/agent-session" --repo-path "$NEST_D_TARGET" \
+  --state-dir "$NEST_TMP/s-elsewhere"
+check "#36 a repo dirty outside the skill dir still proceeds" \
+  "unnamed gh-check" "$(_nest_dirty_verdict)"
+
+# The reducer probe, LAST because it clobbers NEST_ERR. Not a criterion and it says
+# nothing about the driver: it answers "can the token C1 expects be produced at all",
+# which a check that fails today has no other way to establish -- an expectation
+# nothing could ever satisfy is not a check, it is a permanent red. Both arms, since
+# the discrimination is the point: a refusal naming the file reduces to `named
+# stopped-early`, and the same sentence on a run that carried on regardless does not.
+#
+# The wording below is invented, and deliberately never asserted against the driver
+# -- only the substring `phases/express.md` and the absence of the gh line are load
+# bearing, which is what leaves the implementation free to phrase its refusal however
+# it likes.
+NEST_RC=2
+NEST_ERR='error: --skill-dir has uncommitted changes: skills/agent-session/phases/express.md'
+check "probe: a refusal naming the path reduces to the token C1 expects" \
+  "named stopped-early" "$(_nest_dirty_verdict)"
+NEST_ERR='error: --skill-dir has uncommitted changes: skills/agent-session/phases/express.md
+error: required command not found: gh'
+check "probe: and the same message on a run that continued anyway does not" \
+  "named gh-check" "$(_nest_dirty_verdict)"
 
 # --- the issue query must actually request the labels it filters on --------
 #
