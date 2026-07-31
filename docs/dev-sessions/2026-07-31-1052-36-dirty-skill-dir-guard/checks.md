@@ -116,9 +116,10 @@ the independent verifier at the end of execute and re-run in `pr` before pushing
 squashed, so `1bd50f0` is an ancestor of the pushed head and a reviewer can re-run this command
 rather than taking the verdict on trust.
 
-`git diff <freeze-sha> --stat` lists only `checks.md` (the sanctioned `Frozen at` sha line, plus
-this section), `plan.md` (new), and `driver/agent-session-driver.sh` (the implementation). No
-collateral edit to any file no phase named.
+`git diff <freeze-sha> --stat` lists nothing outside this session directory and the one
+implementation file — run it rather than trusting a list here, which is the kind of enumeration that
+rots. (An earlier draft of this paragraph did enumerate it, and was already wrong by the time it was
+committed: it omitted `notes.md`, which the same commit added. The independent verifier caught it.)
 
 The rebase in `pr` step 1 was a **no-op** — the branch was already atop `origin/main` at `c46c8e2`
 — so the freeze sha needed no re-anchoring and this verdict was never taken against a rewritten
