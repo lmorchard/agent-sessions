@@ -1,7 +1,7 @@
 # Frozen acceptance checks
 
 **Source:** https://github.com/lmorchard/agent-sessions/issues/42
-**Frozen at:** (recorded in the follow-up commit)
+**Frozen at:** `66aefa0` (2026-07-31)
 **Check files — read-only from Phase 1 onward:**
 - `scripts/test_run_progress.py`
 
