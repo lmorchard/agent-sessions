@@ -17,6 +17,25 @@ ok()   { PASS=$((PASS+1)); printf '  ok    %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  FAIL  %s\n     expected: %s\n     actual:   %s\n' "$1" "$2" "$3"; }
 check(){ [ "$2" = "$3" ] && ok "$1" || bad "$1" "$2" "$3"; }
 
+# Count occurrences of a literal on the driver's NON-COMMENT lines.
+#
+# The old spelling of these assertions was `grep -q '<literal>' "$DRIVER"`, which
+# succeeds when the literal appears ANYWHERE -- including inside a comment.
+# findings.md (defect class 5) calls that "a spelling check, not a test", and the
+# warning against it sat in a comment in this very file for two days while eight
+# instances shipped and a ninth was added. Comparing a COUNT is what fixes it:
+# delete the code and the count drops, so the assertion flips; describe it in a
+# comment and the line is stripped before counting, so it does not.
+#
+# `make assertion-lint` (scripts/assertion_lint.py) now fails the build if the
+# `-q` form comes back. See issue #28.
+#
+# Whole-line comments only -- a trailing `# ...` is not stripped, because doing so
+# would need a bash parser to avoid mangling a `#` inside a string. Every literal
+# these guard occurs on a real code line, and the shape is enforced mechanically.
+_code_hits()    { grep -v '^[[:space:]]*#' "$DRIVER" | grep -cF "$1"; }
+_code_hits_re() { grep -v '^[[:space:]]*#' "$DRIVER" | grep -cE "$1"; }
+
 # NO REPLICAS. These call the shipped parser, driver/gate.py, through the same
 # CLI the driver itself uses. This file used to hand-copy extract_gate,
 # gate_field, classify_outcome and TIER_JQ -- and the copies drifted, so the
@@ -210,11 +229,8 @@ check "default state dir resolves"     "$PWD/.driver-state" "$(abspath ./.driver
 # The regression this guards: the invoke stage runs `cd "$REPO_PATH"` in a
 # subshell, so a relative --state-dir resolved at startup points somewhere else
 # by the time the prompt file is read. That killed the first real run.
-if grep -q 'STATE_DIR="$(abspath "$STATE_DIR")"' "$DRIVER"; then
-  ok "driver resolves STATE_DIR to an absolute path"
-else
-  bad "driver resolves STATE_DIR" "abspath call present" "absent"
-fi
+check "driver resolves STATE_DIR to an absolute path" "1" \
+  "$(_code_hits 'STATE_DIR="$(abspath "$STATE_DIR")"')"
 
 # --- budget exhaustion is distinguishable from a designed stop -------------
 
@@ -241,39 +257,30 @@ check "no budget set -> no reclassification"   "incomplete"       "$(budget_recl
 
 # budget-exhausted must NOT be parked -- parking hides a recoverable config
 # problem behind a skip reason on a perfectly good issue.
-if grep -qE '^ *parked\|failed\|incomplete\|no-gate\)' "$DRIVER" && \
-   ! grep -qE '^ *parked\|failed\|incomplete\|no-gate\|budget-exhausted\)' "$DRIVER"; then
-  ok "budget-exhausted is excluded from the park list"
-else
-  bad "budget-exhausted park status" "excluded from park list" "included (would hide a config problem)"
-fi
+# Both halves are load-bearing and are now asserted separately, so a failure says
+# which one broke: the park list must EXIST (or the second assertion passes
+# vacuously against a list that is simply gone), and it must NOT name
+# budget-exhausted.
+check "the park case list is present to be checked"     "1" \
+  "$(_code_hits_re '^ *parked\|failed\|incomplete\|no-gate\)')"
+check "budget-exhausted is excluded from the park list" "0" \
+  "$(_code_hits_re '^ *parked\|failed\|incomplete\|no-gate\|budget-exhausted\)')"
 
 # --- the driver takes its child down with it -------------------------------
 
 echo "orphan: the in-flight child must not outlive its driver"
 
-if grep -q 'trap cleanup EXIT INT TERM' "$DRIVER"; then
-  ok "cleanup trap installed on EXIT/INT/TERM"
-else
-  bad "cleanup trap" "trap cleanup EXIT INT TERM" "absent"
-fi
-if grep -q 'kill -TERM "\$CHILD_PID"' "$DRIVER"; then
-  ok "cleanup terminates the in-flight child"
-else
-  bad "cleanup kills child" "kill -TERM \$CHILD_PID" "absent"
-fi
+check "cleanup trap installed on EXIT/INT/TERM" "1" \
+  "$(_code_hits 'trap cleanup EXIT INT TERM')"
+check "cleanup terminates the in-flight child"  "1" \
+  "$(_code_hits 'kill -TERM "$CHILD_PID"')"
 # The trap cannot fire on SIGKILL or a host crash, so startup must detect a
 # still-live orphan and refuse -- otherwise two runs mutate one repo at once.
-if grep -q 'refusing to start a second run while an orphan is live' "$DRIVER"; then
-  ok "startup refuses to run alongside a live orphan"
-else
-  bad "live-orphan guard" "startup refuses" "absent"
-fi
-if grep -q 'child.pid' "$DRIVER"; then
-  ok "child pid is recorded for post-crash orphan detection"
-else
-  bad "child.pid recorded" "written to the run dir" "absent"
-fi
+check "startup refuses to run alongside a live orphan" "1" \
+  "$(_code_hits 'refusing to start a second run while an orphan is live')"
+# Two: the write in the invoke stage and the read in the orphan check. Both are
+# needed -- recording the pid with nothing reading it detects no orphan.
+check "child pid is recorded AND read back" "2" "$(_code_hits 'child.pid')"
 
 # --- C1: no merge path in the driver ---------------------------------------
 
@@ -334,11 +341,8 @@ check "a missing stream file does not"               "no"  "$(_yn "$TMPD/nope.js
 # consults it -- deleting the has_success_result call from the classifier must
 # break this, which is how the skill-readonly guard should have been written
 # the first time.
-if grep -q 'rc" -ne 0 \] && ! has_success_result' "$DRIVER"; then
-  ok "the failed branch consults the stream before overruling the gate"
-else
-  bad "failed branch consults the stream" "has_success_result in the rc!=0 guard" "absent"
-fi
+check "the failed branch consults the stream before overruling the gate" "1" \
+  "$(_code_hits 'rc" -ne 0 ] && ! has_success_result')"
 
 # --- a skill dir nested inside the target checkout -------------------------
 
@@ -1124,11 +1128,15 @@ esac
 
 # `verdict:` rather than mere non-emptiness: a stray newline is non-empty too, and
 # that is exactly the value the bug wrote.
-if grep -q '^verdict: eligible-for-auto-merge$' "$D32_RUNDIR/gate.yaml" 2>/dev/null; then
+# A count, not `grep -q`: same reason as _code_hits above. A missing file yields
+# no output and a nonzero status, so the substitution is empty and the default
+# makes it 0 -- this fails closed rather than erroring.
+D32_VERDICT_HITS="$(grep -c '^verdict: eligible-for-auto-merge$' "$D32_RUNDIR/gate.yaml" 2>/dev/null || true)"
+if [ "${D32_VERDICT_HITS:-0}" -eq 1 ]; then
   ok "gate.yaml carries the gate block"
 else
-  bad "gate.yaml carries the gate block" "a line 'verdict: eligible-for-auto-merge'" \
-      "[$(tr '\n' '|' < "$D32_RUNDIR/gate.yaml" 2>/dev/null || echo MISSING)]"
+  bad "gate.yaml carries the gate block" "exactly one 'verdict: eligible-for-auto-merge' line" \
+      "${D32_VERDICT_HITS:-0} in [$(tr '\n' '|' < "$D32_RUNDIR/gate.yaml" 2>/dev/null || echo MISSING)]"
 fi
 
 rm -rf "$D32_TMP"
