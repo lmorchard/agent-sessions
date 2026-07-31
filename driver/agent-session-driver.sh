@@ -175,6 +175,65 @@ if [ "$DRY_RUN" -eq 0 ] && [ -z "$CLASSIFY_ONLY" ]; then
         die "--skill-dir is inside --repo-path (pass --allow-nested-skill-dir to proceed)"
       ;;
   esac
+
+  # An unattended run READS $SKILL_DIR and is graded by what it reads there. If that
+  # directory has uncommitted edits to tracked files, the run is graded by text that
+  # is in no commit: nothing in the PR, the ledger row or the gate block records what
+  # it actually read, and the same invocation an hour later is a different run. This
+  # happened -- the run on issue #23 found phases/express.md, phases/pr.md and
+  # references/frozen-checks.md modified-but-uncommitted, where committed pr.md said
+  # "Squash and open" and the working tree said "Push and open". That decides whether
+  # the freeze commit survives to the gate, so it was not cosmetic. The run stopped
+  # voluntarily and nothing in the system helped it. See issue #36.
+  #
+  # Refuse rather than warn: a warning in an unattended run is read by nobody until
+  # after the money is spent, and unreviewed instructions produce output that looks
+  # entirely normal. No escape-hatch flag either -- it would be reached for by reflex,
+  # which is the trap --allow-nested-skill-dir's false-positive guards exist to
+  # prevent. One can be added if it is ever actually wanted.
+  #
+  # AFTER the containment check on purpose: the nest cases in test-driver.sh that die
+  # at containment point --skill-dir at this repo's own skill dir, so testing
+  # cleanliness first would make their stop-point depend on the developer's working
+  # tree -- the host-dependence the constructed PATH there exists to remove.
+  #
+  # Scoped to tracked files UNDER the skill dir, via the `-- .` pathspec:
+  #   - not the whole repo, because this driver is routinely pointed at a checkout
+  #     with unrelated work in flight (docs/, .driver-state/), and a check that
+  #     refuses almost every real invocation gets disabled within a day;
+  #   - --untracked-files=no, because a stray scratch file changes nothing about what
+  #     the run is told to do, while a modified tracked file does. Narrower is better
+  #     here; widen only with evidence.
+  # Staged counts as dirty -- `git status` reports the index too, which is why this is
+  # not `git diff`. Staged is still not committed and still not reviewed.
+  #
+  # $skill_real, not $SKILL_DIR: abspath() has not run yet (it is below), so
+  # SKILL_DIR can still be relative, while skill_real was resolved with `pwd -P`
+  # just above.
+  #
+  # The `if` is what keeps a null from rendering as a positive. `git status` prints
+  # nothing on stdout in TWO different situations: a clean tree, and a SKILL_DIR in no
+  # repository at all -- where it exits nonzero and writes "fatal: not a git
+  # repository" to stderr. Treating that stderr as content would refuse every
+  # unpacked-tarball skill dir, so only exit 0 counts as git having answered, and a
+  # git that answered nothing means clean. `git` itself may still be missing here --
+  # the required-command loop is below, not above -- and that case correctly lands as
+  # "could not determine", proceeding to the loop that reports it properly.
+  skill_dirty=""
+  if skill_status="$(CDPATH= cd -- "$skill_real" \
+        && git status --porcelain --untracked-files=no -- . 2>/dev/null)"; then
+    skill_dirty="$skill_status"
+  fi
+  if [ -n "$skill_dirty" ]; then
+    log "ERROR: --skill-dir has uncommitted changes to tracked files: $skill_real"
+    # Every modified path, not just the first: an operator told only "dirty" has to go
+    # hunt for what changed. Paths are printed relative to the repository root, which
+    # is what --porcelain guarantees; the line above supplies the absolute anchor.
+    printf '%s\n' "$skill_dirty" | while IFS= read -r skill_dirty_line; do
+      log "  $skill_dirty_line"
+    done
+    die "--skill-dir is not clean: an unattended run would be graded by instructions that are in no commit"
+  fi
 fi
 
 for c in gh jq git; do
