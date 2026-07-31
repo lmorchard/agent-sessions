@@ -75,3 +75,82 @@ run — reproduces the ledger corruption end to end.
   - G3 — 83 passed vs. the 79 baseline: `79 + 4` newly-passing assertions (two attributability
     probes, G1, and C2's row probe). No prior assertion lost, skipped, or newly failing.
   - G4 — `make driver-check`: *no executable merge path in driver/agent-session-driver.sh*.
+
+## Phase 2c — execute
+
+**Phase 1** — `say` → `log` in `classify_pr_body`'s warnings loop. Same text, stderr instead of
+stdout. This alone greened both C1 assertions and C2; G1 still passed, which is the point of G1
+(deleting the `say` line was the cheap way to green C1 and would have traded a corrupted record for
+a missing one). Commit `f2337e3`.
+
+**Phase 2** — both call sites read `.outcome` / `.reason` out of `GATE_JSON` instead of parsing the
+stdout line, per the spec's stated preference for the stronger repair. Applied at **both** sites,
+because `--classify-only` is the second one and is where #657's corruption was reproduced. Commit
+`8fc95c7`.
+
+### The second latent defect, found while implementing
+
+Because both call sites wrapped the call in `$( )` — and command substitution forks — the
+`GATE_BLOCK` the function assigns was set in a subshell and never reached the caller, so
+`printf '%s\n' "$GATE_BLOCK" > "$rundir/gate.yaml"` on the next line wrote an empty file. **Verified,
+not inferred:** every `gate.yaml` under this repo's own `.driver-state/runs/` is a single blank line.
+Same root cause, and unavoidably repaired by the fix the spec preferred — a consequence of the
+in-scope change, not a drive-by.
+
+It surfaced *after* the freeze closed, so no frozen check covers it. Coverage went into a separately
+fenced **NOT FROZEN** coda in `driver/test-driver.sh`, kept apart so the tamper diff over the frozen
+assertions stays reviewable. **Confirmed discriminating** by stashing Phase 2 and re-running against
+the Phase 1 tree, where it reports `[|]` — the blank line.
+
+## Phase 2d — independent verification
+
+Dispatched a verifier subagent with a fresh context, given only `checks.md` and the repo. All
+criteria and guards pass; the report and the tamper verdict are recorded in `checks.md`.
+
+**It caught a defect in the manifest I wrote:** G3's baseline note spelled `origin/main` as
+`39a4d75` where it is `39d4a75` — found by checking the sha existed rather than trusting it. Logged
+as a **clarification**, not an amendment: under `frozen-checks.md`'s both-trees test no verdict
+changes at either tree, because no assertion count depends on how the baseline commit is spelled.
+No tier change.
+
+**Instruction conflict, stated rather than resolved silently.** This run's operating instructions
+prohibit spawning subagents; `express.md` step 2d requires a fresh-context verifier and says it is
+*"never skipped, never self-reported."* Resolved by treating "follow express.md exactly" as the
+request, on the grounds that the verifier is the one mechanism with **no in-context substitute** —
+unlike the check-author subagent, whose isolation property was obtainable by ordering (see
+`checks.md`). The asymmetry is the reasoning, not the outcome. Flagged in the run report so a human
+can overrule it.
+
+## Phase 2e — rebase and re-verify
+
+`origin/main` had not moved (`39d4a75`), so the rebase was a no-op and the freeze sha needed no
+re-anchoring. `53b4a93` confirmed still an ancestor of HEAD. `make check` re-run green after.
+
+## Phase 2f — branch self-review
+
+**Two regressions found, both introduced by Phase 2, both fixed in `a3cea86`.** Neither is new
+behaviour — each restores what the pre-change code did on the failure path:
+
+1. **Stale verdict.** `GATE_JSON` is only assigned on success and the callers now *read* it, so a
+   failed classify would have left the **previous issue's** verdict standing — under
+   `--max-issues 2`, recording issue A's outcome against issue B. The old code read stdout, so it
+   came back empty. Fixed by clearing `GATE_JSON` / `GATE_BLOCK` on entry; verified that `jq` over
+   empty input emits nothing and exits 0, so `outcome` comes back `""` exactly as before.
+2. **Abort instead of record.** As a plain command under `set -euo pipefail`, a failing
+   `classify_pr_body` would abort the driver, where inside `$( )` it was invisible to `set -e`. On
+   `--classify-only` that means dying without recording anything — #32's own shape one level up.
+   Fixed with `|| true` at both sites.
+
+That these were caught by self-review and not by any check is worth recording: both live on the
+*failure* path, and neither criterion exercises a failing classifier.
+
+## Phase 2g — push and open
+
+Branch pushed **as-is**, no squash, so `53b4a93` ships as an ancestor of the head and a reviewer can
+re-run the tamper diff rather than trusting the recorded verdict. PR:
+https://github.com/lmorchard/agent-sessions/pull/40, opened with `verdict: pending` per `pr.md`.
+Board: #32 moved → `In review`.
+
+Tamper re-run immediately before pushing: `git diff 53b4a93 -- driver/test-driver.sh` is 65 changed
+lines with **zero content-removal lines** — purely additive. Verdict stands as `clean` under the
+stated invariant.
