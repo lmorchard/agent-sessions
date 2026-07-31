@@ -150,8 +150,6 @@ _FORMAT = "%x1e%H%x00%B"
 _RECORD_SEP = "\x1e"
 _FIELD_SEP = "\x00"
 
-failures: list[str] = []
-
 
 def _quoted_spans(line: str) -> list[tuple[int, int]]:
     """The `(start, end)` offsets of the *content* of each inline code span.
@@ -242,6 +240,15 @@ def commit_messages(rev_range: str, repo: Path | None = None) -> list[tuple[str,
         cwd=repo,
         capture_output=True,
         text=True,
+        # Pin the decode instead of inheriting the process locale. `text=True`
+        # alone decodes with `locale.getpreferredencoding()` and strict errors,
+        # so under a C/POSIX locale -- which is what a CI runner usually has --
+        # a commit message containing a non-ASCII byte raises UnicodeDecodeError
+        # and takes `make check` down with it. Not hypothetical here: this
+        # repo's own history is full of em-dashes. `assertion_lint.py` pins the
+        # same pair for the same reason.
+        encoding="utf-8",
+        errors="replace",
         check=True,
     ).stdout
 
@@ -282,12 +289,28 @@ def main(argv: list[str] | None = None) -> int:
         # A range git cannot resolve is a broken invocation, not a clean tree.
         # Failing loudly here is the same lesson as assertion-lint's empty-scope
         # check: a null must not render as a positive.
+        #
+        # Both halves of this failure go to stderr. Lint *findings* are the
+        # tool's output and belong on stdout; an operational error is a
+        # diagnostic, and splitting one error message across two streams is how
+        # a caller ends up logging half of it.
         sys.stderr.write(exc.stderr or "")
-        print(f"FAIL: commit-lint could not read the range {rev_range!r}")
+        print(
+            f"FAIL: commit-lint could not read the range {rev_range!r}",
+            file=sys.stderr,
+        )
         return 1
 
-    for sha, lineno, text in found:
-        failures.append(f"{sha[:7]} line {lineno}: quoted closing keyword: {text}")
+    # Local, deliberately -- `assertion_lint` and `docs_check` accumulate into a
+    # module-level list, and that is the one thing not copied from them. A
+    # module-level list survives the call, so a second `main()` in the same
+    # process reports the first run's findings again and can fail a range that
+    # is actually clean. Their test suites clear it in a fixture; nothing here
+    # needs to read it, so the state should not exist.
+    failures = [
+        f"{sha[:7]} line {lineno}: quoted closing keyword: {text}"
+        for sha, lineno, text in found
+    ]
 
     for f in failures:
         print(f"  FAIL  {f}")

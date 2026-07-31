@@ -126,3 +126,65 @@ def test_a_four_space_indented_block_is_not_treated_as_quoting():
 def test_a_tilde_fence_is_not_treated_as_quoting():
     message = "subject\n\n~~~\nCloses #99113\n~~~\n"
     assert commit_lint.scan_message(message) == []
+
+
+# --- entry-point regressions, from the Copilot review on PR #49 -------------
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+#: A range with one known quoted keyword: the commit that closed issue 7.
+DIRTY_RANGE = "2cbe106~1..2cbe106"
+#: A range that resolves and selects nothing.
+EMPTY_RANGE = "HEAD..HEAD"
+
+
+@pytest.fixture
+def in_repo(monkeypatch):
+    """`main()` takes no repo argument -- it runs git in the cwd, because it is
+    meant to be invoked from inside the repo being scanned. Pin the cwd so these
+    do not depend on where pytest was started from."""
+    monkeypatch.chdir(REPO_ROOT)
+
+
+def test_a_second_run_in_one_process_does_not_inherit_the_first_ones_findings(in_repo):
+    """`main()` accumulated into a module-level list, so a clean range run after
+    a dirty one in the same process reported the dirty run's findings again and
+    exited non-zero. Reachable from any caller that imports this rather than
+    shelling out."""
+    assert commit_lint.main([DIRTY_RANGE]) == 1
+    assert commit_lint.main([EMPTY_RANGE]) == 0
+
+
+def test_repeated_clean_runs_produce_identical_output(in_repo, capsys):
+    commit_lint.main([EMPTY_RANGE])
+    first = capsys.readouterr().out
+    commit_lint.main([EMPTY_RANGE])
+    assert capsys.readouterr().out == first
+
+
+def test_an_unresolvable_range_sends_all_of_its_error_to_stderr(in_repo, capsys):
+    """Both halves of the message -- git's own stderr and ours. Splitting one
+    error across two streams is how a caller logs half of it."""
+    assert commit_lint.main(["no-such-ref..HEAD"]) == 1
+    captured = capsys.readouterr()
+    assert "could not read the range" in captured.err
+    assert captured.out == ""
+
+
+def test_the_scan_decodes_as_utf8_regardless_of_locale(monkeypatch):
+    """`text=True` alone decodes with the process locale and strict errors, so a
+    C/POSIX-locale runner would raise UnicodeDecodeError on this repo's own
+    history.
+
+    Not hypothetical: measured 2026-07-31, 29 commits carry non-ASCII in their
+    messages, em-dashes mostly. The live object database is the fixture on
+    purpose -- a synthetic one would let a locale-dependent decode pass.
+    """
+    monkeypatch.setenv("LC_ALL", "C")
+    monkeypatch.setenv("LANG", "C")
+    messages = commit_lint.commit_messages("--all", repo=REPO_ROOT)
+    assert messages, "--all selected no commits"
+    assert any(ord(c) > 127 for _sha, body in messages for c in body), (
+        "expected non-ASCII somewhere in this repo's history; if this fails "
+        "the test has stopped exercising the decode path"
+    )
