@@ -100,4 +100,39 @@ _None._
 
 ## Tamper verdict
 
-_(recorded at the end of execute and again in pr)_
+**`clean-by-substitute`** — recorded against the tree that ships, at `f384d92`. Basis, stated
+per-criterion because the mechanism differs by criterion and a single word would hide that:
+
+- **C2 — `clean`, by the real mechanism.** `git diff 48c8104 -- scripts/test_assertion_lint.py`
+  is **empty**. The one frozen check file is byte-unchanged since the freeze, so C2's seven
+  passing assertions are the ones authored before implementation. This is a genuine empty diff,
+  not an absent one.
+- **C1 and C3 — `clean-by-substitute`.** Both are commands, so there is no file for the diff to
+  compare and an empty result there would be an absent result, not a clean one. The three
+  substitutes ran:
+  1. *Manifest integrity.* `git diff 48c8104 -- <session-dir>/checks.md` shows exactly one hunk:
+     `**Frozen at:** _(recorded in the follow-up commit)_` → `**Frozen at:** 48c8104 (2026-07-31)`.
+     That is the sanctioned follow-up write. **No CRITERION line, no CHECK command, and no guard
+     command differs from the freeze version.** Amendments: none.
+  2. *Equality against the independent source.* The independent verifier confirmed all six
+     commands (C1, C2, C3, G1, G2, G3) are byte-identical to the issue body's, including
+     whitespace; the only non-ASCII in either document is em-dashes and arrows in prose, never
+     inside a command.
+  3. *No collateral edits.* `git diff 48c8104 --stat`: `Makefile` (C3's wiring),
+     `driver/test-driver.sh` (C1's work), `scripts/assertion_lint.py` (the C2/C3 deliverable),
+     `docs/findings.md` (the ledger row this run falsified), plus the session's own `plan.md` and
+     the `checks.md` sha line. No file that no criterion would need; no test file touched other
+     than the subject of C1 itself.
+
+**Could the diff satisfy C1 without doing the work?** No — and this was the specific question put
+to the independent verifier, because a command-based check asserts over text and a deletion would
+satisfy it. The verifier read the full diff and computed, against the freeze blob: `check` call
+sites **66 → 74**, C1 pattern matches **8 → 0**, any non-comment `grep -q` **9 → 0**. Every
+matched line was converted, not deleted; the suite's assertion count rose 88 → 89. G1 is the guard
+that would have caught the deletion route, and it passes at 89.
+
+**Scope invariant for the self-edited oracle** (declared at freeze, checked here): no line in the
+diff to `driver/test-driver.sh` reduces what the suite asserts. Confirmed — no assertion deleted,
+no expected value loosened, no case skipped. Two are *strengthened*: `child.pid` now requires the
+pid be written **and** read back (count 2, where the old form accepted any single mention), and
+the `gate.yaml` assertion tightened from at-least-one to exactly-one.
