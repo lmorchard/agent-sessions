@@ -9,9 +9,16 @@
 #
 # Design + rationale: docs/dev-sessions/2026-07-25-0926-board-driver/spec.md
 #
-# Deliberately host-agnostic: no $HOME assumptions, every path a flag, no
-# interactive prompts, all mutable state under one --state-dir. The GitHub
-# Actions host is meant to run this file unchanged.
+# Deliberately host-agnostic: every path a flag, no interactive prompts, all
+# mutable state under one --state-dir. The GitHub Actions host is meant to run
+# this file unchanged.
+#
+# The one host assumption, added deliberately for issue #27: with no --state-dir,
+# the default is an XDG path, which consults $XDG_STATE_HOME and then $HOME. It
+# used to be `./.driver-state` -- no $HOME, but also no repo component, so every
+# repo on a host shared one state directory and one inflight.json. See the
+# defaults block below. --state-dir remains an explicit override, so the flag is
+# still the way to run with no $HOME at all.
 
 set -euo pipefail
 
@@ -38,7 +45,26 @@ ISSUE=""
 MAX_ISSUES=1
 MAX_BUDGET=10
 RUN_TIMEOUT=5400
-STATE_DIR="./.driver-state"
+# Empty means "not given", and the default is computed from --repo further down --
+# it cannot be a literal here, because it depends on an argument not yet parsed.
+#
+# It used to be `./.driver-state`: one fixed relative path, no repo component. So
+# every repository the driver was pointed at on a host shared one state directory,
+# and therefore one inflight.json and one runs/ namespace. Two consequences, both
+# hit for real rather than theorised (issue #27):
+#
+#   - a live run against decafclaw #657 refused a run against agent-sessions one
+#     minute later, announcing the unrelated child as an unsupervised orphan;
+#   - `--classify-only <n>` resolves runs/<issue>-<ts>/ by issue number and mtime,
+#     so with two repos in one directory it can recover the wrong repo's run and
+#     record its cost and session id against the other repo's issue. Every issue
+#     number this repo uses collides with one of decafclaw's.
+#
+# The fix is the LAYOUT, not a comparison: one directory per repo means the orphan
+# guard is per-repo because the marker it reads is, and --classify-only is
+# unambiguous because each repo has its own runs/. No code anywhere compares two
+# repos. If a change to this file finds itself doing that, this default regressed.
+STATE_DIR=""
 BOARD=""
 DRY_RUN=0
 ALLOW_NESTED=0
@@ -77,7 +103,11 @@ agent-session-driver.sh --repo <owner/name> --skill-dir <path> --repo-path <path
   --max-issues <n>        issues per invocation (default 1)
   --max-budget-usd <amt>  per-run ceiling (default 10)
   --timeout <seconds>     per-run wall clock (default 5400)
-  --state-dir <path>      run history + per-run transcripts (default ./.driver-state).
+  --state-dir <path>      run history + per-run transcripts. Used exactly as given.
+                          Default, when omitted, is ONE DIRECTORY PER REPO:
+                            ${XDG_STATE_HOME:-$HOME/.local/state}/agent-session/<owner>-<name>/
+                          so concurrent runs against different repos do not
+                          collide. The resolved path is logged at startup.
                           Park state is NOT here: it is a label on the issue.
   --board <owner/number>  optional; advisory board-column reporting
   --model <name>          optional; passed to claude
@@ -268,9 +298,63 @@ abspath() {
     *)  printf '%s\n' "$PWD/${1#./}" ;;
   esac
 }
+# The per-repo default, resolved HERE and not at the defaults block, because it
+# depends on --repo. Three placement constraints, none of them stylistic:
+#
+#   1. AFTER the `for c in gh jq git` loop above. The nest section of
+#      driver/test-driver.sh asserts that the FIRST LINE OF STDERR from a run with
+#      a bad --skill-dir is that run's own error message. Anything logged earlier
+#      becomes the first line and flips it, and that file is frozen for this
+#      change.
+#   2. BEFORE the mkdir below, obviously, but the mkdir also must not move up:
+#      several cases assert that a run which dies in validation creates no state
+#      directory at all.
+#   3. The report goes through `log` (stderr), never `say` (stdout). Several cases
+#      capture stdout ONLY and match a bare four-digit issue number anywhere in
+#      it; a temp state-dir path is full of digits, so a stdout line there widens a
+#      spurious-pass window in assertions this change may not edit. `log` is also
+#      what this file already uses for diagnostics -- `say` is the report.
+#
+# `--repo` is validated non-empty far above, but non-empty is not enough now that
+# REPO lands in a filesystem path. ${REPO//\//-} flattens owner/name to
+# owner-name: one level deep, and GitHub's naming rules admit no other slash, so
+# it cannot collide.
+#
+# Shape-validated because "it flattens slashes" is incidental protection, not a
+# check. Measured on the unvalidated version: `--repo ../../../../tmp/ESCAPED`
+# stayed inside the root (the slashes became dashes), but `--repo ..` produced the
+# slug `..`, and abspath then resolved the state dir to the PARENT of
+# agent-session/ -- runs.jsonl, parked.jsonl and runs/ were created one level
+# outside the intended root. One level, not arbitrary traversal, and only reachable
+# by typing a repo name that no `gh` call could satisfy -- but the fix is three
+# lines and the alternative is relying on a substitution that was never meant to be
+# a boundary. Raised by the Copilot review on PR #44.
+case "$REPO" in
+  */*/*) die "--repo must be owner/name, with exactly one '/': $REPO" ;;
+  */*)   : ;;
+  *)     die "--repo must be owner/name, with exactly one '/': $REPO" ;;
+esac
+case "$REPO" in
+  .|..|*/.|*/..|./*|../*) die "--repo may not contain a path component of . or ..: $REPO" ;;
+esac
+if [ -z "$STATE_DIR" ]; then
+  # Checked rather than left to fail: with both unset the path would begin
+  # `/.local/state`, and the only symptom would be an obscure `mkdir` failure
+  # aborting under `set -e` with no indication that a missing HOME caused it.
+  if [ -z "${XDG_STATE_HOME:-}" ] && [ -z "${HOME:-}" ]; then
+    die "no --state-dir given and neither XDG_STATE_HOME nor HOME is set; pass --state-dir"
+  fi
+  STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/agent-session/${REPO//\//-}"
+fi
 STATE_DIR="$(abspath "$STATE_DIR")"
 [ -n "$SKILL_DIR" ] && SKILL_DIR="$(abspath "$SKILL_DIR")"
 [ -n "$REPO_PATH" ] && REPO_PATH="$(abspath "$REPO_PATH")"
+
+# Said out loud because it is no longer self-evident. `./.driver-state` was
+# visible in the checkout you ran from; an XDG path is not, and an operator who
+# cannot tell which directory a run read cannot tell a fresh host from a wrong
+# --state-dir. One line, and the driver already logs comparable detail per run.
+log "state dir  $STATE_DIR"
 
 # The hosted run may READ the skill but must never WRITE it. --add-dir grants
 # access to the skill directory, which would otherwise let the run edit the very

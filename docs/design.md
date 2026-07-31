@@ -11,7 +11,8 @@ Two companion files, split out of this one in move 6:
   before writing any flag list or gate row.**
 - **[build-log.md](archive/build-log.md)** — the chronological account of moves 1–5, **closed**. Read it for
   the incidents that produced the rules in `findings.md`, not for state; per-run provenance now lives
-  in `.driver-state/runs.jsonl` and a move's account in its session `notes.md`.
+  in the driver's `runs.jsonl` (the path the driver logs at startup) and a move's account in its
+  session `notes.md`.
 - **[usage.md](usage.md)** — the operator's guide: commands, outcomes, run artifacts, recovery.
   Written for someone running the thing rather than changing it.
 
@@ -315,7 +316,9 @@ which leaves every criterion passing and the suite green, and only a guard notic
 ## Current state
 
 **Deliberately short.** The enumerable facts live where they cannot rot — the backlog on
-[the board](https://github.com/users/lmorchard/projects/9), per-run provenance in `.driver-state/runs.jsonl`, a plain-language summary in
+[the board](https://github.com/users/lmorchard/projects/9), per-run provenance in the driver's
+per-repo `runs.jsonl` (it logs the resolved state directory at startup; `./.driver-state/` is the
+pre-#27 archive), a plain-language summary in
 [../README.md](../README.md). This section carries only what none of those hold: what is proven, and
 what is not.
 

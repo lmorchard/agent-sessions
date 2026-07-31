@@ -1413,6 +1413,294 @@ fi
 
 rm -rf "$D32_TMP"
 
+# --- #27: the state directory must describe ONE repo -------------------------
+#
+#   https://github.com/lmorchard/agent-sessions/issues/27
+#
+# FROZEN acceptance checks. Read-only from Phase 1 onward: if a check here looks
+# wrong, that is a STOP and an amendment (see
+# skills/agent-session/references/frozen-checks.md), not an edit.
+#
+# The defect: the state dir DEFAULT is a fixed relative path with no repo
+# component, so every repo the driver is pointed at shares one directory on a
+# host. Three consequences, one per criterion below:
+#
+#   C1. inflight.json is a single file, so a live run against repo A makes the
+#       driver refuse to start against repo B and announce repo A's child as an
+#       unsupervised orphan -- a false alarm that stops unrelated work.
+#   C2. so the default has to resolve per repo, under XDG, and SAY where.
+#   C3. runs/<issue>-<ts>/ is keyed on the issue number alone, and issue numbers
+#       collide across repos. `--classify-only 4` picks by mtime, so it can
+#       recover the wrong repo's run and record its cost and session against the
+#       other repo's issue.
+#
+# WHAT IS DELIBERATELY NOT CHANGED, and why the cases are shaped around it:
+# `--state-dir X` keeps meaning exactly X -- only the DEFAULT moves. G2 asserts
+# that, and driver/test-park-state.sh (another issue's FROZEN check file, hence
+# read-only) depends on it at :275-282. So no criterion case here passes
+# --state-dir at all; every one sets XDG_STATE_HOME instead.
+#
+# Every case invokes the SHIPPED driver as a subprocess against the offline `gh`
+# stub below, and every one runs with cwd set to a temp dir and XDG_STATE_HOME set
+# to a temp dir -- the first so no case can read or write this repo's real
+# ./.driver-state, the second so no case can fall back to the real
+# $HOME/.local/state. Assertions are on messages and resolved paths rather than
+# exit status, because exit status cannot discriminate: the orphan refusal and a
+# clean dry run differ by 2 vs 0, but so do a dozen unrelated stop points.
+#
+# THE MARKER IS PLANTED TWICE, in both places repo A's own driver could have
+# written it: <cwd>/.driver-state/inflight.json (today's shared, cwd-relative
+# default) and $XDG_STATE_HOME/agent-session/lmorchard-decafclaw/inflight.json
+# (the per-repo path C2 names). That is not a guess at the implementation -- it is
+# what makes C1 and G1 mean the same sentence under either resolution: "repo A has
+# a live in-flight run, recorded wherever repo A's driver records it." Planting
+# only the XDG copy would make C1 pass vacuously today, against a directory
+# nothing ever wrote to; planting only the legacy copy would make G1 stop
+# asserting anything the moment the default moves.
+
+echo "#27: one repo's state dir must not speak for another"
+
+X27_TMP="$(mktemp -d)"
+X27_BIN="$X27_TMP/bin"; mkdir -p "$X27_BIN"
+
+# The offline `gh`. Empty lists for the two queries these paths make, and exit 0
+# for EVERYTHING else -- which is load-bearing rather than lazy. --classify-only
+# ends in apply_park_state, which runs `gh label create` and `gh issue edit`, and
+# these cases name REAL repositories (lmorchard/decafclaw,
+# lmorchard/agent-sessions). The catch-all is the only thing standing between this
+# suite and a label written to somebody's issue. Calls are logged so a reader can
+# see what was intercepted.
+cat > "$X27_BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$STUB_DIR/gh.log"
+case "$*" in
+  "issue list"*) printf '%s' '[]' ;;
+  "pr list"*)    printf '%s' '[]' ;;
+  *)             exit 0 ;;
+esac
+STUB
+chmod +x "$X27_BIN/gh"
+
+_x27_flat() { printf '%s' "$1" | tr '\n' '|' | cut -c1-300; }
+
+# The two needles C1 forbids, reduced to one comparable token. Both halves are
+# named, because they are two different messages from two different channels --
+# `ORPHAN STILL RUNNING` is say() on stdout, `refusing to start a second run` is
+# die() on stderr -- and a failure should say which one fired.
+_x27_orphan() { # $1 = combined driver output
+  local refuse=no orphan=no
+  case "$1" in *'refusing to start a second run'*) refuse=yes ;; esac
+  case "$1" in *'ORPHAN STILL RUNNING'*)           orphan=yes ;; esac
+  printf 'refuse=%s orphan=%s\n' "$refuse" "$orphan"
+}
+
+# "Did the run get all the way through?" -- the positive form of "SHALL NOT
+# refuse". The dry-run exit line is the last thing a --dry-run prints, so it
+# cannot be reached by a run that died at validation, at the required-command
+# loop, or at the orphan check.
+_x27_reached() { # $1 = combined driver output
+  case "$1" in *'dry run -- no claude invocation'*) printf 'reached\n' ;;
+                                                *) printf 'stopped-early\n' ;; esac
+}
+
+_x27_recorded() { # $1 = combined driver output -- the same, for --classify-only
+  case "$1" in *'recorded to'*) printf 'recorded\n' ;; *) printf 'stopped-early\n' ;; esac
+}
+
+_x27_alive() { # $1 = pid
+  if kill -0 "$1" 2>/dev/null; then printf 'live\n'; else printf 'dead\n'; fi
+}
+
+_x27_fixture() { # $1 = run dir
+  [ -f "$1/stream.jsonl" ] && printf 'ready\n' || printf 'missing\n'
+}
+
+# Which repo's run directory did this invocation resolve? Both halves again: the
+# `theirs=no` half is what stops a driver that resolves EVERY same-numbered run
+# dir it can find from satisfying the case. Neither path is a substring of the
+# other (different repo segment, different timestamp), so the two tokens are
+# independent.
+_x27_seen() { # $1 = output, $2 = the dir this repo should resolve, $3 = the other repo's
+  local mine=no theirs=no
+  case "$1" in *"$2"*) mine=yes ;; esac
+  case "$1" in *"$3"*) theirs=yes ;; esac
+  printf 'mine=%s theirs=%s\n' "$mine" "$theirs"
+}
+
+# A live in-flight run, laid out exactly as run_issue() writes one: the marker at
+# <state>/inflight.json, and the pid of a real live process at
+# <state>/runs/<issue>-<ts>/child.pid, which is the file the startup check reads
+# through the marker's own run_dir field.
+_x27_plant_marker() { # $1 = state dir, $2 = issue, $3 = live pid, $4 = owner/name
+  local rundir="$1/runs/$2-20260731T000000Z"
+  mkdir -p "$rundir" || return 1
+  printf '%s\n' "$3" > "$rundir/child.pid" || return 1
+  jq -n -c --arg issue "$2" --arg ts '20260731T000000Z' --arg rundir "$rundir" \
+           --arg url "https://github.com/$4/issues/$2" \
+    '{issue:($issue|tonumber), started:$ts, run_dir:$rundir, url:$url}' > "$1/inflight.json"
+}
+
+_x27_dry_run() { # $1 = cwd, $2 = XDG_STATE_HOME, rest = driver args -> combined output
+  local cwd="$1" xdg="$2"; shift 2
+  ( cd "$cwd" && STUB_DIR="$X27_TMP" XDG_STATE_HOME="$xdg" PATH="$X27_BIN:$PATH" \
+      bash "$DRIVER" "$@" ) 2>&1
+}
+
+# A real background process, so C1 and G1 exercise the live-orphan branch rather
+# than the finished-but-unrecorded one. Killed explicitly at the end of the
+# section -- deliberately NOT via a trap, because a second `trap ... EXIT` would
+# REPLACE the one at the top of this file and leak $TMPD and $NEST_TMP. `sleep`
+# rather than a long-lived shell so even a leak reaps itself.
+sleep 120 &
+X27_PID=$!
+
+# --- C1: a live run in repo A must not stop a run against repo B -------------
+
+X27_C1_CWD="$X27_TMP/c1/cwd"; X27_C1_XDG="$X27_TMP/c1/xdg"
+mkdir -p "$X27_C1_CWD"
+_x27_plant_marker "$X27_C1_CWD/.driver-state"                       4 "$X27_PID" lmorchard/decafclaw
+_x27_plant_marker "$X27_C1_XDG/agent-session/lmorchard-decafclaw"   4 "$X27_PID" lmorchard/decafclaw
+
+# G2 FIRST, and it is doing three jobs at once. (1) It asserts the decided
+# non-change: --state-dir X still means exactly X, so an explicit EMPTY state dir
+# has no orphan in it even though the cwd's legacy default does. (2) It is the
+# harness control -- same cwd, same stub, same flags, one flag different -- so a
+# C1 that fails cannot be blamed on the stub, the PATH or the cwd. (3) It proves
+# the token C1 expects is producible from a real run at all, which a check that
+# fails today has no other way to establish.
+X27_G2_SD="$X27_TMP/g2-state"; mkdir -p "$X27_G2_SD"
+X27_G2_OUT="$(_x27_dry_run "$X27_C1_CWD" "$X27_C1_XDG" \
+                --repo lmorchard/agent-sessions --dry-run --state-dir "$X27_G2_SD")"
+check "#27 G2 --state-dir X still means exactly X, and an empty one holds no orphan" \
+  "refuse=no orphan=no reached" \
+  "$(printf '%s %s' "$(_x27_orphan "$X27_G2_OUT")" "$(_x27_reached "$X27_G2_OUT")")"
+
+X27_C1_OUT="$(_x27_dry_run "$X27_C1_CWD" "$X27_C1_XDG" \
+                --repo lmorchard/agent-sessions --dry-run)"
+check "#27 C1 repo A's live in-flight run neither refuses nor orphan-warns repo B" \
+  "refuse=no orphan=no" "$(_x27_orphan "$X27_C1_OUT")"
+# The same criterion asserted positively. Absence of a needle and a driver that
+# stopped early look identical from the outside, and G2 only covers the
+# --state-dir spelling of this invocation.
+check "#27 C1 and the run against repo B completes its selection pass" \
+  "reached" "$(_x27_reached "$X27_C1_OUT")"
+
+# --- G1: the same-repo refusal must survive (a guard, passes today) ----------
+#
+# Not a criterion. The cheapest way to green C1 is to make the orphan guard
+# permissive, which trades a false alarm for two drivers mutating one checkout at
+# once -- the thing the guard exists to prevent, and what the issue's "What we're
+# NOT doing" rules out in as many words. Identical fixture to C1; only the
+# --repo differs. It also serves as C1's discriminator: the same reducer must
+# report the tokens PRESENT here, or C1's `no` means nothing.
+
+X27_G1_CWD="$X27_TMP/g1/cwd"; X27_G1_XDG="$X27_TMP/g1/xdg"
+mkdir -p "$X27_G1_CWD"
+_x27_plant_marker "$X27_G1_CWD/.driver-state"                     4 "$X27_PID" lmorchard/decafclaw
+_x27_plant_marker "$X27_G1_XDG/agent-session/lmorchard-decafclaw" 4 "$X27_PID" lmorchard/decafclaw
+
+X27_G1_OUT="$(_x27_dry_run "$X27_G1_CWD" "$X27_G1_XDG" \
+                --repo lmorchard/decafclaw --dry-run)"
+check "#27 G1 a live in-flight run STILL stops a second run against the same repo" \
+  "refuse=yes orphan=yes" "$(_x27_orphan "$X27_G1_OUT")"
+
+# The liveness probe for both, after both runs: a dead pid sends the startup check
+# down the finished-but-unrecorded branch, where C1 passes and G1 fails for
+# reasons that have nothing to do with either. Asserted here rather than before
+# the runs so it covers the whole window.
+check "#27 probe: the planted child.pid was a live process across C1 and G1" \
+  "live" "$(_x27_alive "$X27_PID")"
+
+kill "$X27_PID" 2>/dev/null || true
+wait "$X27_PID" 2>/dev/null || true
+
+# --- C2: the default resolves per repo, under XDG, and says so ---------------
+
+X27_C2_CWD="$X27_TMP/c2/cwd"; X27_C2_XDG="$X27_TMP/c2/xdg"
+mkdir -p "$X27_C2_CWD"
+X27_C2_WANT="$X27_C2_XDG/agent-session/lmorchard-agent-sessions"
+
+X27_C2_OUT="$(_x27_dry_run "$X27_C2_CWD" "$X27_C2_XDG" \
+                --repo lmorchard/agent-sessions --dry-run)"
+
+# The probe, and it passes today: nothing is planted in this case's cwd, so a run
+# that does not reach the dry-run exit here failed for a harness reason, not a
+# criterion one.
+check "#27 probe: the C2 run reached the dry-run exit" "reached" "$(_x27_reached "$X27_C2_OUT")"
+
+check "#27 C2 the default state dir is the XDG per-repo path" \
+  "created" "$(_nest_made "$X27_C2_WANT")"
+# The complement, and not decoration: if the shared cwd-relative directory is
+# still created, the default did not move -- it was merely joined by a second
+# directory. Only both together say the default resolved to one place.
+check "#27 C2 and the shared cwd-relative default is no longer created" \
+  "absent" "$(_nest_made "$X27_C2_CWD/.driver-state")"
+# "SHALL report the resolved path", asserted as a substring of the whole output
+# rather than a line format: which line it lands on, and how it is worded, is
+# nothing the criterion constrains. Today a --dry-run prints no state dir at all
+# (the `State:` line sits after the invoke loop, which --dry-run exits before).
+case "$X27_C2_OUT" in
+  *"$X27_C2_WANT"*) ok "#27 C2 and the resolved path is reported" ;;
+  *)                bad "#27 C2 and the resolved path is reported" \
+                        "output naming $X27_C2_WANT" "$(_x27_flat "$X27_C2_OUT")" ;;
+esac
+
+# --- C3: issue numbers collide across repos ----------------------------------
+#
+# Two run directories for issue 4, one per repo, under the per-repo roots C2
+# names. The repo-A one is given the EARLIER timestamp in its name and is created
+# first, so a resolver that picks by mtime or by name order picks repo A both
+# times -- which is the shape of the real defect (`ls -td` over a shared runs/).
+
+X27_C3_CWD="$X27_TMP/c3/cwd"; X27_C3_XDG="$X27_TMP/c3/xdg"
+mkdir -p "$X27_C3_CWD"
+X27_C3_A="$X27_C3_XDG/agent-session/lmorchard-decafclaw/runs/4-20260730T101010Z"
+X27_C3_B="$X27_C3_XDG/agent-session/lmorchard-agent-sessions/runs/4-20260731T202020Z"
+mkdir -p "$X27_C3_A" "$X27_C3_B"
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.25,"session_id":"stub-decafclaw","result":"done"}' \
+  > "$X27_C3_A/stream.jsonl"
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.75,"session_id":"stub-agent-sessions","result":"done"}' \
+  > "$X27_C3_B/stream.jsonl"
+
+# Both fixtures asserted rather than assumed. The recovery path only reports a run
+# dir it finds a stream.jsonl in, so a mistyped fixture path would make both C3
+# assertions fail with nothing to say which -- a typo and an absent behaviour look
+# identical from the assertion's side.
+check "#27 probe: repo A's run dir fixture is in place" "ready" "$(_x27_fixture "$X27_C3_A")"
+check "#27 probe: repo B's run dir fixture is in place" "ready" "$(_x27_fixture "$X27_C3_B")"
+
+X27_C3_B_OUT="$(_x27_dry_run "$X27_C3_CWD" "$X27_C3_XDG" \
+                  --repo lmorchard/agent-sessions --classify-only 4)"
+X27_C3_A_OUT="$(_x27_dry_run "$X27_C3_CWD" "$X27_C3_XDG" \
+                  --repo lmorchard/decafclaw --classify-only 4)"
+
+# Both probes pass today: --classify-only records an outcome whether or not it
+# finds a run dir, so reaching the ledger write says the run worked and isolates
+# the criterion assertions to the resolution itself.
+check "#27 probe: --classify-only ran to completion against repo B" \
+  "recorded" "$(_x27_recorded "$X27_C3_B_OUT")"
+check "#27 probe: --classify-only ran to completion against repo A" \
+  "recorded" "$(_x27_recorded "$X27_C3_A_OUT")"
+
+# Spelled out with ok/bad rather than `check` so a failure carries the run's own
+# output: `mine=no theirs=no` alone cannot tell "resolved nothing at all" from
+# "resolved the other repo's directory", and those want different fixes.
+_x27_c3() { # $1 = label, $2 = output, $3 = the dir it should resolve, $4 = the other repo's
+  local got; got="$(_x27_seen "$2" "$3" "$4")"
+  if [ "$got" = "mine=yes theirs=no" ]; then
+    ok "$1"
+  else
+    bad "$1" "mine=yes theirs=no, where mine is $3" "$got -- $(_x27_flat "$2")"
+  fi
+}
+
+_x27_c3 "#27 C3 --classify-only 4 against repo B resolves repo B's run dir" \
+  "$X27_C3_B_OUT" "$X27_C3_B" "$X27_C3_A"
+_x27_c3 "#27 C3 --classify-only 4 against repo A resolves repo A's run dir" \
+  "$X27_C3_A_OUT" "$X27_C3_A" "$X27_C3_B"
+
+rm -rf "$X27_TMP"
+
 # --- syntax ----------------------------------------------------------------
 
 echo "syntax"
