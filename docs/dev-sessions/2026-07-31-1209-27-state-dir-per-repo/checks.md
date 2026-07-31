@@ -158,3 +158,20 @@ so the primary tamper check applies unmodified:
 
 Must be empty. Stated as an invariant: **no line in that diff may change what any frozen check
 asserts.** Paired with the behavioural guard G1, which is what actually catches a weakened oracle.
+
+### Tamper verdict, recorded before pushing: `clean`
+
+`git diff 0ad6881 -- driver/test-driver.sh` → **empty** (0 lines). Bare `clean`, not
+`clean-by-substitute`: the criteria are test cases in a real check file, so the primary mechanism
+applies directly and no substitute was needed.
+
+`git diff 0ad6881 -- <session-dir>/checks.md` is non-empty, as the invariant predicts — the freeze
+procedure writes the sha in a follow-up commit. Every difference is a sanctioned append: the
+`Frozen at` sha, this verdict, and clarification C-1. **No CRITERION line, CHECK command, or guard
+command differs from the freeze version.**
+
+Independently confirmed by the verifier subagent, which also audited the criteria and CHECK text
+against issue #27 codepoint by codepoint (for lookalike punctuation) and found them byte-faithful.
+
+The freeze commit is an ancestor of the pushed head (`git merge-base --is-ancestor 0ad6881 HEAD`),
+so a reviewer can re-run both diffs rather than taking this record on trust.
