@@ -219,6 +219,17 @@ if [ "$DRY_RUN" -eq 0 ] && [ -z "$CLASSIFY_ONLY" ]; then
   # git that answered nothing means clean. `git` itself may still be missing here --
   # the required-command loop is below, not above -- and that case correctly lands as
   # "could not determine", proceeding to the loop that reports it properly.
+  #
+  # RESIDUAL RISK, stated rather than gated away: "git answered nothing" collapses
+  # not-in-a-repo together with every OTHER nonzero exit -- an unreadable .git/index,
+  # a corrupt repo, dubious-ownership. In those states a genuinely dirty skill dir
+  # proceeds. That is the behaviour issue #36 asks for in as many words (G3: "a `git
+  # status` that errors must not be read as 'dirty'"), and the alternative is worse
+  # in the common case: distinguishing them means deciding what "in a repo" means
+  # without being able to ask git, and getting it wrong refuses every legitimate
+  # non-checkout skill dir. Found by the verifier's adversarial probe on this change,
+  # by chmod 000 on .git/index; recorded here rather than fixed because narrowing it
+  # is a decision about the criteria, not an implementation detail.
   skill_dirty=""
   if skill_status="$(CDPATH= cd -- "$skill_real" \
         && git status --porcelain --untracked-files=no -- . 2>/dev/null)"; then

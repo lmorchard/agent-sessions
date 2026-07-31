@@ -109,4 +109,30 @@ _None._
 
 ## Tamper verdict
 
-_(Recorded by the independent verifier at the end of execute, and again in `pr` before pushing.)_
+**`clean`** — not `clean-by-substitute`: `Check files` is non-empty, so the real mechanism ran.
+
+`git diff 1bd50f030f446c9abd7d486d68caf7410fc8c363 -- driver/test-driver.sh` → **empty**, taken by
+the independent verifier at the end of execute and re-run in `pr` before pushing. The branch is not
+squashed, so `1bd50f0` is an ancestor of the pushed head and a reviewer can re-run this command
+rather than taking the verdict on trust.
+
+`git diff <freeze-sha> --stat` lists only `checks.md` (the sanctioned `Frozen at` sha line, plus
+this section), `plan.md` (new), and `driver/agent-session-driver.sh` (the implementation). No
+collateral edit to any file no phase named.
+
+The rebase in `pr` step 1 was a **no-op** — the branch was already atop `origin/main` at `c46c8e2`
+— so the freeze sha needed no re-anchoring and this verdict was never taken against a rewritten
+commit.
+
+## Post-verification note — an uncovered state, recorded not fixed
+
+The independent verifier's adversarial probe found one state the frozen checks do not cover: a skill
+dir that **is** in a repo and **is** dirty, but whose `git status` fails for a reason other than
+not-being-a-repo (probe: `chmod 000 .git/index` → exit 128, empty stdout). The driver proceeds.
+
+This is the behaviour the issue specifies — G3 says *"a `git status` that errors must not be read as
+'dirty'"* — so it is **not** an amendment, not a failing check, and not a check that mis-states its
+criterion. It is a residual risk, now named in a comment at the code as well as here. Narrowing it
+would mean deciding what "inside a repo" means without being able to ask git, and getting that wrong
+refuses every legitimate non-checkout skill dir. A candidate follow-up, for a human to file if it is
+judged worth closing.
