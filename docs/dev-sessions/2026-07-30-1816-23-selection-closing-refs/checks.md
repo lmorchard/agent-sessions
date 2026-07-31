@@ -147,4 +147,28 @@ None.
 
 ## Tamper verdict
 
-(Recorded by the independent verifier.)
+**`clean`** — a real check file exists, so this is the mechanism itself, not a substitute.
+
+`git diff c0a6500 -- driver/test-driver.sh` → **empty**, run twice: once by the independent
+verifier at the end of `execute`, and once again immediately before the push, so the verdict
+describes the tree that ships.
+
+Re-runnable by anyone: `c0a6500` is an ancestor of the pushed head (`git merge-base --is-ancestor
+c0a6500 HEAD` → yes). The branch was **not squashed**, so the baseline is present on `origin` and a
+reviewer does not have to take this line on trust.
+
+Two further observations from the verifier, both recorded rather than summarised away:
+
+- `git diff c0a6500 -- driver/test-park-state.sh` → also **empty**. Not listed in `Check files`
+  above, but it is frozen and it is what G1/G2 protect, so it was checked anyway.
+- **Manifest integrity: intact.** `git diff c0a6500 -- <this file>` is non-empty by construction —
+  the freeze procedure writes the sha in a follow-up commit — so it is stated as an invariant, not
+  an equality: no CRITERION line, no CHECK command, no `AT FREEZE` block and no guard command
+  differs from the freeze version. The only difference at the verifier's run was
+  `-**Frozen at:** (recorded in the follow-up commit)` / `+**Frozen at:** \`c0a6500\` (2026-07-30)`,
+  which is a sanctioned append. This section is the second sanctioned append.
+
+**Coverage removal: settled mechanically.** Because the diff over `driver/test-driver.sh` is empty,
+no assertion was deleted, renamed, skipped or narrowed after the freeze. The suite went
+`74 passed, 5 failed` → `79 passed, 0 failed`; the arithmetic (74 + 5 = 79) is itself evidence that
+the five criterion assertions turned green rather than disappearing.
