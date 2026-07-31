@@ -35,12 +35,21 @@ Three details are load-bearing, each of them a way a naive reader gets it wrong:
 
 from __future__ import annotations
 
+import argparse
 import json
+import os
+import sys
+import time
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 STREAM_NAME = "stream.jsonl"
+
+#: `last` is one line in a digest that is often read from a log; an assistant text
+#: block can be many paragraphs, so it is collapsed and cut to this width.
+LAST_TEXT_WIDTH = 100
 
 
 @dataclass
@@ -159,3 +168,189 @@ def read_progress(run_dir: Path | str) -> Progress:
                 snap.is_error = record.get("is_error")
 
     return snap
+
+
+# --- locating a run --------------------------------------------------------
+
+
+def default_state_dir(repo: str) -> Path:
+    """Where the driver keeps `repo`'s state -- mirrored from the driver itself.
+
+    `agent-session-driver.sh:347` derives
+    `${XDG_STATE_HOME:-$HOME/.local/state}/agent-session/${REPO//\\//-}`, and this
+    reimplements that line. Issue #42 quotes the older `.driver-state/runs/...`
+    path, which #27 superseded; implementing what the issue says would point
+    `make watch` at a directory the driver no longer writes.
+    """
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(base) / "agent-session" / repo.replace("/", "-")
+
+
+def find_latest_run(state_dir: Path | str) -> Path | None:
+    """The most recently modified run directory under `state_dir/runs`, if any.
+
+    Absent state dir, absent `runs/`, or no children at all are all the same
+    answer -- None, never an exception: an operator starting a watch before the
+    first run exists is the normal case, not an error.
+    """
+    runs = Path(state_dir) / "runs"
+    try:
+        children = [child for child in runs.iterdir() if child.is_dir()]
+    except OSError:
+        return None
+    if not children:
+        return None
+    return max(children, key=lambda child: child.stat().st_mtime)
+
+
+# --- rendering -------------------------------------------------------------
+
+
+def _format_duration(seconds: float) -> str:
+    total = max(int(seconds), 0)
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m{secs:02d}s"
+    if minutes:
+        return f"{minutes}m{secs:02d}s"
+    return f"{secs}s"
+
+
+def _elapsed_seconds(snap: Progress) -> float | None:
+    """How long the run has been going, from the two sources that are honest.
+
+    The `result` record's `duration_ms` when the run has emitted one; otherwise
+    the `NN-YYYYMMDDTHHMMSSZ` timestamp the driver puts in the directory name.
+    **Never the directory's ctime** -- that updates on every write to the stream,
+    so a busy run reads as roughly zero seconds old. Got wrong once already.
+    """
+    if snap.duration_ms is not None:
+        try:
+            return float(snap.duration_ms) / 1000.0
+        except (TypeError, ValueError):
+            pass
+    _, _, stamp = snap.run_dir.name.rpartition("-")
+    try:
+        started = datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return (datetime.now(timezone.utc) - started).total_seconds()
+
+
+def _one_line(text: str, width: int = LAST_TEXT_WIDTH) -> str:
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= width:
+        return collapsed
+    return collapsed[: width - 3] + "..."
+
+
+def format_progress(snap: Progress) -> str:
+    """A plain-text digest: no ANSI, no cursor control, no spinner.
+
+    These runs are backgrounded as often as they are watched live, so the output
+    has to survive being read out of a log file with `cat`. Lines with no data
+    behind them are omitted rather than printed empty.
+    """
+    lines = []
+    if not snap.started:
+        # C3, at the presentation layer: a run that has written nothing must not
+        # be rendered as a run idling at zero turns.
+        why = (
+            "not started -- nothing complete written yet"
+            if snap.skipped
+            else "not started -- no stream.jsonl yet"
+        )
+        lines.append(f"run {snap.run_dir.name}   {why}")
+    else:
+        fields = [f"turns {snap.turns}"]
+        if snap.cost_usd is not None:
+            fields.append(f"${snap.cost_usd:.2f}")
+        elapsed = _elapsed_seconds(snap)
+        if elapsed is not None:
+            fields.append(_format_duration(elapsed))
+        lines.append(f"run {snap.run_dir.name}   " + "   ".join(fields))
+
+    if snap.tools:
+        tally = "  ".join(
+            f"{name} {count}"
+            for name, count in sorted(snap.tools.items(), key=lambda kv: (-kv[1], kv[0]))
+        )
+        lines.append(f"  tools  {tally}")
+    if snap.last_text:
+        lines.append(f"  last   {_one_line(snap.last_text)}")
+    if snap.skipped:
+        noun = "line" if snap.skipped == 1 else "lines"
+        lines.append(f"  note   {snap.skipped} unparseable {noun} (a live stream is truncated mid-record)")
+    return "\n".join(lines)
+
+
+# --- CLI -------------------------------------------------------------------
+
+
+def _resolve_run_dir(args) -> Path | None:
+    """Explicit RUNDIR, then --state-dir's newest run, then --repo's."""
+    if args.rundir:
+        candidate = Path(args.rundir)
+        return candidate if candidate.is_dir() else None
+    if args.state_dir:
+        return find_latest_run(Path(args.state_dir))
+    if args.repo:
+        return find_latest_run(default_state_dir(args.repo))
+    return None
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="run_progress.py",
+        description="Digest a run's stream.jsonl -- turns, tools, last words, cost.",
+        epilog="Reads only. This never creates or writes anything under the state dir.",
+    )
+    parser.add_argument(
+        "rundir", nargs="?", metavar="RUNDIR", help="a run directory; overrides the lookups below"
+    )
+    parser.add_argument("--state-dir", metavar="DIR", help="a driver state dir; watches its newest run")
+    parser.add_argument("--repo", metavar="OWNER/NAME", help="derive the state dir the driver would use")
+    parser.add_argument("--watch", action="store_true", help="reprint on an interval until interrupted")
+    parser.add_argument(
+        "--interval", type=float, default=10, metavar="SECONDS", help="watch interval (default: 10)"
+    )
+    args = parser.parse_args(argv)
+
+    first = True
+    try:
+        while True:
+            # Re-resolved every tick, not just once: under --repo a watch left
+            # running across the end of one run should pick up the next.
+            run_dir = _resolve_run_dir(args)
+            if run_dir is None:
+                if first:
+                    print(_no_run_message(args), file=sys.stderr)
+                    return 2
+                print("no run directory yet")
+            else:
+                print(format_progress(read_progress(run_dir)))
+            if not args.watch:
+                return 0
+            first = False
+            sys.stdout.flush()
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        # An operator ending a watch is not a crash; a traceback here would be
+        # noise on top of whatever they were actually reading.
+        return 130
+
+
+def _no_run_message(args) -> str:
+    if args.rundir:
+        return f"run_progress.py: not a directory: {args.rundir}"
+    if args.state_dir:
+        return f"run_progress.py: no run directories under {Path(args.state_dir) / 'runs'}"
+    if args.repo:
+        looked = default_state_dir(args.repo) / "runs"
+        return f"run_progress.py: no run directories under {looked} (for --repo {args.repo})"
+    return "run_progress.py: give a RUNDIR, or --state-dir DIR, or --repo OWNER/NAME"
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
