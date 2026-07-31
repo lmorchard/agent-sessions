@@ -1,7 +1,7 @@
 # Frozen acceptance checks
 
 **Source:** https://github.com/lmorchard/agent-sessions/issues/36
-**Frozen at:** _(recorded in the follow-up commit)_
+**Frozen at:** `1bd50f030f446c9abd7d486d68caf7410fc8c363` (2026-07-31)
 **Check files — read-only from Phase 1 onward:**
 - `driver/test-driver.sh`
 
