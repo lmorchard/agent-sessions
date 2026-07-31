@@ -17,7 +17,12 @@ ok()   { PASS=$((PASS+1)); printf '  ok    %s\n' "$1"; }
 bad()  { FAIL=$((FAIL+1)); printf '  FAIL  %s\n     expected: %s\n     actual:   %s\n' "$1" "$2" "$3"; }
 check(){ [ "$2" = "$3" ] && ok "$1" || bad "$1" "$2" "$3"; }
 
-# Count occurrences of a literal on the driver's NON-COMMENT lines.
+# Count the driver's NON-COMMENT LINES containing a literal.
+#
+# Lines, not occurrences -- `grep -c` counts matching lines, and two hits on one
+# line count once. Every expectation below was measured against the driver rather
+# than reasoned about, so the numbers are right either way, but the distinction
+# matters to anyone adding a case.
 #
 # The old spelling of these assertions was `grep -q '<literal>' "$DRIVER"`, which
 # succeeds when the literal appears ANYWHERE -- including inside a comment.
