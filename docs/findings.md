@@ -18,7 +18,7 @@ of the build log — it carries only what still governs.
 
 ## Recurring defect classes
 
-Six patterns this project has hit more than once. Each has cost real money to rediscover.
+Seven patterns this project has hit more than once. Each has cost real money to rediscover.
 
 ### 1. A row satisfied by evidence *adjacent* to what it names — OPEN GAP
 
@@ -92,7 +92,7 @@ table's own column and not in a sentence above it.)*
 
 ### 2. A null must never render as a positive
 
-**Six instances**, and it keeps arriving through a different door.
+**Seven instances**, and it keeps arriving through a different door.
 
 1. **`clean` vs `clean-by-substitute`** — the tamper vocabulary had no way to say *there was
    nothing to diff*, so a null rendered as a pass (move 2).
@@ -112,6 +112,14 @@ table's own column and not in a sentence above it.)*
 6. **The permission-denial detector counted its own regex.** Driving this repo put the detector's
    pattern text into the stream, where it matched it — 3 denials reported, **1 genuine**. Could only
    surface in a self-referential run.
+
+7. **A review that had not arrived reported as `0 unresolved threads`.** PR #44's gate row read
+   `BY SUBSTITUTE: 0 reviews and 0 review comments exist, so no thread can` — and the review landed
+   ~90 seconds later with three threads, one of them a real defect the change had introduced.
+   **First instance inside the merge gate itself**, which is the most expensive place for it: under
+   phase 3 a run reaching `eligible-for-auto-merge` on that substitute would auto-merge on the
+   strength of a review nobody had read. Tracked as
+   [#45](https://github.com/lmorchard/agent-sessions/issues/45).
 
 ### 3. Brittle absolutes encoding relative invariants
 
@@ -224,6 +232,37 @@ stripped of its elaboration, appears to license *"I ran it, it's green, done."*
 
 ---
 
+### 7. A detector cannot tell a mention from a claim — four instances, four different systems
+
+The newest class, and the one that keeps arriving through a *different detector* each time. Something
+scans text for a pattern; text that merely *quotes* the pattern matches; the detector acts on a
+mention as though it were a claim.
+
+| # | Detector | What it matched | Cost |
+|---|---|---|---|
+| 1 | the permission-denial counter | its own regex, present in the stream because the run was driving this repo | 3 denials reported, **1 genuine** — and it still does this, in every run since |
+| 2 | `make docs-check` | `CLAUDE.md`'s own *example* of a stale count | flagged on its first run; fixed by writing examples with `N`, not by teaching it to skip quotes |
+| 3 | `gate.py`'s spec-marker test | an issue body *quoting* `<!-- agent-session:spec -->` — including one whose sentence said it was **not** triaged | a marker-less issue reads as specced ([#19](https://github.com/lmorchard/agent-sessions/issues/19)) |
+| 4 | **GitHub's own closing-keyword parser** | a commit body quoting a fixture whose payload contains `Closes #7` | **closed live issue #7 as COMPLETED** ([#47](https://github.com/lmorchard/agent-sessions/issues/47)) |
+
+**Instance 4 is the one that changes the rule.** The first three are our detectors, so "make the
+detector smarter" was always available — anchor the pattern, scope what is linted. GitHub's parser is
+not ours. **When the detector belongs to someone else, the only lever is what you hand it.**
+
+**The tell:** you are writing *about* a pattern, inside a medium that scans for it. Quoting a gate
+block in a PR body, a marker in an issue, a `grep -q` in a test, a closing keyword in a commit
+message. **A project that documents its own detectors will trip them**, and this one documents them
+constantly.
+
+**Two mitigations, and the second is the one that generalises.** Scope the detector so its own source
+is out of range — `assertion_lint.py` contains its pattern six times and reports itself zero times,
+which is instance 2's fix done right. And where you cannot change the detector, change the text:
+`findings.md` writes example counts as `N` for exactly this reason.
+
+**One trap specific to instance 4, because it is counterintuitive:** *commit messages are not rendered
+as markdown*, so backticks around `Closes #N` are literal characters and protect nothing. Backticks
+**do** work in issue and PR bodies, which is why the habit feels safe.
+
 ## Rules about oracles, earned from runs
 
 Each of these came out of a specific failure and still governs.
@@ -289,6 +328,35 @@ means keeping a live-run trigger in a suite that otherwise cannot reach the netw
 Generalisable: **when a guard protects against a dangerous state, its mutation test enters that
 state.** Ask what the mutation *does* before running it, and prefer a one-off demonstration recorded
 in the PR over a repeatable test that arms the hazard.
+
+**A check whose mechanism the permission floor forbids is not a check.** Two instances, and the
+second was written *in the same session that diagnosed the first*. `phases/pr.md` step 9 tells a run
+to poll for a review "every 30s for up to 10 minutes" — but `sleep` loops, backgrounded shells and
+`Monitor` are all denied under `dontAsk`, so an unattended run cannot do it; PR #44's run polled twice,
+declared a timeout, and published a gate row while the review was 90 seconds away
+([#45](https://github.com/lmorchard/agent-sessions/issues/45)). Hours later, issue #42's G1 was written
+citing `find … -newer`, which the same floor also denies; the run substituted a `stat` snapshot and
+said so. **Before freezing a check, ask whether the run can actually execute its mechanism** — the
+answer is not obvious, because the denials are triggered by shell *syntax* (redirects, control flow)
+rather than by command names. The known survivor for waiting is `gh pr checks --watch`, and there is
+no equivalent for reviews.
+
+**A row that a mechanism could not produce must not render as that mechanism's negative result.**
+The same #44 gate said `threads: 0 unresolved — BY SUBSTITUTE: 0 reviews exist, so no thread can`.
+That is defect class 2 *inside the merge gate*: "no review has arrived yet" is not "no unresolved
+threads". `pr.md` already has the right rule for CI — an unsettled check yields `pending`, "nothing is
+wrong, it just isn't derivable yet" — and reviews should inherit it. Measured while diagnosing this:
+across six PRs, Copilot returned in **2.2–4.5 minutes**, so the 10-minute allowance was never the
+problem and a longer one would not have helped.
+
+**The same repo fact produced opposite verdicts across four runs, and nobody had decided the rule.**
+Every one of PRs #40, #41, #43 and #44 carried a `ci:` row saying, in near-identical words, that this
+repo has no CI configured. Three read that as satisfiable and published
+`eligible-for-auto-merge`; the fourth read it as *"the CI row has no mechanism"* and published
+`human-merge-required`. Under phase 3 that is the difference between merging and not. The *vocabulary*
+existed — `no checks configured` was added in move 4a — but the **verdict rule** for it never was.
+**Where a row can be absent rather than pass or fail, decide what absence means before it decides
+itself.**
 
 **A guard's pass count is not a coverage measure, and `-k` selections silently include
 neighbours.** #586's G1 `12 passed` was 8 irrelevant tests from a different method; exactly one
@@ -476,6 +544,7 @@ the entries most likely to be silently re-broken.**
 | **`gh issue edit --remove-label <label the issue does not have>` exits 0**, silently, with no state change. So an un-park can be unconditional; reading the labels first to avoid a no-op spends an API call to prevent nothing. | probe on a real issue, move 9 (#5) |
 | **`gh label create <existing label>` exits 1** — `already exists; use --force to update its color and description`. A create-then-apply sequence therefore needs `|| true` and suppressed output; `--force` would work too but rewrites color/description on every call. | same probe |
 | **`gh issue list --json labels` returns `labels: []`, an array of objects** (`{id,name,description,color}`), so the filter is `any(.name == $label)`. Requesting the field costs nothing on a query already being made — and **omitting it fails open**: the labels key is simply absent, so a label filter silently matches nothing. Mutation-tested: dropping `labels` from the driver's `--json` list left the whole frozen suite (`make park-test`) green, because its stub served a fixed payload. **A stub that ignores the requested field list cannot see a missing field.** | move 9 (#5) |
+| **A commit message that *quotes* a closing keyword still closes the issue.** Commit messages are **not rendered as markdown**, so backticks are literal characters and protect nothing — unlike issue and PR bodies, where they do. A commit body describing a test fixture whose payload contains `Closes #7` closed live issue #7 as COMPLETED. The PR's own `closingIssuesReferences` said `[23]`, so the metadata anyone would check showed nothing wrong. | 2026-07-31, PR #38 / commit `2cbe106` |
 | **`gh` writes post as the repo owner's account.** A PR shows "review by lmorchard" for the agent's own thread reply, so **any gate row of the form "a human reviewed this" is self-satisfiable** in this setup. | move 2b |
 | **`gh project create` applies no template**, so a CLI-created board gets `Todo` / `In Progress` / `Done` — missing `Ready` and `In review`, two of the three states the skill transitions through, and wrong casing on the third. Template boards get `Backlog` / `Ready` / `In progress` / `In review` / `Done`. Measured across six boards: 3 template, 3 bare. | move 7 |
 | **`gh project field-list` does not expose option colors or descriptions.** Those need GraphQL (`projectV2.field(name:)` → `ProjectV2SingleSelectField.options { name color description }`). | move 7 |
