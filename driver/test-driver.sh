@@ -922,6 +922,154 @@ fi
 
 rm -rf "$R_TMP"
 
+# --- #32: a warning must not overwrite the outcome it warns about -----------
+#
+#   https://github.com/lmorchard/agent-sessions/issues/32
+#
+# FROZEN acceptance checks. Read-only from Phase 1 onward: if a check here looks
+# wrong, that is a STOP and an amendment (see
+# skills/agent-session/references/frozen-checks.md), not an edit.
+#
+# The defect: `classify_pr_body` documents itself as "Prints outcome<TAB>reason"
+# -- its stdout IS its return value -- and then writes warnings to that same
+# stdout via `say`, which unlike `log` and `die` does not redirect to stderr.
+# Both call sites read it with `read -r`, which consumes only the FIRST line, so
+# a warning line becomes the outcome and the real value is discarded unread.
+# Hit for real: the decafclaw #657 ledger row, a $16.69 run whose outcome field
+# holds the warning text and whose reason is empty.
+#
+# NO REPLICAS: C1 and G1 evaluate the shipped `classify_pr_body`, `say` and `log`
+# out of the driver with sed, and C2 invokes the shipped driver as a subprocess.
+# Naming the function as the extraction entry point makes a rename fail closed.
+
+echo "#32: a classifier warning must not overwrite the outcome"
+
+# The fixture the issue names: an unparseable `ci` sha (so the warning fires) and
+# a non-empty head sha (so the staleness branch is entered at all). `reason` is
+# set in the block, so the expected value is the block's own text rather than
+# gate.py's default.
+C32_SHA="deadbeefcafe"
+C32_BODY="$GATE_MARKER
+\`\`\`yaml
+tier: auto-ok
+checks: C1 pass
+guards: G1 pass
+tamper: clean
+ci: not yet graded
+threads: 0 unresolved
+verdict: eligible-for-auto-merge
+reason: all rows satisfied
+\`\`\`"
+
+# The correct answer, from the shipped parser. Not an assertion about #32 -- a
+# probe that makes the C1 failure attributable: if gate.py stopped producing
+# gate-eligible here, C1 would fail for a reason that has nothing to do with the
+# channel bug, and this line says which.
+check "probe: gate.py itself classifies the fixture gate-eligible" \
+  "gate-eligible" "$(outcome_of "$C32_BODY" "$C32_SHA")"
+check "probe: and reports exactly one warning on it" \
+  "1" "$(_classify "$C32_BODY" "$C32_SHA" | jq -r '.warnings | length')"
+
+# The shipped output helpers, extracted rather than copied: whichever channel the
+# driver's `say` writes to is the channel these checks see. `die` comes along
+# because it is defined on the same shape and a future classify path may call it.
+eval "$(sed -n '/^log()/p;/^say()/p' "$DRIVER")"
+eval "$(sed -n '/^classify_pr_body()/,/^}/p' "$DRIVER")"
+
+if ! declare -f classify_pr_body >/dev/null; then
+  bad "extract the real classify_pr_body from the driver" \
+      "a function named classify_pr_body" "not found (renamed?)"
+elif ! declare -f say >/dev/null || ! declare -f log >/dev/null; then
+  bad "extract the real say/log from the driver" \
+      "functions named say and log" "not found (renamed?)"
+else
+  GATE_JSON=""
+  GATE_BLOCK=""
+
+  # C1. Read the way the function documents itself and both call sites read it:
+  # stdout only, first line, tab-split. Deliberately NOT pinned to one repair --
+  # a fix that leaves the warning on stdout still leaves the function violating
+  # the contract in its own comment, which is the defect.
+  C32_STDOUT="$(classify_pr_body "$C32_BODY" "$C32_SHA" 2>/dev/null)"
+  IFS="$(printf '\t')" read -r c32_outcome c32_reason <<EOF
+$C32_STDOUT
+EOF
+  check "#32 C1 the value channel carries the outcome, not the warning" \
+    "gate-eligible" "$c32_outcome"
+  check "#32 C1 and carries the reason with it" \
+    "all rows satisfied" "$c32_reason"
+
+  # G1. The warning must survive the fix. The cheapest way to green C1 is to
+  # delete the `say` line, which trades a corrupted record for a missing one --
+  # and silences a "a null must never render as a positive" warning, which is the
+  # thing the warning channel exists for. Combined stdout+stderr, because the
+  # point is that the OPERATOR still sees it, not which fd it arrives on.
+  C32_BOTH="$(classify_pr_body "$C32_BODY" "$C32_SHA" 2>&1)"
+  case "$C32_BOTH" in
+    *"ci row carries no parseable sha"*)
+      ok "#32 G1 the warning is still visible to the operator" ;;
+    *)
+      bad "#32 G1 the warning is still visible to the operator" \
+          "output containing: ci row carries no parseable sha" \
+          "$(printf '%s' "$C32_BOTH" | tr '\n' '|' | cut -c1-300)" ;;
+  esac
+fi
+
+# C2. The SECOND call site, end to end. `--classify-only` is the documented
+# recovery path for an unrecorded outcome, and on #657 it reproduced the same
+# corruption (the ledger's third row carries `recovered: true` and the warning
+# text). A fix at one call site and not the other is findings.md class 1's
+# "fixed the cost field, never generalised".
+#
+# Self-contained stubs rather than reuse of test-park-state.sh's: that file is
+# another issue's frozen check file, and its fixture omits the `ci` row on
+# purpose. Same shape, honouring the requested --json field list.
+
+C32_TMP="$(mktemp -d)"
+C32_BIN="$C32_TMP/bin"; mkdir -p "$C32_BIN"
+printf '%s\n' "$C32_BODY" > "$C32_BIN/pr-body.txt"
+printf '%s' '[{"number":42,"title":"stub pr","body":"Closes #7","headRefName":"fix/7-stub",
+  "url":"https://github.com/stub/repo/pull/42","closingIssuesReferences":[{"number":7}]}]' \
+  > "$C32_BIN/pr-list.json"
+
+cat > "$C32_BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "pr list"*)            cat "$STUB_DIR/pr-list.json" ;;
+  *"--json headRefOid"*) printf '%s\n' "$STUB_HEAD_SHA" ;;
+  *"--json body"*)       cat "$STUB_DIR/pr-body.txt" ;;
+  *)                     exit 0 ;;
+esac
+STUB
+chmod +x "$C32_BIN/gh"
+
+C32_SD="$C32_TMP/state"
+C32_OUT="$(STUB_DIR="$C32_BIN" STUB_HEAD_SHA="$C32_SHA" PATH="$C32_BIN:$PATH" \
+             bash "$DRIVER" --repo stub/repo --classify-only 7 --state-dir "$C32_SD" 2>&1)"
+C32_ROW="$(tail -1 "$C32_SD/runs.jsonl" 2>/dev/null || true)"
+
+# The probe first, for the same reason as above: an absent row and a driver that
+# died at validation look identical to the assertion below, and only this tells
+# them apart.
+if [ -z "$C32_ROW" ]; then
+  bad "probe: --classify-only appended a ledger row" \
+      "a json row in $C32_SD/runs.jsonl" \
+      "$(printf '%s' "$C32_OUT" | tr '\n' '|' | cut -c1-300)"
+else
+  ok "probe: --classify-only appended a ledger row"
+  C32_ROW_OUTCOME="$(printf '%s' "$C32_ROW" | jq -r '.outcome')"
+  case "$C32_ROW_OUTCOME" in
+    gate-eligible|gate-human|ci-stale|incomplete|parked|failed|no-gate|budget-exhausted)
+      ok "#32 C2 the recovery path records a known outcome value" ;;
+    *)
+      bad "#32 C2 the recovery path records a known outcome value" \
+          "one of gate-eligible|gate-human|ci-stale|incomplete|parked|failed|no-gate|budget-exhausted" \
+          "[$C32_ROW_OUTCOME]" ;;
+  esac
+fi
+
+rm -rf "$C32_TMP"
+
 # --- syntax ----------------------------------------------------------------
 
 echo "syntax"
