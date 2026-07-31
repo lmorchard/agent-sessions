@@ -1,7 +1,7 @@
 # Frozen acceptance checks
 
 **Source:** https://github.com/lmorchard/agent-sessions/issues/47
-**Frozen at:** _(pending — recorded in the follow-up commit)_
+**Frozen at:** 945467b (2026-07-31)
 **Check files — read-only from Phase 1 onward:**
 - `scripts/test_commit_lint.py`
 
