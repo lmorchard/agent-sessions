@@ -48,11 +48,10 @@ Write `scripts/commit_lint.py` to the interface the frozen tests declare:
 
 **Verification:**
 
-- [ ] `uv run pytest scripts/test_commit_lint.py` passes, and reports a non-zero collected count
-      (exit 5 = collected nothing is a failed check, not a pass).
-- [ ] `python3 scripts/commit_lint.py --all` reports exactly one occurrence, `2cbe106`'s quoted
-      `Closes #7` — guard G1, run as the command it is written as.
-- [ ] `git diff 945467b -- scripts/test_commit_lint.py` is empty (tamper check).
+- [x] `uv run pytest scripts/test_commit_lint.py` — **22 collected, 22 passed, exit 0.** Not exit 5.
+- [x] `python3 scripts/commit_lint.py --all` — **exactly one occurrence**, `2cbe106` line 14,
+      `Closes #7`, exit 1. `2cbe106`'s own genuine `Closes #23` is not among them. Guard G1.
+- [x] `git diff 945467b -- scripts/test_commit_lint.py` — **empty**. Tamper check clean.
 
 ## Phase 2 — wire it into the gate
 
@@ -69,11 +68,15 @@ to exercise, and C1's frozen test never runs in the suite.
 
 **Verification:**
 
-- [ ] `make check` exits 0 on this branch (whose commits are all clean).
-- [ ] `make check` exits non-zero over a range containing a quoted keyword — exercised by the
-      frozen entry-point tests, which run the real script as a subprocess against a throwaway
-      `git init` repo, and confirmed by hand on a scratch commit that is then discarded.
-- [ ] `make gate-test` collects and passes the new file.
+- [x] `make check` exits 0 on this branch, ending `all checks passed`, with
+      `commit-lint: no quoted closing keywords in origin/main..HEAD`.
+- [x] `make check` exits non-zero over a range containing a quoted keyword. Demonstrated by hand
+      on a scratch empty commit quoting a reference to a nonexistent issue, then discarded
+      (`git reset --soft`; branch restored to `21db545`, working tree untouched). **Both**
+      mechanisms fired: `make commit-lint` reported it directly, and `make check` aborted earlier
+      still at `gate-test`, because the frozen real-history test also caught it. Also covered by
+      the frozen entry-point tests against a throwaway `git init` repo.
+- [x] `make gate-test` collects and passes the new file — **85 passed** (63 before).
 
 ## Phase 3 — record the finding
 
@@ -86,13 +89,30 @@ is 3-for-3 on added rules measuring away.
 
 **Verification:**
 
-- [ ] `python3 scripts/docs_check.py` exits 0 (G2).
+- [x] `python3 scripts/docs_check.py` exits 0 (G2) — `links resolve, tables well-formed, counts match`.
+
+## Phase 4 — unplanned: fix what the independent verifier found
+
+**Advances:** C1 (correctness of the rule the criterion names).
+
+Not in the original plan; added because verification found three real defects, two of them false
+positives on legitimate commits. Detail in `notes.md`. The fix pairs backtick delimiters instead of
+counting parity, at both fence and inline scope.
+
+**Verification:**
+
+- [x] `uv run pytest scripts/test_commit_lint.py scripts/test_commit_lint_edges.py` — **37 passed**
+      (22 frozen, unchanged and untouched; 15 new).
+- [x] `python3 scripts/commit_lint.py --all` still reports exactly the one known occurrence.
+- [x] `make check` green.
+- [x] The frozen check file was **not** edited — regressions live in a new
+      `scripts/test_commit_lint_edges.py`. Tamper diff re-confirmed empty after the fix.
 
 ## Criteria coverage
 
 | Criterion | Advanced by |
 |---|---|
-| C1 | Phase 1 |
+| C1 | Phase 1, Phase 4 |
 | C2 | Phase 1, Phase 2 |
 
 Both directions: every `Cn` appears in some phase; every phase advances at least one `Cn` except

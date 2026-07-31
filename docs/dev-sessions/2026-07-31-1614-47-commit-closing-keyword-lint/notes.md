@@ -34,18 +34,56 @@ lands inside `subprocess._fork_exec`, several frames from anything this repo wro
   `rm -rf` cleanup. Outside the repo, nothing reads it, but it should be deleted so nobody mistakes
   it for the deliverable. The implementation in this branch was written without reading it.
 
+## The verification round is where the real value was
+
+The independent verifier passed both criteria, all three guards, and the tamper diff — and then
+found **three defects** by constructing adversarial inputs of its own. All three passed the frozen
+suite. That is the sentence worth keeping: *a frozen check that discriminates is not the same as a
+frozen check that is exhaustive.* C1's fixtures proved the detector could tell a quoted reference
+from a genuine one; they said nothing about doubled backticks, same-line triple spans, or unclosed
+fences.
+
+Two of the three were **false positives on legitimate commits** — the failure mode this detector
+was specifically designed to avoid, reproduced inside the detector meant to avoid it:
+
+1. `` ``Closes #N`` `` was missed. Spans were matched as `` `[^`]*` ``, so the *empty* span between
+   each doubled tick matched, and the keyword sat between two spans instead of inside one.
+2. ```` ```Closes #N``` ```` on one line read as a fence opener: the line was skipped unscanned
+   *and* fence state was left flipped, so the quoted one was missed and the commit's own genuine
+   trailer was reported instead.
+3. An unclosed fence swallowed everything after it, reporting the commit's genuine trailer.
+
+One cause underneath all three: **parity**. "An odd number of backticks so far means we are inside
+a span" reclassifies everything after a stray delimiter. The fix pairs delimiters — fences and
+inline runs alike — and makes an unmatched one inert.
+
+The irony is instructive rather than embarrassing. The module docstring had *already* rejected
+global parity, in writing, for exactly this reason, and then used line-scoped parity anyway.
+Narrowing the blast radius of a fragile rule is not the same as replacing it, and the docstring's
+own argument applied at both scopes.
+
+Regressions went into `scripts/test_commit_lint_edges.py`, a separate file, because
+`scripts/test_commit_lint.py` is the frozen oracle and adding to it would be the implementer
+editing what grades it.
+
 ## Design decision worth keeping
 
-**Global backtick parity was rejected even though it passes every frozen fixture.** Counting
-backticks across the whole message and calling odd-parity regions "quoted" is four lines and
-classifies all eleven historical references correctly. It was not used, because one stray backtick
-anywhere in a message flips the classification of everything after it — in *both* directions. It
-would silently start failing genuine commits, or silently stop reporting a real one, and neither
-failure announces itself. A state machine that resets per line cannot fail that way.
+**Parity was rejected at every scope, and it took two passes to actually do it.** Counting
+backticks and calling odd-parity regions "quoted" is a few lines and classifies all eleven
+historical references correctly. Rejected because one stray backtick flips the classification of
+everything after it, in *both* directions — silently failing genuine commits, or silently hiding a
+real one. Neither failure announces itself.
 
-This is the same instinct as the four documented non-features in the module docstring: a false
-positive trains the operator to wave the mechanism through, which is the failure mode that ends
-detectors.
+The first draft rejected *global* parity and then used *line-scoped* parity, which has the same
+defect over a smaller region; the verifier found it three times. Delimiters are now paired
+explicitly, and an unmatched one is inert.
+
+**Where the asymmetry points matters.** A missed detection costs one wrongly-closed issue,
+recoverable by reopening it — which is what actually happened to #7. A false positive costs the
+whole mechanism, because it fires on commits that were fine and the operator switches it off.
+Every tie in this module is broken toward not reporting, which is also why the three documented
+non-features (indented blocks, `~~~` fences, cross-line spans) stay non-features until something
+measured says otherwise.
 
 ## Dogfood note
 
