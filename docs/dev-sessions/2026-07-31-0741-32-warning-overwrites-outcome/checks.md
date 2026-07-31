@@ -68,13 +68,48 @@ other is `docs/findings.md` class 1's "fixed the cost field, never generalised" 
   Status at freeze: recorded in `notes.md`.
 - **G3:** `make driver-test` — no assertion lost, newly skipped, or newly failing. Invariant,
   not a count. **Baseline recorded at freeze so "lost" is checkable:** `driver/test-driver.sh`
-  reported **79 passed, 0 failed** on `origin/main` (39a4d75 tree, measured 2026-07-31).
+  reported **79 passed, 0 failed** on `origin/main` (`39d4a75` tree, measured 2026-07-31).
 - **G4:** `make driver-check` — the driver still has no executable merge path.
   Status at freeze: recorded in `notes.md`.
 
 ## Amendments
 
-(Append-only. Empty.)
+(Append-only.)
+
+- **CLARIFICATION, not an amendment (2026-07-31).** G3's baseline note recorded the `origin/main`
+  tree as `39a4d75`; the actual commit is `39d4a75`. Caught by the independent verifier, which
+  checked the sha existed instead of taking it on trust.
+  **Why a clarification:** the sha is provenance for where the baseline was measured, not part of
+  what G3 asserts — G3 asserts *79 passed, 0 failed, nothing lost*. Applying
+  `frozen-checks.md`'s mechanical test: the old and new wording produce the same verdict at the
+  freeze commit AND against the current implementation, because neither tree's assertion count
+  depends on how the baseline commit is spelled. Both cells "verdict same" → clarification. No
+  tier change.
+
+## Tamper verdict — recorded by the independent verifier (2026-07-31)
+
+`git diff 53b4a93 -- driver/test-driver.sh` is **NOT empty**, and the reason is disclosed rather
+than explained away: the run appended a separately fenced `#32 coda: NOT FROZEN` block covering a
+second latent defect that surfaced *after* the freeze had closed.
+
+**Verdict: clean under the stated invariant.** The invariant, as `frozen-checks.md` requires it be
+stated — over what the checks assert, not as a whitelist of allowed line forms:
+
+> No line in the diff may change what any frozen check asserts — no test body, assertion, expected
+> value, fixture, helper, `skip`/`xfail` marker, or signature belonging to C1, C2 or G1.
+
+The verifier's finding, on a fresh context with only this manifest and the repo: **no.** The diff
+is a single purely-additive hunk inserted after the frozen section's closing `rm -rf "$C32_TMP"`;
+`grep '^-'` over it yields zero content-removal lines, and the C1/C2/G1 code — `C32_SHA`,
+`C32_BODY`, the `classify_pr_body`/`say`/`log` sed-extraction, the C1 `check` calls, the G1 `case`
+block, and C2's stub and outcome-enum assertion — is byte-for-byte identical between `53b4a93` and
+HEAD. Same result for `origin/main` → `53b4a93`: purely additive, nothing removed, so the
+baseline's 79 assertions are byte-identical in HEAD's copy of the file.
+
+**Teeth:** the verifier states the diff could not have made any frozen check pass without the work
+being done — it does not touch the C1/C2/G1 code, those assertions are literal-value equality
+checks against the *shipped* `classify_pr_body` extracted by `sed`, and there is no fixture, mock
+or skip marker in the diff that could satisfy them vacuously. Suite: **88 passed, 0 failed**.
 
 ## Tamper verdict
 
