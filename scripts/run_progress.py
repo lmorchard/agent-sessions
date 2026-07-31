@@ -317,22 +317,31 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    first = True
+    # A --watch that cannot find a run WAITS for one; only a one-shot read fails.
+    # Polling for something that does not exist yet is what watching is for, and
+    # `make watch` is most useful started in the terminal beside `make run`,
+    # before the run has created its directory.
+    #
+    # The exception is an explicit RUNDIR: a path that is not a directory is a
+    # typo, and a typo cannot fix itself, so that one fails even under --watch
+    # rather than looping forever on a misspelling.
+    fatal_if_unresolved = not args.watch or bool(args.rundir)
     try:
         while True:
             # Re-resolved every tick, not just once: under --repo a watch left
             # running across the end of one run should pick up the next.
             run_dir = _resolve_run_dir(args)
             if run_dir is None:
-                if first:
-                    print(_no_run_message(args), file=sys.stderr)
+                if fatal_if_unresolved:
+                    print(f"run_progress.py: {_no_run_message(args)}", file=sys.stderr)
                     return 2
-                print("no run directory yet")
+                # Not "0 turns" and not silence -- the same distinction C3 draws
+                # inside a run, drawn one level up for the run itself.
+                print(f"waiting -- {_no_run_message(args)}")
             else:
                 print(format_progress(read_progress(run_dir)))
             if not args.watch:
                 return 0
-            first = False
             sys.stdout.flush()
             time.sleep(args.interval)
     except KeyboardInterrupt:
@@ -342,14 +351,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _no_run_message(args) -> str:
+    """Why no run resolved. Carries no `prog:` prefix -- it is also printed as the
+    body of a `waiting -- ...` line, where a program name reads as an error."""
     if args.rundir:
-        return f"run_progress.py: not a directory: {args.rundir}"
+        return f"not a directory: {args.rundir}"
     if args.state_dir:
-        return f"run_progress.py: no run directories under {Path(args.state_dir) / 'runs'}"
+        return f"no run directories under {Path(args.state_dir) / 'runs'}"
     if args.repo:
         looked = default_state_dir(args.repo) / "runs"
-        return f"run_progress.py: no run directories under {looked} (for --repo {args.repo})"
-    return "run_progress.py: give a RUNDIR, or --state-dir DIR, or --repo OWNER/NAME"
+        return f"no run directories under {looked} (for --repo {args.repo})"
+    return "give a RUNDIR, or --state-dir DIR, or --repo OWNER/NAME"
 
 
 if __name__ == "__main__":
