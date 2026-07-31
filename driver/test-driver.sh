@@ -1070,6 +1070,69 @@ fi
 
 rm -rf "$C32_TMP"
 
+# --- #32 coda: NOT FROZEN ----------------------------------------------------
+#
+# Everything above this line in the #32 section is frozen. This block is not: it
+# covers a second latent defect the #32 fix repairs incidentally, discovered
+# during implementation and therefore after the freeze closed. Kept separate so
+# the tamper diff over the frozen assertions stays reviewable -- this block
+# changes no frozen fixture, helper or assertion.
+#
+# The defect: both call sites read the classifier through `$(classify_pr_body ...)`.
+# Command substitution forks, so the GATE_BLOCK the function assigns landed in a
+# subshell and never reached the caller -- and the next line writes it to
+# `$rundir/gate.yaml`. Every gate.yaml this driver has written is therefore a
+# single blank line, verified across this repo's own .driver-state/runs. Reading
+# the JSON fields instead of the stdout line requires calling the function in the
+# current shell, which repairs it.
+
+echo "#32 coda (not frozen): gate.yaml records the block, not a blank line"
+
+D32_TMP="$(mktemp -d)"
+D32_BIN="$D32_TMP/bin"; mkdir -p "$D32_BIN"
+printf '%s\n' "$C32_BODY" > "$D32_BIN/pr-body.txt"
+printf '%s' '[{"number":42,"title":"stub pr","body":"Closes #7","headRefName":"fix/7-stub",
+  "url":"https://github.com/stub/repo/pull/42","closingIssuesReferences":[{"number":7}]}]' \
+  > "$D32_BIN/pr-list.json"
+cat > "$D32_BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "pr list"*)            cat "$STUB_DIR/pr-list.json" ;;
+  *"--json headRefOid"*) printf '%s\n' "$STUB_HEAD_SHA" ;;
+  *"--json body"*)       cat "$STUB_DIR/pr-body.txt" ;;
+  *)                     exit 0 ;;
+esac
+STUB
+chmod +x "$D32_BIN/gh"
+
+# A run dir with a stream: the recovery path only writes gate.yaml when it finds
+# one, so without this the write is never reached and the check passes vacuously.
+D32_SD="$D32_TMP/state"
+D32_RUNDIR="$D32_SD/runs/7-20260731T000000Z"
+mkdir -p "$D32_RUNDIR"
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.5,"session_id":"stub","result":"done"}' \
+  > "$D32_RUNDIR/stream.jsonl"
+
+D32_OUT="$(STUB_DIR="$D32_BIN" STUB_HEAD_SHA="$C32_SHA" PATH="$D32_BIN:$PATH" \
+             bash "$DRIVER" --repo stub/repo --classify-only 7 --state-dir "$D32_SD" 2>&1)"
+
+case "$D32_OUT" in
+  *"run dir  $D32_RUNDIR"*) ok "probe: the recovery path found the run dir" ;;
+  *) bad "probe: the recovery path found the run dir" "a 'run dir' line naming $D32_RUNDIR" \
+         "$(printf '%s' "$D32_OUT" | tr '\n' '|' | cut -c1-300)" ;;
+esac
+
+# `verdict:` rather than mere non-emptiness: a stray newline is non-empty too, and
+# that is exactly the value the bug wrote.
+if grep -q '^verdict: eligible-for-auto-merge$' "$D32_RUNDIR/gate.yaml" 2>/dev/null; then
+  ok "gate.yaml carries the gate block"
+else
+  bad "gate.yaml carries the gate block" "a line 'verdict: eligible-for-auto-merge'" \
+      "[$(tr '\n' '|' < "$D32_RUNDIR/gate.yaml" 2>/dev/null || echo MISSING)]"
+fi
+
+rm -rf "$D32_TMP"
+
 # --- syntax ----------------------------------------------------------------
 
 echo "syntax"

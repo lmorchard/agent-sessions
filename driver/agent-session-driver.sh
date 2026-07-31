@@ -728,9 +728,21 @@ run_issue() { # $1 = issue number
       prurl="$(printf '%s' "$prline" | cut -f2)"
       _body="$(gh pr view "$prnum" --repo "$REPO" --json body -q .body 2>/dev/null || true)"
       GATE_HEAD_SHA="$(gh pr view "$prnum" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || true)"
-      IFS="$(printf '\t')" read -r outcome reason <<EOF
-$(classify_pr_body "$_body" "$GATE_HEAD_SHA")
-EOF
+      # Read the JSON, not the stdout line. Two reasons, both learned on #657:
+      #
+      #   1. Parsing stdout means anything else written there corrupts the value.
+      #      Phase 1 moved the one offender to stderr; this removes the shared
+      #      channel, so the next diagnostic added inside cannot re-break it.
+      #   2. NOT `$(classify_pr_body ...)`: command substitution forks, so the
+      #      GATE_JSON and GATE_BLOCK the function assigns were being set in a
+      #      subshell and lost. That is why every gate.yaml this driver has ever
+      #      written is empty. Calling it plainly keeps both.
+      #
+      # The stdout contract stays honoured (see the function's comment); it is
+      # just not what these callers read. See issue #32.
+      classify_pr_body "$_body" "$GATE_HEAD_SHA" >/dev/null
+      outcome="$(printf '%s' "$GATE_JSON" | jq -r '.outcome')"
+      reason="$(printf '%s' "$GATE_JSON" | jq -r '.reason')"
       printf '%s\n' "$GATE_BLOCK" > "$rundir/gate.yaml"
     fi
   fi
@@ -852,9 +864,14 @@ if [ -n "$CLASSIFY_ONLY" ]; then
     prurl="$(printf '%s' "$prline" | cut -f2)"
     _body="$(gh pr view "$prnum" --repo "$REPO" --json body -q .body 2>/dev/null || true)"
     GATE_HEAD_SHA="$(gh pr view "$prnum" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || true)"
-    IFS="$(printf '\t')" read -r outcome reason <<EOF
-$(classify_pr_body "$_body" "$GATE_HEAD_SHA")
-EOF
+    # Same read as the run path above, for the same reasons -- and this is the
+    # call site that MATTERS most: --classify-only is the documented recovery path
+    # for an unrecorded outcome, and on #657 it reproduced the same corruption it
+    # exists to repair. A fix at one call site and not the other is findings.md
+    # class 1's "fixed the cost field, never generalised". See issue #32.
+    classify_pr_body "$_body" "$GATE_HEAD_SHA" >/dev/null
+    outcome="$(printf '%s' "$GATE_JSON" | jq -r '.outcome')"
+    reason="$(printf '%s' "$GATE_JSON" | jq -r '.reason')"
     [ "$rundir" != "(none)" ] && printf '%s\n' "$GATE_BLOCK" > "$rundir/gate.yaml"
   fi
 
