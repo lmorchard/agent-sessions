@@ -128,6 +128,56 @@ rested on a scenario the change does not alter. The `AT FREEZE` text above is ac
 observed, and the frozen case is what graded the work — but the probe was weaker corroboration at
 freeze than its wording implies. Flagged for the human at the gate.
 
+### Post-review round, human-adjudicated by Les 2026-07-31 — three threads, all fixed
+
+The Copilot review **arrived after this run published its gate block.** The row read
+`threads: 0 unresolved — BY SUBSTITUTE: 0 reviews and 0 review comments exist, so no thread can; the
+requested review timed out`, and that substitute was true when written and false minutes later. It is
+`docs/findings.md` defect class 2 in the gate itself: *no review has arrived yet* is not *no
+unresolved threads*. The run's verdict was `human-merge-required` anyway, so nothing was at risk —
+but a run that had reached `eligible-for-auto-merge` on the same substitute would have been eligible
+on the strength of a review nobody had read. Tracked separately.
+
+**Thread 3 — `driver/agent-session-driver.sh`: `--repo` was not shape-validated, and it now lands in a
+filesystem path.** The only genuine defect of the three, and one this change introduced: `REPO` had
+never been part of a path before. Measured before fixing, rather than argued:
+
+| `--repo` value | before | after |
+|---|---|---|
+| `../../../../tmp/ESCAPED` | slug `..-..-..-..-tmp-ESCAPED`, stayed inside the root | rejected |
+| `..` | slug `..` → **state dir resolved to the PARENT of `agent-session/`**; `runs.jsonl`, `parked.jsonl` and `runs/` created one level outside the intended root | rejected |
+| `owner/name/extra` | slug `owner-name-extra`, confined but wrong | rejected |
+| `lmorchard/agent-sessions` | correct | correct |
+
+So the exposure was **one level, not arbitrary traversal** — `${REPO//\//-}` eats the separators, which
+is incidental protection rather than a boundary. Now shape-validated: exactly one `/`, and no `.` or
+`..` path component. Seven malformed values rejected, the legitimate one unaffected, and nothing is
+created outside `$XDG_STATE_HOME/agent-session/` any more.
+
+**Threads 1 and 2 — hardcoded `/Users/lorchard/...` in `probe-04-g3-fingerprint.py` and
+`migrate-ledger.py`.** Both now derive the main checkout from
+`git rev-parse --path-format=absolute --git-common-dir`, with an `AGENT_SESSION_ARCHIVE` override.
+`--git-common-dir` and not `--git-dir` is the point: inside a linked worktree only the common dir
+points at the main checkout, and `.driver-state/` is gitignored so it exists only there.
+
+Worth recording that probe-04's *comment already claimed* the value was "resolved from the worktree's
+git commondir rather than hardcoded" while the next line hardcoded it, leaving `WORKTREE` computed and
+unused. Same shape as `driver/test-driver.sh`'s old *"Source the driver's functions"* comment, which
+described a fix that was never made — `findings.md` class 5, a comment asserting what the code does
+not do.
+
+**Not an amendment, and not a clarification either.** `driver/test-driver.sh` is this run's only check
+file and it is untouched by this round — `git diff <freeze-sha> -- driver/test-driver.sh` stays as the
+tamper check and stays clean. The probe scripts are *evidence recorders*, not CHECK mechanisms: C1, C2
+and C3 all name cases in `test-driver.sh`. So no frozen oracle moved, no verdict changed at either
+tree, and **this run keeps its tier.** Recorded here because the files were touched after the freeze,
+not because a check was.
+
+Verified after the round: `bash driver/test-driver.sh` → 112 passed, 0 failed; `make check` green;
+`probe-04` → `G3 PASS: all 100 fingerprinted files byte-identical`; both scripts run from a linked
+worktree and under the env override. Threads resolved on the grounds `pr.md` requires — each was
+fixed, not waved through.
+
 ## Resolution of one spec ambiguity, recorded before the freeze
 
 The spec says "`--state-dir` keeps working as an explicit override" without saying whether, after

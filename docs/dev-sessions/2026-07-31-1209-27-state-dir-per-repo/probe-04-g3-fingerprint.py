@@ -20,17 +20,28 @@ Run with `--write` at freeze to record the baseline, then bare to compare:
 """
 import hashlib
 import json
+import os
 import pathlib
+import subprocess
 import sys
 
 SESSION = pathlib.Path(__file__).resolve().parent
 BASELINE = SESSION / "g3-baseline.json"
 
 # The MAIN checkout, not this worktree: .driver-state/ is gitignored and lives
-# only there. Resolved from the worktree's git commondir rather than hardcoded.
+# only there. Resolved from the worktree's git commondir, as the line below now
+# actually does -- it previously hardcoded one machine's path while this comment
+# claimed otherwise, and left WORKTREE computed but unused. Raised by the Copilot
+# review on PR #44. `--git-common-dir` is the point: inside a linked worktree
+# `--git-dir` gives the worktree's own gitdir, and only the common dir points at
+# the main checkout's .git.
 WORKTREE = SESSION.parents[2]
-MAIN = pathlib.Path("/Users/lorchard/devel/agent-sessions")
-STATE = MAIN / ".driver-state"
+_common = subprocess.run(
+    ["git", "-C", str(WORKTREE), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+    capture_output=True, text=True, check=True,
+).stdout.strip()
+MAIN = pathlib.Path(_common).parent
+STATE = pathlib.Path(os.environ.get("AGENT_SESSION_ARCHIVE") or (MAIN / ".driver-state"))
 
 
 def excluded(rel: pathlib.PurePath) -> bool:

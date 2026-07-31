@@ -23,9 +23,29 @@ Undo: delete the per-repo directories it names. The archive is untouched.
 import json
 import os
 import pathlib
+import subprocess
 import sys
 
-ARCHIVE = pathlib.Path("/Users/lorchard/devel/agent-sessions/.driver-state/runs.jsonl")
+# The pre-#27 archive lives in the MAIN checkout -- `.driver-state/` is gitignored,
+# so it exists only there and not in a linked worktree. Derived from git rather
+# than hardcoded to one developer's home, which is what this line used to do and
+# which made the script fail for everyone else even when their archive existed.
+# Raised by the Copilot review on PR #44. `--git-common-dir` rather than
+# `--git-dir`: inside a linked worktree only the common dir points at the main
+# checkout. `AGENT_SESSION_ARCHIVE` overrides it for anyone whose archive is
+# somewhere else.
+def _archive_default() -> pathlib.Path:
+    here = pathlib.Path(__file__).resolve().parent
+    common = subprocess.run(
+        ["git", "-C", str(here), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    return pathlib.Path(common).parent / ".driver-state" / "runs.jsonl"
+
+
+ARCHIVE = pathlib.Path(os.environ["AGENT_SESSION_ARCHIVE"]) if os.environ.get(
+    "AGENT_SESSION_ARCHIVE"
+) else _archive_default()
 XDG = pathlib.Path(os.environ.get("XDG_STATE_HOME") or (pathlib.Path.home() / ".local/state"))
 ROOT = XDG / "agent-session"
 APPLY = "--apply" in sys.argv

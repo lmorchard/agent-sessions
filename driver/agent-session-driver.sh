@@ -315,9 +315,28 @@ abspath() {
 #      spurious-pass window in assertions this change may not edit. `log` is also
 #      what this file already uses for diagnostics -- `say` is the report.
 #
-# `--repo` is validated non-empty far above, so the slug is never empty here.
-# ${REPO//\//-} flattens owner/name to owner-name: one level deep, and GitHub's
-# naming rules admit no other slash, so it cannot collide.
+# `--repo` is validated non-empty far above, but non-empty is not enough now that
+# REPO lands in a filesystem path. ${REPO//\//-} flattens owner/name to
+# owner-name: one level deep, and GitHub's naming rules admit no other slash, so
+# it cannot collide.
+#
+# Shape-validated because "it flattens slashes" is incidental protection, not a
+# check. Measured on the unvalidated version: `--repo ../../../../tmp/ESCAPED`
+# stayed inside the root (the slashes became dashes), but `--repo ..` produced the
+# slug `..`, and abspath then resolved the state dir to the PARENT of
+# agent-session/ -- runs.jsonl, parked.jsonl and runs/ were created one level
+# outside the intended root. One level, not arbitrary traversal, and only reachable
+# by typing a repo name that no `gh` call could satisfy -- but the fix is three
+# lines and the alternative is relying on a substitution that was never meant to be
+# a boundary. Raised by the Copilot review on PR #44.
+case "$REPO" in
+  */*/*) die "--repo must be owner/name, with exactly one '/': $REPO" ;;
+  */*)   : ;;
+  *)     die "--repo must be owner/name, with exactly one '/': $REPO" ;;
+esac
+case "$REPO" in
+  .|..|*/.|*/..|./*|../*) die "--repo may not contain a path component of . or ..: $REPO" ;;
+esac
 if [ -z "$STATE_DIR" ]; then
   # Checked rather than left to fail: with both unset the path would begin
   # `/.local/state`, and the only symptom would be an obscure `mkdir` failure
