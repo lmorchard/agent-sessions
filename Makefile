@@ -4,13 +4,13 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help check driver-check driver-test gate-test park-test docs-check assertion-lint dry-run run loop run-self dry-run-self skill-readonly
+.PHONY: help check driver-check driver-test gate-test park-test docs-check assertion-lint dry-run run loop watch run-self dry-run-self skill-readonly
 
 help:
 	@echo "check            run every check -- the targets listed below, in one go"
 	@echo "driver-check     assert the driver has no executable merge path"
 	@echo "driver-test      bash fixture tests (runs gate-test first)"
-	@echo "gate-test        pytest over gate.py + docs_check.py -- imports, never restates"
+	@echo "gate-test        pytest over the Python modules -- imports them, never restates"
 	@echo "park-test        frozen acceptance checks for #5 (park state as a label)"
 	@echo "skill-readonly   assert the hosted run cannot write to the skill directory"
 	@echo "docs-check       detect doc rot: dead links, split tables, stale counts"
@@ -18,6 +18,7 @@ help:
 	@echo "dry-run          selection only against $(REPO); no claude invocation"
 	@echo "run              one real unattended run (nothing merges)"
 	@echo "loop             burn down up to 2 eligible issues (nothing merges)"
+	@echo "watch            digest the newest run's stream.jsonl on a loop; reads, never writes"
 	@echo "run-self         drive THIS repo (needs --allow-nested-skill-dir; ISSUE=n to pin)"
 	@echo "dry-run-self     selection only against this repo's own board"
 	@echo "                 ISSUES=n BUDGET=n override queue depth / per-issue ceiling"
@@ -48,7 +49,7 @@ driver-test: gate-test
 	@bash driver/test-driver.sh
 
 gate-test:
-	@uv run --quiet pytest driver/test_gate.py scripts/test_docs_check.py
+	@uv run --quiet pytest driver/test_gate.py scripts/test_docs_check.py scripts/test_run_progress.py
 
 # The frozen acceptance checks for issue #5, wired in AFTER the work landed --
 # deliberately, because guard G1 was "make check green" and it had to pass at the
@@ -105,6 +106,7 @@ dry-run:
 # came in at $11.76 and $11.20. $25 leaves headroom for the re-verification tax.
 BUDGET ?= 25
 ISSUES ?= 1
+INTERVAL ?= 10
 
 run:
 	@bash $(DRIVER) --repo $(REPO) --board $(BOARD) \
@@ -115,6 +117,17 @@ run:
 # separate only because it was assembled by hand twice and is worth discovering.
 loop:
 	@$(MAKE) run ISSUES=$(or $(ISSUES_OVERRIDE),2)
+
+# `run` and `run-self` print nothing between "== invoke #N ==" and the exit line,
+# so a run is a black box for as long as it lasts -- while megabytes of live signal
+# sit in the run's stream.jsonl the whole time. This reads that signal; it never
+# writes to the state dir, and nothing about the run changes because it is watched.
+# Not in `check`: it is an interactive loop with no end condition. See issue #42.
+#
+# REPO= picks whose runs are watched, INTERVAL= how often. It follows the newest
+# run under that repo's state dir, so it can be started before the run is.
+watch:
+	@python3 scripts/run_progress.py --repo $(REPO) --watch --interval $(INTERVAL)
 
 # Drive THIS repo. Needs --allow-nested-skill-dir, because $(SKILL) lives inside
 # $(CURDIR) and #10's guard now refuses that configuration by default (exit 2).
