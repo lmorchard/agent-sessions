@@ -38,8 +38,11 @@ check(){ [ "$2" = "$3" ] && ok "$1" || bad "$1" "$2" "$3"; }
 # Whole-line comments only -- a trailing `# ...` is not stripped, because doing so
 # would need a bash parser to avoid mangling a `#` inside a string. Every literal
 # these guard occurs on a real code line, and the shape is enforced mechanically.
-_code_hits()    { grep -v '^[[:space:]]*#' "$DRIVER" | grep -cF "$1"; }
-_code_hits_re() { grep -v '^[[:space:]]*#' "$DRIVER" | grep -cE "$1"; }
+# `--` ends option parsing: without it a pattern starting with `-` would be read
+# as a flag, and the helper would break on the one input it most needs to handle
+# literally. No behaviour change for the current callers.
+_code_hits()    { grep -v '^[[:space:]]*#' "$DRIVER" | grep -cF -- "$1"; }
+_code_hits_re() { grep -v '^[[:space:]]*#' "$DRIVER" | grep -cE -- "$1"; }
 
 # NO REPLICAS. These call the shipped parser, driver/gate.py, through the same
 # CLI the driver itself uses. This file used to hand-copy extract_gate,
