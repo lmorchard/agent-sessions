@@ -538,8 +538,15 @@ classify_pr_body() { # $1 = PR body, $2 = head sha. Prints "outcome<TAB>reason".
   GATE_BLOCK="$(printf '%s' "$GATE_JSON" | jq -r '.gate')"
   # Warnings are the parser's "a null must never render as a positive" channel;
   # surface them here rather than letting them die inside the JSON.
+  #
+  # `log`, never `say`: this function's stdout IS its return value (see the header
+  # comment), and `say` writes to stdout while `log` and `die` redirect to stderr.
+  # A `say` here put the warning on line 1 of the return value, and the callers'
+  # `read -r` takes only the first line -- so the warning became the outcome and
+  # the real outcome was discarded unread. That destroyed the record of a $16.69
+  # run on decafclaw #657, and --classify-only reproduced it. See issue #32.
   printf '%s' "$GATE_JSON" | jq -r '.warnings[]?' | while IFS= read -r w; do
-    say "  WARNING: $w"
+    log "  WARNING: $w"
   done
   printf '%s' "$GATE_JSON" | jq -r '[.outcome, .reason] | @tsv'
 }
