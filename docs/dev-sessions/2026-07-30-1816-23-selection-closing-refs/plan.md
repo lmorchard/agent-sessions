@@ -132,18 +132,27 @@ pr_blocking_issue() { # $1 = issue number, $2 = open-prs json
   Renaming would also be churn beyond the smallest reasonable change.
 
 **Verification — automated:**
-- [ ] C1's check passes: `make driver-test` — `C1(a)`, `C1(b)`, `C1(c)` all `ok`
-- [ ] C2's check passes: `make driver-test` — `C2(a)`, `C2(b)` both `ok`
-- [ ] Guards still pass: `make driver-test` — `G1`, `G2`, `driver parses` all `ok`;
-      `make park-test` — 21 passed, 0 failed; `make check` — all green (G4)
-- [ ] Tamper diff empty: `git diff <freeze-sha> -- driver/test-driver.sh`
-- [ ] The driver has exactly three `pr_for_issue`/`pr_blocking_issue` call sites, one strict at
-      selection and two loose at discovery: `grep -n 'pr_for_issue\|pr_blocking_issue'
-      driver/agent-session-driver.sh`
+- [x] C1's check passes: `make driver-test` — `C1(a)`, `C1(b)`, `C1(c)` all `ok`
+- [x] C2's check passes: `make driver-test` — `C2(a)`, `C2(b)` both `ok`
+- [x] Guards still pass: `make driver-test` — `G1`, `G2`, `driver parses` all `ok`, suite
+      `79 passed, 0 failed`; `make park-test` — 21 passed, 0 failed; `make check` — `all checks
+      passed` (G4)
+- [x] Tamper diff empty: `git diff c0a6500 --stat -- driver/test-driver.sh` — no output
+- [x] The driver has exactly three matcher call sites, one strict at selection and two loose at
+      discovery: `grep -n 'pr_for_issue\|pr_blocking_issue' driver/agent-session-driver.sh` →
+      `:465` strict (selection), `:715` and `:839` loose (discovery), plus `:470`, the advisory's
+      read of the loose matcher, which gates nothing
 
 **Verification — manual:**
-- [ ] None. Both criteria are machine-checkable; that is what makes this run `auto-ok`. No
-      human-judgment criterion exists, so nothing is pending a human grade at the gate.
+- [x] None required. Both criteria are machine-checkable; that is what makes this run `auto-ok`.
+      No human-judgment criterion exists, so nothing is pending a human grade at the gate.
+
+**Not covered by a frozen check — stated rather than glossed:** the advisory `note:` line (change
+4, spec Open question 3's default) is *additive output* and no criterion constrains it. The frozen
+node proves it does not break C1 — the advisory prints on exactly the C1 fixture and C1 stays green
+— but nothing asserts that it prints, or what it says. Adding an assertion for it now would mean
+editing a frozen check file, which is a STOP, so it stays uncovered and declared. Follow-up
+candidate for `notes.md`, not something to smuggle past the freeze.
 
 ---
 
