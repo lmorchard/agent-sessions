@@ -4,7 +4,7 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help check driver-check driver-test gate-test park-test docs-check assertion-lint dry-run run loop watch run-self dry-run-self skill-readonly
+.PHONY: help check driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint dry-run run loop watch run-self dry-run-self skill-readonly
 
 help:
 	@echo "check            run every check -- the targets listed below, in one go"
@@ -15,6 +15,7 @@ help:
 	@echo "skill-readonly   assert the hosted run cannot write to the skill directory"
 	@echo "docs-check       detect doc rot: dead links, split tables, stale counts"
 	@echo "assertion-lint   detect presence-grep assertions -- a spelling check, not a test"
+	@echo "commit-lint      detect a commit message that QUOTES a closing keyword"
 	@echo "dry-run          selection only against $(REPO); no claude invocation"
 	@echo "run              one real unattended run (nothing merges)"
 	@echo "loop             burn down up to 2 eligible issues (nothing merges)"
@@ -25,7 +26,7 @@ help:
 	@echo ""
 	@echo "  REPO=$(REPO)  REPO_PATH=$(REPO_PATH)  BOARD=$(BOARD)"
 
-check: driver-check driver-test park-test skill-readonly docs-check assertion-lint
+check: driver-check driver-test park-test skill-readonly docs-check assertion-lint commit-lint
 	@echo "all checks passed"
 
 # C1. Kept separate from driver-test so it can be cited as its own check.
@@ -49,7 +50,7 @@ driver-test: gate-test
 	@bash driver/test-driver.sh
 
 gate-test:
-	@uv run --quiet pytest driver/test_gate.py scripts/test_docs_check.py scripts/test_run_progress.py
+	@uv run --quiet pytest driver/test_gate.py scripts/test_docs_check.py scripts/test_run_progress.py scripts/test_commit_lint.py
 
 # The frozen acceptance checks for issue #5, wired in AFTER the work landed --
 # deliberately, because guard G1 was "make check green" and it had to pass at the
@@ -97,6 +98,23 @@ docs-check:
 # See issue #28 and scripts/assertion_lint.py.
 assertion-lint:
 	@python3 scripts/assertion_lint.py
+
+# GitHub closes an issue on `Closes #N` in a commit message, and commit messages
+# are NOT rendered as markdown -- so backticks around one are literal characters,
+# not quoting, and the issue closes anyway. That is how issue #7 was closed by
+# accident on 2026-07-31, by a commit body describing a test fixture.
+#
+# The PR's own metadata said nothing was wrong: gh reported its
+# closingIssuesReferences as [23]. Only the commit body carried the reference,
+# which is what made it invisible.
+#
+# Scope is the commits this branch adds on top of origin/main. History is
+# immutable and already holds the one known instance, so re-reporting it forever
+# would train the operator to ignore the check -- `python3 scripts/commit_lint.py
+# --all` is how the regression guard gets run by hand. Same detector-not-
+# exhortation reasoning as docs-check and assertion-lint above. See issue #47.
+commit-lint:
+	@python3 scripts/commit_lint.py
 
 dry-run:
 	@bash $(DRIVER) --repo $(REPO) --board $(BOARD) --dry-run
