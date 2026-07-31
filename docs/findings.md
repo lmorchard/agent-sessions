@@ -592,9 +592,13 @@ about mutation-testing a guard that protects a dangerous state.
   an `inflight.json` marker written *before* the invocation, plus `--classify-only <n>`.
 - **No trap can fire on SIGKILL or a host crash.** A VSCode crash reparented `claude -p` to init
   (PPID 1) — still running, still spending, still mutating the repo, for another ~15 minutes.
-  Startup now detects a live orphan and refuses to start a second run against the same repo. A
-  finished orphan wants `--classify-only`; a live one wants killing. **Conflating those two states
-  was the actual bug.**
+  Startup now detects a live orphan and refuses to start a second run. A finished orphan wants
+  `--classify-only`; a live one wants killing. **Conflating those two states was the actual bug.**
+  The refusal is scoped to the repo, but **nothing in it compares repos** — the state directory
+  defaults to one per repo (`--state-dir` still means exactly the path given), so a marker for one
+  repo is not in the directory another repo's run reads. The scoping is a property of the layout,
+  which is why there is no repo-comparison code to get wrong. Point two runs at one explicit
+  `--state-dir` and they collide again, correctly: one `inflight.json` cannot describe two runs.
 
 ---
 
