@@ -263,6 +263,14 @@ which is instance 2's fix done right. And where you cannot change the detector, 
 as markdown*, so backticks around `Closes #N` are literal characters and protect nothing. Backticks
 **do** work in issue and PR bodies, which is why the habit feels safe.
 
+**Instance 4 now has a detector rather than a habit: `make commit-lint`.** It reports a closing keyword
+only where it sits inside backticks, over the commits a branch adds on top of `origin/main`. The
+negative half is what makes it survivable — an ordinary trailing closing reference is left alone, so it
+does not fire on every legitimate commit and get switched off. `python3 scripts/commit_lint.py --all` is
+the whole-history form, and running it is how the claim "one instance, ever" stays checkable instead of
+remembered. Note the shape of the fix: it does not make GitHub's parser smarter, which is impossible
+from here — it changes what we hand it, which is the lever this row's lesson identified.
+
 ## Rules about oracles, earned from runs
 
 Each of these came out of a specific failure and still governs.
