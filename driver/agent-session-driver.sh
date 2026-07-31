@@ -327,14 +327,46 @@ park_reason() { # $1 = issue number -> the latest recorded reason for it
 }
 
 
-# Open PRs, once. An express PR carries "Closes #N"; a branch may also carry the
-# number. Match on both rather than assuming which.
+# Open PRs, once. `closingIssuesReferences` is what GitHub itself considers a
+# link -- the issues a merge would actually close -- and it rides along on the
+# list query for free. No second call, no `gh pr view`.
 fetch_open_prs() {
   gh pr list --repo "$REPO" --state open --limit 200 \
-     --json number,title,body,headRefName,url 2>/dev/null || echo '[]'
+     --json number,title,body,headRefName,url,closingIssuesReferences 2>/dev/null || echo '[]'
 }
 
-pr_for_issue() { # $1 = issue number, $2 = open-prs json
+# TWO matchers, deliberately, because the two callers want opposite errors.
+#
+#   pr_blocking_issue  -- the SELECTION gate. Wants PRECISION. A false match here
+#                         removes real work from the queue and says nothing about
+#                         it: the driver idles and prints a skip reason that reads
+#                         as true. Nothing downstream ever catches it.
+#   pr_for_issue       -- post-run DISCOVERY. Wants RECALL. It runs against a PR
+#                         the driver may have just opened badly, and a false MISS
+#                         reports `parked: no PR opened` about a PR that exists.
+#
+# They used to be one function, matching a bare `#N` anywhere in body, title or
+# branch. That is a proxy for the closing link, and it fired on PR #21 of this
+# repo -- a docs-only triage sweep tabulating six issue numbers, closing none of
+# them -- hiding #11 and #13 while `closingIssuesReferences` on it was empty.
+# Self-amplifying, too: the more the project documents its own triage, the more
+# of its own backlog it hides. See issue #23.
+#
+# Do NOT unify these back together. Do NOT rename pr_for_issue: the guards in
+# driver/test-driver.sh extract it out of this file BY NAME.
+
+pr_blocking_issue() { # $1 = issue number, $2 = open-prs json -- STRICT, selection only
+  # `// []` is load-bearing rather than defensive: a PR served without the key at
+  # all (any caller or stub that did not request the field) yields null, and
+  # `null[]` is a jq ERROR, not an empty match -- which would take the whole
+  # selection stage down instead of matching nothing.
+  printf '%s' "$2" | jq -r --arg n "$1" '
+    .[] | select(
+      [ (.closingIssuesReferences // [])[] | .number | tostring ] | index($n)
+    ) | "\(.number)\t\(.url)"' | head -1
+}
+
+pr_for_issue() { # $1 = issue number, $2 = open-prs json -- LOOSE, discovery only
   printf '%s' "$2" | jq -r --arg n "$1" '
     .[] | select(
         ((.body  // "") | test("(^|[^0-9])#" + $n + "([^0-9]|$)"))
@@ -426,11 +458,16 @@ select_issues() {
     return 0
   fi
 
-  local n tier title col prline reason
+  local n tier title col prline mention reason
   while IFS="$(printf '\t')" read -r n tier title; do
     [ -n "$n" ] || continue
     col="$(board_status "$n")"
-    prline="$(pr_for_issue "$n" "$prs")"
+    prline="$(pr_blocking_issue "$n" "$prs")"
+    # Only asked when nothing BLOCKS, and only to report the near-match rather
+    # than discard it silently. A null rendering as a positive is findings.md
+    # class 2; silently dropping the near-match is the same shape in reverse.
+    mention=""
+    [ -z "$prline" ] && mention="$(pr_for_issue "$n" "$prs")"
     reason=""
 
     if   [ "$tier" = "needs-review" ]; then reason="tier: needs-review"
@@ -451,6 +488,13 @@ select_issues() {
       # The column is advisory. Say so where it disagrees, rather than resolving it.
       if [ -n "$col" ] && [ "$col" != "Ready" ]; then
         say "                note: board column is '$col', not 'Ready' -- not a gate, see spec.md Q2"
+      fi
+      # So is a mention. This is the near-match the old matcher used to act on:
+      # saying it out loud is what makes the behaviour change legible to an
+      # operator wondering why an issue they thought was taken came up eligible.
+      if [ -n "$mention" ]; then
+        say "                note: PR #$(printf '%s' "$mention" | cut -f1) names #$n but declares no" \
+            "closing link -- advisory, not a gate"
       fi
       ELIGIBLE="$ELIGIBLE $n"
     fi

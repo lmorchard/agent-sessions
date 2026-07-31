@@ -52,7 +52,7 @@ to the rate at which they arrive.
 | 7 | Three independent unattended runs reported `project-gates` satisfied **by substitute**, having run `make check`'s four steps natively because `make check` itself was unpassable. | move 4c | fixed |
 | 8 | `amendments: none` was true only under one of two readings of the amendment policy. The policy now names both trees, and under it #668 was an amendment. | move 5 (#668) | closed 2026-07-27 |
 | 9 | **The driver's test suite tests a replica of the classifier, not the classifier.** `test-driver.sh` hand-copies driver logic — one helper is annotated *"Mirrors the driver's extraction + comparison exactly"* with nothing enforcing that — and it has **already diverged**: `classify_outcome` is 53 lines in the driver and 15 in the copy, with **zero `ci-stale` awareness** in the copy. | verified 2026-07-27 | closed by [#9](https://github.com/lmorchard/agent-sessions/issues/9) |
-| 10 | **`pr_for_issue` matches a bare `#N` anywhere in an open PR's body, title or branch name**, so a PR that merely *mentions* an issue removes it from selection. The function's own comment says *"an express PR carries `Closes #N`"* and the code never requires the keyword. A docs PR listing six issue numbers hid six issues; `closingIssuesReferences` was empty on it. | verified 2026-07-29 | open, [#23](https://github.com/lmorchard/agent-sessions/issues/23) |
+| 10 | **`pr_for_issue` matches a bare `#N` anywhere in an open PR's body, title or branch name**, so a PR that merely *mentions* an issue removes it from selection. The function's own comment says *"an express PR carries `Closes #N`"* and the code never requires the keyword. A docs PR listing six issue numbers hid six issues; `closingIssuesReferences` was empty on it. | verified 2026-07-29 | closed by [#23](https://github.com/lmorchard/agent-sessions/issues/23) |
 
 **The tell:** the row names a command, and the evidence offered is not that command's output.
 **The fix, every time:** make the row cite a command that is actually run, and make its failure
@@ -61,9 +61,17 @@ mode distinguishable from its success mode.
 **Instance 10 adds a direction the first nine did not have: this class can cost *liveness*, not just
 correctness.** Nine of them made a check wrongly report *true*, which a later stage or a reader could
 still catch. This one makes eligible work wrongly report *absent*, and nothing downstream looks — the
-driver idles while printing a skip reason that reads as true. It is also **self-amplifying in this
-repo specifically**: the matcher keys on issue numbers appearing in prose, so the more the project
-documents its own triage, the more of its own backlog it hides.
+driver idles while printing a skip reason that reads as true. It was also **self-amplifying in this
+repo specifically**: the matcher keyed on issue numbers appearing in prose, so the more the project
+documented its own triage, the more of its own backlog it hid.
+
+Closed by splitting the one matcher in two, along the line the two callers were already implicitly
+drawn on. Selection consults `closingIssuesReferences` — what GitHub itself would close — and
+nothing else; post-run PR discovery keeps the loose match, because it wants recall where selection
+wants precision, and a miss there reports `parked: no PR opened` about a PR that exists. The two
+directions are pinned against each other in `make driver-test`: the criteria assert the strict side,
+the guards assert the loose one, so tightening the shared matcher instead would have shown up as a
+guard flip rather than as a quiet regression in the frozen park-state suite.
 
 **Instance 9 was the worst of the nine, and it is worth keeping the evidence.** Running both
 classifiers over one identical gate block (`ci: 2/2 pass @ 0d08b2d`, head `e8f03389abcdef`) gave:

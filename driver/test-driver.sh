@@ -735,6 +735,193 @@ esac
 
 rm -rf "$M_TMP"
 
+# --- an open PR blocks an issue only when it actually CLOSES it -------------
+#
+# Selection asks "does an open PR already exist for #N" and answers it by looking
+# for the number in the PR's body, title or branch name. Those are all proxies for
+# the thing GitHub already knows authoritatively -- `closingIssuesReferences`, the
+# linked-issue set a merge would actually close. A proxy that fires on any mention
+# is wrong in the direction that costs the most: an issue nobody is working on
+# reads as taken, and the driver silently stops picking it up. A triage PR that
+# tabulates a dozen issue numbers in prose blocks every one of them, and nothing
+# in the output says why the queue went quiet.
+#
+# Both cases invoke the SHIPPED driver as a subprocess against an offline `gh`
+# stub -- not `grep -q "<literal>" "$DRIVER"`, which is a spelling check and passes
+# on a comment. And the stub HONOURS the requested `--json` field list on BOTH
+# `issue list` and `pr list`, which is the entire mechanism C2 turns on: a driver
+# that does not ask for `closingIssuesReferences` cannot be served it, so the field
+# is invisible to it exactly as it would be against real GitHub.
+#
+# Stdout only (2>/dev/null). log() writes `HH:MM:SSZ` timestamps to stderr, and a
+# timestamp is digits -- capturing 2>&1 would let the clock satisfy a needle
+# looking for an issue number.
+
+echo "select: an open PR blocks an issue only when it closes it"
+
+R_TMP="$(mktemp -d)"
+mkdir -p "$R_TMP/bin"
+
+cat > "$R_TMP/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+fields=""; prev=""
+for a in "$@"; do [ "$prev" = "--json" ] && fields="$a"; prev="$a"; done
+_serve() { jq --arg f "$fields" \
+             '[.[] | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' "$1"; }
+case "$*" in
+  "issue list"*) _serve "$STUB_DIR/issues.json" ;;
+  "pr list"*)    _serve "$STUB_DIR/prs.json" ;;
+  *)             exit 0 ;;
+esac
+STUB
+chmod +x "$R_TMP/bin/gh"
+
+_ref_run() { # serves $R_TMP/{issues,prs}.json to one dry run -> the run's stdout
+  # A fresh state dir per run, so neither case can read the other's state (or a
+  # stale ./.driver-state from wherever the suite was invoked). Under $R_TMP so the
+  # section still cleans up after itself.
+  local state; state="$(mktemp -d "$R_TMP/state.XXXXXX")"
+  STUB_DIR="$R_TMP" PATH="$R_TMP/bin:$PATH" \
+    bash "$DRIVER" --repo stub/repo --dry-run --state-dir "$state" 2>/dev/null
+}
+
+# The one issue under test, in both cases. Marker plus an `auto-ok` Tier heading,
+# because selection drops a marker-less issue before the reporting loop and an
+# untiered one skips for the wrong reason -- either would make the needles below
+# absent for a reason that has nothing to do with PR matching. The title is
+# deliberately digit-free: it is echoed on the line under every SKIP/ELIGIBLE, so a
+# number in it would be a second place for `#11` to appear.
+jq -n -c --arg m "$MARKER" \
+  '[{number:11, title:"the issue a triage sweep merely mentioned",
+     body:($m + "\n\n## Tier: `auto-ok`\n"), labels:[]}]' \
+  > "$R_TMP/issues.json"
+
+_ref_probe() { # $1 = label, $2 = the run's stdout
+  # The liveness probe, asserted separately and NOT one of the criterion's
+  # assertions. An absent needle and a driver that died at validation (or a stub
+  # that served nothing) look identical from the outside, and a check that can fail
+  # for the wrong reason will later pass for the wrong reason. Containment on the
+  # count rather than equality on the whole line, so the probe does not pin a format
+  # neither criterion constrains.
+  case "$(printf '%s\n' "$2" | grep '^repo stub/repo:' || true)" in
+    *"read 1 open issues"*) ok "probe: $1" ;;
+    *)                      bad "probe: $1" "a 'repo stub/repo:' line containing 'read 1 open issues'" \
+                                "$(printf '%s' "$2" | tr '\n' '|' | cut -c1-240)" ;;
+  esac
+}
+
+# --- C1: a prose mention is not a link --------------------------------------
+#
+# PR 21 of this very repo, verbatim in shape: a triage sweep whose body tabulates
+# the issues it triaged, whose branch is named after all three of them, and which
+# closes NONE of them -- `closingIssuesReferences` is empty because no closing
+# keyword appears anywhere. Every proxy the matcher has fires; the authoritative
+# field says no.
+
+jq -n -c '[{number:21, title:"triage sweep",
+            body:"Triage results.\n\n| issue | tier |\n| --- | --- |\n| #11 | auto-ok |\n",
+            headRefName:"docs/triage-11-12-13",
+            url:"https://github.com/stub/repo/pull/21",
+            closingIssuesReferences:[]}]' \
+  > "$R_TMP/prs.json"
+
+C1_OUT="$(_ref_run)"
+_ref_probe "the stub served the issue to the select stage (C1 fixture)" "$C1_OUT"
+
+case "$C1_OUT" in
+  *"ELIGIBLE #11"*) ok "C1(a) an issue merely mentioned by an open PR is still eligible" ;;
+  *)                bad "C1(a) an issue merely mentioned by an open PR is still eligible" \
+                        "ELIGIBLE #11" "$(printf '%s' "$C1_OUT" | tr '\n' '|' | cut -c1-240)" ;;
+esac
+
+# Asserted as "no line carrying the open-PR reason names #11", not as "the exact
+# string `SKIP    #11  already has an open PR` is absent". The latter is satisfiable
+# by a change in spacing, which would green this check while the driver went on
+# blocking the issue. Same reasoning as (b) in the mixed-queue node above.
+check "C1(b) no open-PR skip line names the merely-mentioned issue" "" \
+  "$(printf '%s\n' "$C1_OUT" | grep 'already has an open PR' | grep -F '#11' || true)"
+
+# ...and being eligible has to COUNT, not just print. Matched as a whole line
+# because the needle `eligible: 1` is a prefix of `eligible: 12`.
+check "C1(c) the run reports one eligible issue" "eligible: 1" \
+  "$(printf '%s\n' "$C1_OUT" | grep '^eligible:' || true)"
+
+# --- C2: the closing reference must be requested to be seen -----------------
+#
+# The mirror image, and the only shape that can distinguish "asks for the field"
+# from "happens to be right". This PR carries the number NOWHERE a proxy can reach
+# it -- not the body, not the title, not the branch -- and links the issue only via
+# `closingIssuesReferences`. The stub filters on the requested `--json` list, so a
+# driver that does not name the field is served a PR with no link at all and has
+# nothing to match on. Passing this is therefore evidence about the QUERY, which is
+# what the criterion is about; no second API call is involved either way.
+
+jq -n -c '[{number:22, title:"an ordinary fix",
+            body:"Fixes the thing.\n",
+            headRefName:"chore/no-numbers-in-here",
+            url:"https://github.com/stub/repo/pull/22",
+            closingIssuesReferences:[{"number":11}]}]' \
+  > "$R_TMP/prs.json"
+
+C2_OUT="$(_ref_run)"
+_ref_probe "the stub served the issue to the select stage (C2 fixture)" "$C2_OUT"
+
+# The needle carries the REASON, not just the shape. `SKIP    #11` alone is
+# satisfiable by any skip -- a broken marker or tier parse would skip #11 too, and
+# this would stay green through the regression it exists to catch.
+case "$C2_OUT" in
+  *"SKIP    #11  already has an open PR"*)
+    ok "C2(a) a PR linked only by closingIssuesReferences blocks the issue" ;;
+  *)
+    bad "C2(a) a PR linked only by closingIssuesReferences blocks the issue" \
+        "SKIP    #11  already has an open PR" "$(printf '%s' "$C2_OUT" | tr '\n' '|' | cut -c1-240)" ;;
+esac
+
+check "C2(b) no ELIGIBLE line names the linked issue" "" \
+  "$(printf '%s\n' "$C2_OUT" | grep 'ELIGIBLE' | grep -F '#11' || true)"
+
+# --- G1/G2: the proxies stay, for PRs GitHub has not linked -----------------
+#
+# Guards, not criteria: these pass today and must keep passing. They exist because
+# `pr_for_issue` has TWO callers wanting opposite error directions. The selection
+# gate wants precision -- a wrong match there silently hides eligible work, which is
+# what C1/C2 above are about. Post-run PR DISCOVERY wants recall: it runs against a
+# PR the driver may have just opened badly, and a miss there reports `parked: no PR
+# opened` about a PR that exists.
+#
+# So the guards pin the discovery direction while C1/C2 tighten the selection one,
+# and tripping a guard means a fix meant for selection was over-applied. The fixture
+# is the FROZEN one at driver/test-park-state.sh:89 -- `Closes #7`, branch
+# `fix/7-stub`, and NO `closingIssuesReferences` key at all, because that suite's
+# stub serves a fixed payload and ignores the requested field list. A discovery site
+# that consulted the link alone would resolve it to nothing and flip that suite's
+# cases to `parked`. test-park-state.sh is frozen and read-only, so that is a STOP,
+# not an edit.
+#
+# Read out of the frozen file rather than copied, for the same reason the function
+# below is: a copy is a second source of truth that nothing keeps honest.
+
+echo "guard: body/branch matching still works where GitHub records no link"
+
+FROZEN="$(dirname "$DRIVER")/test-park-state.sh"
+eval "$(sed -n '/^PR_LIST_JSON=/p' "$FROZEN")"
+eval "$(sed -n '/^pr_for_issue()/,/^}/p' "$DRIVER")"
+
+if [ -z "${PR_LIST_JSON:-}" ]; then
+  bad "extract the frozen PR fixture" "PR_LIST_JSON from $FROZEN" "not found (moved or renamed?)"
+elif ! declare -f pr_for_issue >/dev/null; then
+  # Fails closed on a rename. A silent skip here would retire both guards without
+  # anyone deciding to.
+  bad "extract the real pr_for_issue from the driver" "a function named pr_for_issue" "not found (renamed?)"
+else
+  check "G1 the frozen 'Closes #7' PR is still matched to #7" \
+    "$(printf '42\thttps://github.com/stub/repo/pull/42')" "$(pr_for_issue 7 "$PR_LIST_JSON")"
+  check "G2 and #8, which that PR does not mention, is still unmatched" \
+    "" "$(pr_for_issue 8 "$PR_LIST_JSON")"
+fi
+
+rm -rf "$R_TMP"
+
 # --- syntax ----------------------------------------------------------------
 
 echo "syntax"
