@@ -82,7 +82,11 @@ def read_records(path: Path | str) -> tuple[list[dict], int]:
     made anything at all -- and reports as `([], 0)`.
     """
     try:
-        text = Path(path).read_text(errors="replace")
+        # Explicit encoding, matching `scripts/assertion_lint.py`: without it the
+        # decoding depends on the host locale, and a stream written on one machine
+        # could read differently on another. `errors="replace"` stays -- a partial
+        # trailing write can split a multi-byte character mid-sequence.
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         # Absent file, absent run directory, unreadable: all "nothing yet".
         return [], 0
@@ -120,6 +124,23 @@ def _blocks(record: dict) -> list:
     if not isinstance(content, list):
         return []
     return content
+
+
+def _as_number(value: object) -> float | int | None:
+    """A numeric field, or None if the stream carried something else.
+
+    The module's contract is to degrade to "less information", never to a
+    traceback. `read_records` already honours that for a malformed *line*; this
+    honours it for a malformed *value*, which is the same failure one field in.
+    A `total_cost_usd` of `null`, `"12.01"` or `{}` reaches `format_progress`'s
+    `f"${...:.2f}"` otherwise, and a watcher that dies on the thing it is
+    watching is worse than no watcher. Booleans are excluded deliberately --
+    `True` is an `int` in Python and `$1.00` would be a fabricated reading.
+    Raised by the Copilot review on PR #46.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value
 
 
 def read_progress(run_dir: Path | str) -> Progress:
@@ -161,9 +182,9 @@ def read_progress(run_dir: Path | str) -> Progress:
             # Last result wins. A resumed run emits more than one, and the
             # criterion asks for the *latest* cost.
             if "total_cost_usd" in record:
-                snap.cost_usd = record.get("total_cost_usd")
+                snap.cost_usd = _as_number(record.get("total_cost_usd"))
             if "duration_ms" in record:
-                snap.duration_ms = record.get("duration_ms")
+                snap.duration_ms = _as_number(record.get("duration_ms"))
             if "is_error" in record:
                 snap.is_error = record.get("is_error")
 
@@ -316,6 +337,14 @@ def main(argv: list[str] | None = None) -> int:
         "--interval", type=float, default=10, metavar="SECONDS", help="watch interval (default: 10)"
     )
     args = parser.parse_args(argv)
+
+    # Fail fast rather than inside the loop: `time.sleep` raises ValueError on a
+    # negative, so `--interval -1` would crash the watcher on its second pass,
+    # after printing one plausible-looking digest. Zero is rejected too -- a
+    # busy-loop polling a file is not a watch interval. Raised by the Copilot
+    # review on PR #46.
+    if args.interval <= 0:
+        parser.error(f"--interval must be greater than 0 (got {args.interval})")
 
     # A --watch that cannot find a run WAITS for one; only a one-shot read fails.
     # Polling for something that does not exist yet is what watching is for, and
