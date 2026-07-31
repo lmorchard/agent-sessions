@@ -534,6 +534,12 @@ GATE_PY="$(cd "$(dirname "$0")" && pwd)/gate.py"
 GATE_JSON=""
 GATE_BLOCK=""
 classify_pr_body() { # $1 = PR body, $2 = head sha. Prints "outcome<TAB>reason".
+  # Clear both FIRST. The callers now read these globals rather than this
+  # function's stdout, so a failed classify must not leave the PREVIOUS issue's
+  # verdict standing in them -- under --max-issues 2 that would record issue A's
+  # outcome against issue B, which is the same class of defect as #32 itself.
+  GATE_JSON=""
+  GATE_BLOCK=""
   GATE_JSON="$("$PYTHON_BIN" "$GATE_PY" classify --head-sha "${2:-}" <<<"$1")"
   GATE_BLOCK="$(printf '%s' "$GATE_JSON" | jq -r '.gate')"
   # Warnings are the parser's "a null must never render as a positive" channel;
@@ -740,7 +746,12 @@ run_issue() { # $1 = issue number
       #
       # The stdout contract stays honoured (see the function's comment); it is
       # just not what these callers read. See issue #32.
-      classify_pr_body "$_body" "$GATE_HEAD_SHA" >/dev/null
+      #
+      # `|| true` preserves the pre-change failure mode exactly. Inside `$( )` a
+      # classifier crash was invisible to `set -e` and left outcome empty; as a
+      # plain command it would abort the driver instead, which on the recovery
+      # path means dying without recording anything -- #32's own shape.
+      classify_pr_body "$_body" "$GATE_HEAD_SHA" >/dev/null || true
       outcome="$(printf '%s' "$GATE_JSON" | jq -r '.outcome')"
       reason="$(printf '%s' "$GATE_JSON" | jq -r '.reason')"
       printf '%s\n' "$GATE_BLOCK" > "$rundir/gate.yaml"
@@ -869,7 +880,9 @@ if [ -n "$CLASSIFY_ONLY" ]; then
     # for an unrecorded outcome, and on #657 it reproduced the same corruption it
     # exists to repair. A fix at one call site and not the other is findings.md
     # class 1's "fixed the cost field, never generalised". See issue #32.
-    classify_pr_body "$_body" "$GATE_HEAD_SHA" >/dev/null
+    # `|| true` for the same reason as the run path: never abort where the whole
+    # point of this code path is to get an outcome recorded.
+    classify_pr_body "$_body" "$GATE_HEAD_SHA" >/dev/null || true
     outcome="$(printf '%s' "$GATE_JSON" | jq -r '.outcome')"
     reason="$(printf '%s' "$GATE_JSON" | jq -r '.reason')"
     [ "$rundir" != "(none)" ] && printf '%s\n' "$GATE_BLOCK" > "$rundir/gate.yaml"
