@@ -111,6 +111,30 @@ being done — it does not touch the C1/C2/G1 code, those assertions are literal
 checks against the *shipped* `classify_pr_body` extracted by `sed`, and there is no fixture, mock
 or skip marker in the diff that could satisfy them vacuously. Suite: **88 passed, 0 failed**.
 
+### Re-verification on the pushed head (2026-07-31)
+
+`pr.md` step 12: the standing report above described the tree at `8fc95c7`, and the self-review
+fixup `a3cea86` changed `driver/agent-session-driver.sh` afterwards. A second verifier ran on a
+fresh context against HEAD `b187187`, and was additionally asked to read the fixup **adversarially**
+— could `|| true` or the global-clearing make any frozen check pass for a reason unrelated to its
+criterion?
+
+Its finding, which matches the implementer's own reasoning independently: **no, and for a
+structural reason.** C1 and G1 invoke `classify_pr_body` *directly* — extracted by `sed` and called
+as a plain function — so the `|| true` at the call sites is physically outside the code path they
+execute. C2 does exercise the second call site through `--classify-only`, but its fixture
+(`ci: not yet graded`) is a **successful** classification that emits a warning and a valid JSON
+outcome, confirmed by both attributability probes, so `classify_pr_body` exits 0 and `|| true` is
+never reached. `|| true` changes behaviour only on an outright crash of the Python subprocess or
+`jq`, which no frozen fixture induces. All criteria and guards pass; tamper verdict unchanged.
+
+**Substitute to name, per `pr.md`'s rule that a mechanism's absence must not report as its verdict:**
+the second verifier's shell could not run `make driver-test` (denied under this run's permission
+floor), so it delegated that one command to a further fresh context and quoted the raw output. It
+disclosed this rather than fabricating a result, ran every `git` command itself, and the output it
+quotes matches the implementer's own observed run line for line — but the chain of evidence for the
+criteria rows is one hop longer than the mechanism describes.
+
 ## Tamper verdict
 
 (Recorded by the independent verifier at the end of the run.)
