@@ -173,12 +173,20 @@ A guard is decoration until you mutate the thing it guards and watch it fail.
   yields "current", so the obvious test would have been the non-discriminating one.
 - Two micro-test fixtures in move 1 were discarded as non-discriminating. *"Control passed 5/5" is
   only evidence about wording when the fixture can actually fail.*
-- **Eight live assertions in `test-driver.sh` are `grep -q "<literal>" "$DRIVER"`** — lines 196,
-  202, 227, 269, 274, 281, 286, 351. Each passes if the string appears anywhere in the driver,
-  including inside a comment. That is the same inert-content trap the `skill-readonly` guard fell
-  into twice, still shipping (verified 2026-07-27). **A test that greps its subject for a literal
-  is a spelling check, not a test.** *(An earlier version of this entry said "two" — it counted
-  only the `ci-stale` pair. Corrected by a triage scanner.)*
+- **Presence-grep assertions in `test-driver.sh` — `grep -q "<literal>" "$DRIVER"` passes when the
+  literal appears in a COMMENT.** The same inert-content trap the `skill-readonly` guard fell into
+  twice. **A test that greps its subject for a literal is a spelling check, not a test.** Closed
+  2026-07-31 by issue #28: every instance is now a count comparison over the driver's non-comment
+  lines, and `make assertion-lint` fails the build if the `-q` form returns. Run it for the live
+  count; it is the successor to counting them here, which went wrong twice in opposite directions.
+  **The two things worth keeping.** *(a)* The count was under-stated as "two" (counting only the
+  `ci-stale` pair; a triage scanner corrected it), then the issue that closed it said "eight" — and
+  the detector found a **ninth**, added the morning the fix ran, which the issue's own frozen check
+  could not match because that check requires the target be `"$DRIVER"` and the new one grepped a
+  generated `gate.yaml`. A hand-maintained census of a recurring defect is itself a stale-count
+  hazard. *(b)* The warning against the trap sat **in a comment in the very file carrying the
+  instances**, for two days, and did not prevent the ninth from landing next to it — class 4 above,
+  in one line.
 - **`make docs-check`, on its first run, flagged `CLAUDE.md`'s own *example* of a stale count** —
   it matches a literal and cannot tell a claim from an illustration. Not fixed by teaching it to
   ignore quoted text, which would open a bypass for a real stale claim in quotes; fixed by writing
