@@ -90,7 +90,43 @@ instance 9).
 
 (Append-only. Empty unless an amendment was made.)
 
-None.
+**No amendment.** No CRITERION line, CHECK command, or guard command has changed since the freeze,
+and `driver/test-driver.sh` — the only check file, and the whole oracle — is byte-identical to
+`0ad6881`.
+
+### Clarification C-1, logged: `probe-01` and `probe-02` were extended after the freeze
+
+Raised by the independent verifier, recorded here rather than left in a subagent report, because it
+concerns evidence this file cites.
+
+**What happened.** At freeze, `probe-01` and `probe-02` exercised only one spelling of "repo A is
+live": both runs pointed at a single **explicit** `--state-dir`. That is the spelling the issue used
+at intake, and it fails before the change. It is also a scenario the change deliberately does *not*
+alter — `--state-dir X` still means exactly X, so two runs sharing one directory share one
+`inflight.json` and still collide. During Phase 1 both probes were extended to run a second form
+with **no** `--state-dir`, which is what the criteria actually assert and what `make run` /
+`make run-self` actually invoke.
+
+**Why this is a clarification and not an amendment.** The test in `frozen-checks.md` is whether any
+verdict changes at either tree. Nothing does:
+
+- The probes are **not check files.** `Check files` names `driver/test-driver.sh` alone, and that
+  file's `#27` cases — the oracle — already used the no-`--state-dir` form *at freeze*, where they
+  failed. C1's and C3's teeth were established there, not by the probes.
+- No criterion, check, or guard command changed, so no verdict at the freeze tree or the
+  implementation tree turns on the edit.
+- The extension only **added** a scenario. The original form A is retained verbatim as a negative
+  control, and it is load-bearing: if form A ever stopped refusing, the fix would have bought C1 by
+  making the orphan guard permissive, which the issue's "What we're NOT doing" forbids.
+
+So: no tier change. Recorded because a cited freeze record was edited afterwards, and a reader
+comparing `probe-01` against its freeze version deserves to find the reason here rather than
+reconstruct it.
+
+**The honest residual, stated plainly.** As *originally gathered*, C1's `AT FREEZE` corroboration
+rested on a scenario the change does not alter. The `AT FREEZE` text above is accurate about what was
+observed, and the frozen case is what graded the work — but the probe was weaker corroboration at
+freeze than its wording implies. Flagged for the human at the gate.
 
 ## Resolution of one spec ambiguity, recorded before the freeze
 

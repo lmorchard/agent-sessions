@@ -197,10 +197,34 @@ Everything else it writes, it writes afterwards — which is why that marker exi
 - **The run finished but the driver died before recording:** `--classify-only <n>` recovers the
   outcome from live PR state. No agent invocation, no cost.
 - **The child is still alive** (a host crash can reparent it and leave it running *and
-  spending*): startup detects a live orphan and refuses to start a second run against the same
-  repo. Kill it or wait, then `--classify-only`.
+  spending*): startup detects a live orphan and refuses to start a second run. Kill it or wait,
+  then `--classify-only`. Scoped to the repo, and not by comparing repos — the state directory is
+  one per repo (see below), so another repo's run does not read this marker at all.
 
 Those two states need opposite actions, which is why conflating them was the original bug.
+
+### Where the state directory is
+
+**One directory per repo**, so runs against two repos never collide:
+
+```
+${XDG_STATE_HOME:-$HOME/.local/state}/agent-session/<owner>-<name>/
+```
+
+The driver logs the resolved path at startup — read that line rather than reconstructing it.
+`--state-dir <path>` overrides it and is used **exactly as given**, with no repo subdirectory
+appended; two runs handed the same explicit path will collide at the orphan guard, which is
+correct, because one `inflight.json` cannot describe two runs.
+
+A cross-repo view of the ledger is one glob:
+
+```sh
+cat "${XDG_STATE_HOME:-$HOME/.local/state}"/agent-session/*/runs.jsonl | jq -r '[.issue,.repo,.outcome] | @tsv'
+```
+
+`./.driver-state/` in this checkout is the **pre-#27 archive** — every run before the default
+moved. It is never written again and is kept deliberately; several figures in
+[findings.md](findings.md) rest on it.
 
 ### Per-run artifacts
 
