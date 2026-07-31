@@ -40,16 +40,28 @@ closing references in this repo's history are that shape, so a detector that
 flagged them would fire on every legitimate commit and be switched off within a
 day.
 
-Quoting is decided by a small state machine, per line:
+Quoting is decided by **pairing delimiters**, never by counting parity:
 
-  * a line whose stripped text starts with three backticks toggles fenced-block
-    state, and is not itself scanned;
-  * inside a fence, every match on the line is quoted;
-  * outside one, a match is quoted iff it lies within an inline ```...``` span
-    **on that same line**.
+  * fence delimiter lines -- a run of three or more backticks followed by an
+    info string with no further backticks -- are paired off, and only lines
+    strictly between a *closed* pair are fenced. A fence line's info string is
+    still scanned;
+  * inside a closed fence, every match on the line is quoted;
+  * otherwise, backtick runs on the line are paired left to right, and a match
+    is quoted iff it lies between one such pair.
 
-Four deliberate non-features, each because a false positive trains the operator
-to wave the mechanism through (``findings.md``):
+**Pairing rather than parity is the load-bearing choice**, and both halves of it
+were wrong in the first draft. Parity says "an odd number of backticks so far
+means we are inside a span", so a single stray backtick reclassifies everything
+after it -- reporting the genuine trailer on that line, or on every later line
+if the parity is tracked across the whole message. An unclosed fence did exactly
+that: a body that pastes a log after three backticks and never closes them had
+its own legitimate trailer reported. Pairing makes an unmatched delimiter inert,
+which is the safe direction: a missed detection costs one wrongly-closed issue,
+a false positive costs the whole mechanism, because it fires on commits that
+were fine and the operator switches it off.
+
+Three deliberate non-features, each for the same reason:
 
   * **Four-space-indented blocks are not treated as quoting.** There is no
     delimiter to key on, and indentation in a commit message means many things.
@@ -57,12 +69,12 @@ to wave the mechanism through (``findings.md``):
   * **``~~~`` fences are not recognised.** The criterion is about backticks, and
     a commit message is not markdown regardless.
   * **An inline span is not tracked across a line break.** Line-scoped by
-    construction; the real defect is single-line.
-  * **Global backtick parity is not the mechanism**, though it happens to
-    classify every frozen fixture correctly. It is fragile in the way that
-    matters: one stray backtick flips the classification of everything after
-    it, in both directions -- silently turning genuine references into
-    failures, or hiding a real one. Resetting per line cannot fail that way.
+    construction; the real defect is single-line, and a span that appears to
+    open on one line and close on another is far more likely to be two stray
+    backticks than one intended quotation.
+
+Runs of any length count, so ``` ``Closes #N`` ``` is caught as surely as the
+single-backtick form. GitHub does not care how many backticks there were.
 
 Scope
 -----
@@ -105,14 +117,25 @@ CLOSING_KEYWORD = re.compile(
     re.IGNORECASE,
 )
 
-#: A backtick-delimited fence line -- three or more backticks, optionally
-#: indented, optionally followed by an info string.
-FENCE = re.compile(r"^\s*```")
+#: A fence *delimiter* line: optional indent, a run of three or more backticks,
+#: then an info string containing no further backticks.
+#:
+#: The trailing `[^`]*$` is what stops ```` ```Closes #12``` ```` -- a triple-backtick
+#: inline span, all on one line -- from being read as a fence opener. Treating
+#: that as a delimiter both missed the quoted keyword on it and left the fence
+#: state flipped, so the next genuine trailer got reported instead. One
+#: character of regex, two defects.
+FENCE = re.compile(r"^\s*`{3,}[^`]*$")
 
-#: One inline code span: a backtick, the shortest run of non-backticks, a
-#: backtick. Non-greedy so `a` and `b` on one line are two spans, not one that
-#: swallows the text between them.
-INLINE_SPAN = re.compile(r"`[^`]*`")
+#: The leading indent-plus-backtick-run of a fence delimiter line, so the info
+#: string after it can still be scanned.
+FENCE_RUN = re.compile(r"^\s*`+")
+
+#: A run of one or more backticks. Runs, not single characters: ``` ``Closes #12`` ```
+#: is quoted just as surely as the single-backtick form, and matching `` `[^`]*` ``
+#: missed it -- the empty span between the doubled ticks matched instead, leaving
+#: the keyword between two spans rather than inside one.
+BACKTICK_RUN = re.compile(r"`+")
 
 #: Record and field separators for `git log`, so a multi-line body cannot be
 #: mistaken for the start of the next record. ASCII RS and NUL -- neither can
@@ -131,8 +154,34 @@ failures: list[str] = []
 
 
 def _quoted_spans(line: str) -> list[tuple[int, int]]:
-    """The `(start, end)` character offsets of every inline code span in `line`."""
-    return [m.span() for m in INLINE_SPAN.finditer(line)]
+    """The `(start, end)` offsets of the *content* of each inline code span.
+
+    Backtick runs are paired off left to right -- first with second, third with
+    fourth -- and the text between each pair is a span. **An unpaired trailing
+    run opens nothing.** That is the whole reason for pairing explicitly rather
+    than counting parity: a line carrying one stray backtick would otherwise
+    read as "everything after it is quoted", and report the genuine trailer on
+    that line. A false positive on a legitimate commit is the failure that gets
+    a detector switched off.
+    """
+    runs = [m.span() for m in BACKTICK_RUN.finditer(line)]
+    return [(runs[i][1], runs[i + 1][0]) for i in range(0, len(runs) - 1, 2)]
+
+
+def _fenced_lines(lines: list[str]) -> tuple[set[int], set[int]]:
+    """`(indices of fence delimiter lines, indices of lines inside a fence)`.
+
+    Delimiters are paired the same way inline runs are, and only lines strictly
+    between a **closed** pair count as fenced. An unclosed fence -- a body that
+    opens one and never closes it, which is what pasting a log tail produces --
+    therefore fences nothing. Treating it as open-to-the-end swallowed every
+    later line, including the commit's own genuine trailer.
+    """
+    delimiters = [i for i, line in enumerate(lines) if FENCE.match(line)]
+    fenced: set[int] = set()
+    for opener, closer in zip(delimiters[0::2], delimiters[1::2]):
+        fenced.update(range(opener + 1, closer))
+    return set(delimiters), fenced
 
 
 def scan_message(message: str) -> list[tuple[int, str]]:
@@ -145,25 +194,32 @@ def scan_message(message: str) -> list[tuple[int, str]]:
     A pure function over text: it touches no git, no filesystem and no cwd, so
     a caller can test it without a repository.
     """
+    lines = message.splitlines()
+    delimiters, fenced = _fenced_lines(lines)
     found: list[tuple[int, str]] = []
-    in_fence = False
 
-    for lineno, line in enumerate(message.splitlines(), start=1):
-        if FENCE.match(line):
-            # The delimiter itself carries no reference worth reporting, and
-            # scanning it would double-count an info string.
-            in_fence = not in_fence
+    for index, line in enumerate(lines):
+        lineno = index + 1
+
+        if index in delimiters:
+            # Scan the info string, not the backtick run. ```` ```Closes #12 ````
+            # is a fence opener whose info string is a closing keyword -- still
+            # text the author set down next to backticks, and still a reference
+            # GitHub acts on.
+            after = FENCE_RUN.match(line).end()
+            found.extend(
+                (lineno, m.group(0))
+                for m in CLOSING_KEYWORD.finditer(line[after:])
+            )
             continue
 
-        if in_fence:
+        if index in fenced:
             found.extend((lineno, m.group(0)) for m in CLOSING_KEYWORD.finditer(line))
             continue
 
         spans = _quoted_spans(line)
-        if not spans:
-            continue
         for m in CLOSING_KEYWORD.finditer(line):
-            if any(start < m.start() and m.end() <= end for start, end in spans):
+            if any(start <= m.start() and m.end() <= end for start, end in spans):
                 found.append((lineno, m.group(0)))
 
     return found

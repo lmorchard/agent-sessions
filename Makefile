@@ -50,7 +50,7 @@ driver-test: gate-test
 	@bash driver/test-driver.sh
 
 gate-test:
-	@uv run --quiet pytest driver/test_gate.py scripts/test_docs_check.py scripts/test_run_progress.py scripts/test_commit_lint.py
+	@uv run --quiet pytest driver/test_gate.py scripts/test_docs_check.py scripts/test_run_progress.py scripts/test_commit_lint.py scripts/test_commit_lint_edges.py
 
 # The frozen acceptance checks for issue #5, wired in AFTER the work landed --
 # deliberately, because guard G1 was "make check green" and it had to pass at the
