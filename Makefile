@@ -4,7 +4,7 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help check driver-check driver-test gate-test park-test docs-check dry-run run loop run-self dry-run-self skill-readonly
+.PHONY: help check driver-check driver-test gate-test park-test docs-check assertion-lint dry-run run loop run-self dry-run-self skill-readonly
 
 help:
 	@echo "check            run every check -- the targets listed below, in one go"
@@ -14,6 +14,7 @@ help:
 	@echo "park-test        frozen acceptance checks for #5 (park state as a label)"
 	@echo "skill-readonly   assert the hosted run cannot write to the skill directory"
 	@echo "docs-check       detect doc rot: dead links, split tables, stale counts"
+	@echo "assertion-lint   detect presence-grep assertions -- a spelling check, not a test"
 	@echo "dry-run          selection only against $(REPO); no claude invocation"
 	@echo "run              one real unattended run (nothing merges)"
 	@echo "loop             burn down up to 2 eligible issues (nothing merges)"
@@ -23,7 +24,7 @@ help:
 	@echo ""
 	@echo "  REPO=$(REPO)  REPO_PATH=$(REPO_PATH)  BOARD=$(BOARD)"
 
-check: driver-check driver-test park-test skill-readonly docs-check
+check: driver-check driver-test park-test skill-readonly docs-check assertion-lint
 	@echo "all checks passed"
 
 # C1. Kept separate from driver-test so it can be cited as its own check.
@@ -83,6 +84,18 @@ skill-readonly:
 # and this project is 3 for 3 on those measuring away. See scripts/docs_check.py.
 docs-check:
 	@python3 scripts/docs_check.py
+
+# `grep -q 'x' "$(DRIVER)"` passes when x appears in a COMMENT -- findings.md calls
+# that "a spelling check, not a test", and the warning against it sat in a comment
+# next to eight live instances for two days without preventing a ninth. So: a
+# detector, not an exhortation. Same reasoning as docs-check above.
+#
+# Scope is driver/test-*.sh. This Makefile's own `grep -qF` guards are excluded on
+# purpose -- skill-readonly asserts a deny rule is literally PRESENT in the driver,
+# so there presence is the property being tested, not a stand-in for behaviour.
+# See issue #28 and scripts/assertion_lint.py.
+assertion-lint:
+	@python3 scripts/assertion_lint.py
 
 dry-run:
 	@bash $(DRIVER) --repo $(REPO) --board $(BOARD) --dry-run
