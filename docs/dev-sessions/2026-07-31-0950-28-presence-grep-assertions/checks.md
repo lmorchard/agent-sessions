@@ -1,7 +1,7 @@
 # Frozen acceptance checks
 
 **Source:** https://github.com/lmorchard/agent-sessions/issues/28
-**Frozen at:** _(recorded in the follow-up commit)_
+**Frozen at:** `48c8104` (2026-07-31)
 **Branch base:** `c46c8e2` (origin/main at setup)
 
 **Check files — read-only from Phase 1 onward:**
