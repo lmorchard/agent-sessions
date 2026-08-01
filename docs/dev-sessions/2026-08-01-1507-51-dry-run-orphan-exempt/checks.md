@@ -1,7 +1,7 @@
 # Frozen acceptance checks
 
 **Source:** https://github.com/lmorchard/agent-sessions/issues/51
-**Frozen at:** (recorded in the follow-up commit)
+**Frozen at:** `fa4ca83` (2026-08-01)
 **Check files — read-only from Phase 1 onward:**
 - `driver/test-park-state.sh`
 
