@@ -16,8 +16,9 @@ Two companion files, split out of this one in move 6:
 - **[usage.md](usage.md)** — the operator's guide: commands, outcomes, run artifacts, recovery.
   Written for someone running the thing rather than changing it.
 
-[prior-art.md](prior-art.md) has the external survey, and [../README.md](../README.md) is the
-plain-language introduction.
+[prior-art.md](prior-art.md) has the external survey, [../README.md](../README.md) is the
+plain-language introduction, and [orientation.md](orientation.md) is the newcomer's on-ramp —
+the vocabulary this file assumes, plus what is and isn't proven.
 
 ## Origin
 
