@@ -1,0 +1,28 @@
+the gh stub serves the issue list
+  and both issues reach tier filtering
+the driver logged a gh issue list call
+the gh stub serves the PR and its gate
+  and the ledger row was written
+the claude stub stands in for a real run
+  and the normal path reaches an outcome
+the labeled issue is parked, the unlabeled one is not
+recovery path: labels the right issue with the park label, in one call
+normal path: labels the right issue with the park label, in one call
+gate-eligible: the outcome is what the gate said
+  removes the park label from the right issue, in one call
+  and never adds it
+gate-human: the outcome is what the gate said
+  removes the park label from the right issue, in one call
+  and never adds it
+fresh host: the labeled issue is skipped, with a reason
+  while the unlabeled issue stays eligible
+--retry makes the parked issue eligible again
+the skip reason cites the latest ledger row
+  and not the first appended one
+selection names the open-PR query failure
+  and exits non-zero
+  and never invokes claude
+  control: with a healthy query the same run DOES invoke claude
+the recorded reason names the query failure
+  and is not the no-PR-opened reason
+gh's stderr reaches the driver's output
