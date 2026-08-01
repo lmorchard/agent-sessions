@@ -76,6 +76,15 @@ Three deliberate non-features, each for the same reason:
 Runs of any length count, so ``` ``Closes #N`` ``` is caught as surely as the
 single-backtick form. GitHub does not care how many backticks there were.
 
+**Known miss: nested runs of differing length.** Pairing is left to right and
+blind to run length, so a keyword nested one span deep -- a triple-backtick span
+containing a single-backtick one, say -- lands *between* two pairs rather than
+inside one, and is not reported. Markdown pairs a run with the next run of equal
+length, which would close this. Left open deliberately: it errs toward silence,
+which is the safe direction here, and no commit in this repo's history has the
+shape. Found by adversarial review on PR #49 rather than by a fixture, and
+recorded here so widening the rule later is a decision rather than a discovery.
+
 Scope
 -----
 **Commit messages only**, and that is what keeps this detector off its own back.
