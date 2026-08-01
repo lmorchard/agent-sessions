@@ -431,6 +431,141 @@ has   "the recorded reason names the query failure" "$QUERY_FAIL_NEEDLE" "$PD_RE
 hasnt "  and is not the no-PR-opened reason"        "no PR opened"       "$PD_REASON"
 has   "gh's stderr reaches the driver's output"     "$GH_STDERR_NEEDLE"  "$PD_OUT"
 
+# ============================================================================
+# FROZEN acceptance checks for issue #51 -- the live-orphan refusal also blocks
+# --dry-run, which spends nothing.
+#
+#   https://github.com/lmorchard/agent-sessions/issues/51
+#
+# Appended 2026-08-01. Same rules as everything above: no replicas, no grepping
+# the subject for a literal, every assertion over the runtime behaviour of the
+# shipped driver run as a subprocess against stubs.
+#
+# Today the startup orphan check `die`s for EVERY invocation once it finds an
+# inflight.json whose run dir holds a child.pid naming a live process. --dry-run
+# invokes no claude, writes nothing to the state dir and creates no worktree, so
+# the refusal costs a human an intervention and protects nothing. C1 is expected
+# to FAIL at freeze; G1/G2 and the control are expected to PASS, and must keep
+# passing -- the refusal must survive for the invocations that DO spend.
+# ============================================================================
+
+# The live process the fixture points at. Spawned here, killed below and again
+# on EXIT: a borrowed pid ($$, 1, a literal) would make the fixture a lie or make
+# it flaky, and either way C1 would test nothing.
+sleep 300 &
+ORPHAN_PID=$!
+# Extend the existing cleanup rather than dropping it -- $TMPROOT must still go.
+trap 'kill "$ORPHAN_PID" 2>/dev/null; rm -rf "$TMPROOT"' EXIT
+
+# Deliberately NOT $ISSUE (7): the park-label fixtures are all about #7, and an
+# orphan marker carrying the same number could be confused for one of them.
+ORPHAN_ISSUE=99
+ORPHAN_TS=20260801T000000Z
+
+# The marker a driver that died between invoking and recording leaves behind:
+# inflight.json plus the run dir's child.pid. Shape taken from what the driver
+# writes at invoke time and reads at startup -- .run_dir out of the JSON, then
+# child.pid inside it.
+make_live_orphan() { # $1 = state dir, $2 = the pid to name
+  local sd="$1" pid="$2" rundir
+  rundir="$sd/runs/$ORPHAN_ISSUE-$ORPHAN_TS"
+  mkdir -p "$rundir"
+  printf '%s\n' "$pid" > "$rundir/child.pid"
+  jq -n -c --arg issue "$ORPHAN_ISSUE" --arg ts "$ORPHAN_TS" --arg rundir "$rundir" \
+     --arg url "https://github.com/$REPO/issues/$ORPHAN_ISSUE" \
+     '{issue:($issue|tonumber), started:$ts, run_dir:$rundir, url:$url}' \
+     > "$sd/inflight.json"
+}
+
+# --- #51 C1: --dry-run reports the orphan but does not refuse ---------------
+#
+# CRITERION: GIVEN a state dir whose inflight.json names a LIVE child pid, WHEN
+# the driver is invoked with --dry-run, THEN it SHALL still print the orphan
+# warning, complete selection, and exit 0.
+#
+# All three assertions matter together: an exit 0 that skipped the warning would
+# hide a live orphan from the operator, and an exit 0 that skipped selection
+# would make --dry-run useless in exactly the state it is being unblocked for.
+#
+# The control immediately below is the attributability proof: same fixture, same
+# flags, child.pid deleted. It must PASS at freeze while these FAIL, which is
+# what shows the exit 2 comes from the live-orphan marker and not from anything
+# incidental to the fixture (the state dir, the inflight.json, the run dir).
+
+echo "#51 C1: --dry-run reports a live orphan but does not refuse"
+
+OR_BIN="$TMPROOT/orphan-dry-bin"; make_stubs "$OR_BIN" "pending"
+OR_LOG="$TMPROOT/orphan-dry.log"; OR_SD="$TMPROOT/orphan-dry-state"
+make_live_orphan "$OR_SD" "$ORPHAN_PID"
+OR_OUT="$(run_driver "$OR_BIN" "$OR_LOG" --repo "$REPO" --dry-run --state-dir "$OR_SD")"
+OR_RC=$?   # must be read immediately: run_driver's last command IS the driver.
+
+check "dry-run exits 0 with a live orphan present" "0" "$OR_RC"
+has   "  and still prints the orphan warning" "ORPHAN STILL RUNNING" "$OR_OUT"
+has   "  and still completes selection"       "ELIGIBLE #8"          "$OR_OUT"
+
+# The control. Its own state dir, so deleting the pid file cannot perturb the
+# case above no matter what order these run in.
+OC_LOG="$TMPROOT/orphan-ctrl.log"; OC_SD="$TMPROOT/orphan-ctrl-state"
+make_live_orphan "$OC_SD" "$ORPHAN_PID"
+rm -f "$OC_SD/runs/$ORPHAN_ISSUE-$ORPHAN_TS/child.pid"
+run_driver "$OR_BIN" "$OC_LOG" --repo "$REPO" --dry-run --state-dir "$OC_SD" >/dev/null
+OC_RC=$?
+check "  control: with the pid file removed, dry-run exits 0" "0" "$OC_RC"
+
+# --- #51 G1/G2: the refusal survives for the invocations that spend ---------
+#
+# G1: a real run against the SAME live-orphan fixture still exits non-zero and
+# never invokes claude. This is the guard the whole refusal exists for -- two
+# concurrent runs against one state dir, the second one spending money while the
+# first is still live.
+#
+# G2: --classify-only still refuses too. It writes a ledger row and moves park
+# labels for a run that is still in flight, so it is not a read-only invocation
+# the way --dry-run is, and exempting it would be the obvious over-reach.
+#
+# The zero-claude-call assertion is non-vacuous for the same reason #39 C1's is,
+# and by the same evidence: the claude stub logs its argv, and #39 C1's control
+# above proves a healthy run of this shape DOES produce at least one such line.
+
+echo "#51 G1/G2: run and --classify-only still refuse, and spend nothing"
+
+OR_SKILL="$TMPROOT/orphan-skill"; mkdir -p "$OR_SKILL/phases"; : > "$OR_SKILL/phases/express.md"
+OR_REPOP="$TMPROOT/orphan-repo"; mkdir -p "$OR_REPOP"
+
+OG1_BIN="$TMPROOT/orphan-run-bin"; make_stubs "$OG1_BIN" "pending"
+OG1_LOG="$TMPROOT/orphan-run.log"; OG1_SD="$TMPROOT/orphan-run-state"
+make_live_orphan "$OG1_SD" "$ORPHAN_PID"
+run_driver "$OG1_BIN" "$OG1_LOG" --repo "$REPO" \
+  --skill-dir "$OR_SKILL" --repo-path "$OR_REPOP" \
+  --state-dir "$OG1_SD" --max-budget-usd 10 >/dev/null 2>&1
+OG1_RC=$?
+
+if [ "$OG1_RC" -ne 0 ]; then
+  ok "a real run still refuses while the orphan is live"
+else
+  bad "a real run still refuses while the orphan is live" "a non-zero exit status" "$OG1_RC"
+fi
+check "  and never invokes claude" "0" "$(claude_calls "$OG1_LOG")"
+
+OG2_BIN="$TMPROOT/orphan-classify-bin"; make_stubs "$OG2_BIN" "pending"
+OG2_LOG="$TMPROOT/orphan-classify.log"; OG2_SD="$TMPROOT/orphan-classify-state"
+make_live_orphan "$OG2_SD" "$ORPHAN_PID"
+run_driver "$OG2_BIN" "$OG2_LOG" --repo "$REPO" --classify-only "$ISSUE" \
+  --state-dir "$OG2_SD" >/dev/null 2>&1
+OG2_RC=$?
+
+if [ "$OG2_RC" -ne 0 ]; then
+  ok "--classify-only still refuses while the orphan is live"
+else
+  bad "--classify-only still refuses while the orphan is live" "a non-zero exit status" "$OG2_RC"
+fi
+
+# Done with the fixture's process. The EXIT trap kills it too, so an early exit
+# above cannot leak it either.
+kill "$ORPHAN_PID" 2>/dev/null
+wait "$ORPHAN_PID" 2>/dev/null
+
 # --- report ----------------------------------------------------------------
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

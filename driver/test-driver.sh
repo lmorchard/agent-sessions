@@ -1593,6 +1593,17 @@ check "#27 C1 and the run against repo B completes its selection pass" \
 # NOT doing" rules out in as many words. Identical fixture to C1; only the
 # --repo differs. It also serves as C1's discriminator: the same reducer must
 # report the tokens PRESENT here, or C1's `no` means nothing.
+#
+# AMENDED 2026-08-01 for issue #51, with human confirmation -- logged in
+# docs/dev-sessions/2026-08-01-1507-51-dry-run-orphan-exempt/checks.md.
+# #51 exempts --dry-run from the refusal, on the grounds that a dry run cannot
+# mutate a checkout and so is not the hazard this guard names. The FIXTURE and
+# the FLAG here are unchanged; only the expected `refuse` token moves yes -> no,
+# which states the new behaviour rather than accommodating it. The property this
+# guard exists for is asserted by G1b below, using the vehicle that can actually
+# cause the hazard -- and G1b also restores the discriminator for C1's
+# `refuse=no`, which this check can no longer supply now that no --dry-run
+# invocation ever refuses.
 
 X27_G1_CWD="$X27_TMP/g1/cwd"; X27_G1_XDG="$X27_TMP/g1/xdg"
 mkdir -p "$X27_G1_CWD"
@@ -1601,14 +1612,42 @@ _x27_plant_marker "$X27_G1_XDG/agent-session/lmorchard-decafclaw" 4 "$X27_PID" l
 
 X27_G1_OUT="$(_x27_dry_run "$X27_G1_CWD" "$X27_G1_XDG" \
                 --repo lmorchard/decafclaw --dry-run)"
-check "#27 G1 a live in-flight run STILL stops a second run against the same repo" \
-  "refuse=yes orphan=yes" "$(_x27_orphan "$X27_G1_OUT")"
+check "#27 G1 --dry-run against a live same-repo orphan warns but does not refuse" \
+  "refuse=no orphan=yes" "$(_x27_orphan "$X27_G1_OUT")"
 
-# The liveness probe for both, after both runs: a dead pid sends the startup check
-# down the finished-but-unrecorded branch, where C1 passes and G1 fails for
-# reasons that have nothing to do with either. Asserted here rather than before
-# the runs so it covers the whole window.
-check "#27 probe: the planted child.pid was a live process across C1 and G1" \
+# --- G1b: the refusal survives for the invocation that CAN mutate ------------
+#
+# The half of G1 that #51 does not change, asserted with a real `run`. Same
+# fixture, no --dry-run.
+#
+# Without --dry-run the driver requires --skill-dir and --repo-path
+# (agent-session-driver.sh:152), so both are supplied and both must be real --
+# otherwise the run dies in argument validation and reports refuse=no for a
+# reason that has nothing to do with the orphan, which would be a guard passing
+# for the wrong cause. It still never invokes anything: the orphan refusal is a
+# startup check (:1037) and selection is not reached until :1138.
+#
+# (_x27_dry_run is a generic "run the driver with these args" helper despite the
+# name; it is used here deliberately so both halves share one invocation path.)
+
+X27_G1B_CWD="$X27_TMP/g1b/cwd"; X27_G1B_XDG="$X27_TMP/g1b/xdg"
+X27_G1B_REPO="$X27_TMP/g1b/repo"
+mkdir -p "$X27_G1B_CWD" "$X27_G1B_REPO"
+_x27_plant_marker "$X27_G1B_CWD/.driver-state"                     4 "$X27_PID" lmorchard/decafclaw
+_x27_plant_marker "$X27_G1B_XDG/agent-session/lmorchard-decafclaw" 4 "$X27_PID" lmorchard/decafclaw
+
+X27_G1B_OUT="$(_x27_dry_run "$X27_G1B_CWD" "$X27_G1B_XDG" \
+                 --repo lmorchard/decafclaw \
+                 --skill-dir "$(dirname "$(dirname "$DRIVER")")/skills/agent-session" \
+                 --repo-path "$X27_G1B_REPO")"
+check "#27 G1b a real run STILL refuses while a same-repo orphan is live" \
+  "refuse=yes orphan=yes" "$(_x27_orphan "$X27_G1B_OUT")"
+
+# The liveness probe for all three, after the runs: a dead pid sends the startup
+# check down the finished-but-unrecorded branch, where C1 passes and G1/G1b fail
+# for reasons that have nothing to do with any of them. Asserted here rather than
+# before the runs so it covers the whole window.
+check "#27 probe: the planted child.pid was a live process across C1, G1 and G1b" \
   "live" "$(_x27_alive "$X27_PID")"
 
 kill "$X27_PID" 2>/dev/null || true
