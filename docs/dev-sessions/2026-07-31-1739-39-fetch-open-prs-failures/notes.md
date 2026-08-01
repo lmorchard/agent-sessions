@@ -48,6 +48,35 @@ a session doc. `docs-check` matches assertion-count claims in tracked docs — i
 `no assertion-count claims found to check; suite reports 112`, i.e. it is looking at the
 driver-test count, not park-test, and not at session-dir prose.
 
+## Branch self-review findings (2026-07-31, post-rebase)
+
+Two findings, both surfaced rather than silently resolved. No code changed as a result.
+
+**1. The `--classify-only` discovery site is fixed but no frozen check covers it.** C2's criterion
+says *"during post-run PR discovery"*, and there are **two** such sites — `run_issue` (`:924`) and
+`--classify-only` (`:1080`). The frozen check exercises only the first. I fixed both, because
+fixing one and not its twin is findings.md class 1, and because the driver's own comment says
+`--classify-only` is the call site that matters most, being the documented recovery path.
+
+**I did not add a check for the second site, deliberately.** The check files are read-only from
+Phase 1, and more to the point a test I write now, for code I just wrote, has none of the
+independence that makes the frozen ones worth anything — it would be the implementer authoring its
+own oracle, which is the single failure this system exists to prevent. So the gap is named here and
+in the PR body instead of being papered over with a self-authored assertion.
+
+This is not an amendment: the check is not *wrong*, it is *narrower than its criterion*. The
+amendment path is for a check that fails to test its criterion; this one tests it, just not
+exhaustively. Worth a follow-up issue so the second site gets a check authored by a context that
+did not write it.
+
+**2. CLAUDE.md's residual-risk clause has fired, and I cannot be the one to act on it.** That
+paragraph leaves the driver's outcome routing drivable and ends *"Revisit if a run ever touches
+that routing."* This run touches it — C2 changes park reasons. The spec anticipated this and kept
+the tier `auto-ok` on three stated grounds, so this is not a surprise. But **CLAUDE.md is not on
+the drivable allowlist**, so an unattended run must not edit it to record that the clause fired.
+Flagged for the human at the merge gate; the decision about whether the clause should now gate this
+routing is theirs, not this run's.
+
 ## Noticed, deliberately not fixed
 
 Out of scope per the spec's *What we're NOT doing*; recorded here rather than fixed, per CLAUDE.md.
