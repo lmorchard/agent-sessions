@@ -126,11 +126,55 @@ G3 at freeze: all 28 labels in `g3-baseline-labels.txt` printed as `ok`; tally
 
 (Append-only. Empty unless an amendment was made.)
 
-**None applied.** One is **PROPOSED and BLOCKED**, awaiting human confirmation — see
+~~**None applied.** One is **PROPOSED and BLOCKED**, awaiting human confirmation — see
 `notes.md` § "STOP: #51's C1 contradicts #27's frozen guard G1". No check in this manifest or in
 any other suite has been edited. Recorded here rather than acted on, because the amendment path
 in `references/frozen-checks.md` requires human confirmation and a tier downgrade, and this run
-is unattended.
+is unattended.~~
+
+*(Superseded 2026-08-01. The run was right to stop and right not to edit; the block below records
+what happened after a human answered it.)*
+
+### AMENDMENT 1 — 2026-08-01, confirmed by Les, applied by hand after the run parked
+
+**What was changed.** `driver/test-driver.sh`, issue #27's frozen guard G1 — **not a check in this
+run's manifest**, which is why the run could not touch it and stopped instead.
+
+| | before | after |
+|---|---|---|
+| fixture | live same-repo orphan | unchanged |
+| flag | `--dry-run` | unchanged |
+| expectation | `refuse=yes orphan=yes` | `refuse=no orphan=yes` |
+
+Plus a **new** check, `#27 G1b`, with the same fixture and **no** `--dry-run`, asserting
+`refuse=yes orphan=yes`.
+
+**Amendment, not clarification.** Under `frozen-checks.md`'s both-trees test: #27 G1's original
+wording passes at the freeze commit `fa4ca83` and fails against the implementation. A verdict
+changes, so this is an amendment, and **this run is downgraded to `needs-review`** accordingly.
+
+**Why the expectation was allowed to move.** G1's own comment states the hazard it exists to
+prevent: *"two drivers mutating one checkout at once."* A `--dry-run` cannot mutate a checkout, so
+`--dry-run` was G1's *vehicle*, not its *property* — the guard froze the probe. #51 exempts exactly
+the non-mutating invocations and no others.
+
+**Why G1b was required rather than optional.** G1 had a second job its comment names: it was the
+discriminator for #27 C1's `refuse=no`. Once no `--dry-run` invocation ever refuses, nothing in that
+family can report `refuse=yes`, and C1's `refuse=no` would have become vacuous — the amendment would
+have silently weakened a *different* issue's criterion. G1b restores that discriminator inside #27's
+own suite and re-asserts G1's original property with a vehicle that can actually cause the hazard.
+
+**Verified rather than asserted:**
+
+- `make driver-test` — **113 passed, 0 failed** (was 111 passed / 1 failed, the collision).
+- **Mutation-tested.** Deleting the refusal outright (`die` → no-op) fails **G1b** and the
+  pre-existing *"startup refuses to run alongside a live orphan"*, while amended G1 still passes —
+  i.e. G1b, not G1, is now carrying the anti-deletion duty, and it discriminates.
+- C1's own two checks (`refuse=no orphan=no`, and the dry-run banner) pass unchanged.
+
+**Rejected:** moving #27 C1 to a real `run` as well. C1's reducer keys on the `--dry-run` completion
+banner (`test-driver.sh:1502`), so moving C1 would have meant rewriting its observable — a much wider
+amendment for no gain, since only the `refuse` half of the discriminator was lost.
 
 ## Tamper verdict
 
