@@ -92,7 +92,7 @@ table's own column and not in a sentence above it.)*
 
 ### 2. A null must never render as a positive
 
-**Seven instances**, and it keeps arriving through a different door.
+**Nine instances**, and it keeps arriving through a different door.
 
 1. **`clean` vs `clean-by-substitute`** — the tamper vocabulary had no way to say *there was
    nothing to diff*, so a null rendered as a pass (move 2).
@@ -120,6 +120,30 @@ table's own column and not in a sentence above it.)*
    phase 3 a run reaching `eligible-for-auto-merge` on that substitute would auto-merge on the
    strength of a review nobody had read. Tracked as
    [#45](https://github.com/lmorchard/agent-sessions/issues/45).
+
+8. **A killed run logged `cost_usd: 0` and `"no session, no spend"` for a run that spent $10.93.**
+   The stream held `total_cost_usd: 10.929…`, a real `session_id` and `num_turns: 95`; the driver
+   classified before the terminated child had flushed its `result` record, so `pick_result` matched
+   nothing and the `driver-fault` predicate read *"the extractor found nothing"* as *"there is
+   nothing"*. **Worse than the no-record failure `inflight.json` exists to bound** — a missing row
+   sends someone looking, a `cost_usd: 0` row does not. Confirmed a race rather than a parse bug by
+   the very next run: same signal, same exit 143, cost recorded correctly. `--classify-only`
+   recovers it. Tracked as [#58](https://github.com/lmorchard/agent-sessions/issues/58).
+
+9. **`make docs-check` scanned zero files inside a worktree and reported green.** `ROOT` resolves
+   under `.worktrees/<branch>/`, and `.worktrees` is in `SKIP_DIRS`, so every file was skipped as its
+   own excluded ancestor. Measured on one commit from two directories: **103 files from the repo
+   root, 0 from inside a worktree**, both exiting 0. Every `express` run works in a worktree, so
+   **`project-gates: make check green` has included a doc-rot detector that examined nothing on every
+   PR this project has published.** Tracked as
+   [#62](https://github.com/lmorchard/agent-sessions/issues/62).
+
+**Instance 9 is the one to sit with.** The other eight are checks that reported a wrong *value*; this
+is a detector reporting a correct value about an empty set. It was found by an unattended run
+establishing a baseline, which described its own green result as *"my green baseline for that target
+meant nothing"* — a run catching a defect in the infrastructure grading it. **The generalisable
+question it raises for every detector: does it report how much it looked at?** A count in the output
+(`103 files`) makes this class visible on sight; `docs-check: links resolve` does not.
 
 ### 3. Brittle absolutes encoding relative invariants
 
@@ -348,6 +372,29 @@ said so. **Before freezing a check, ask whether the run can actually execute its
 answer is not obvious, because the denials are triggered by shell *syntax* (redirects, control flow)
 rather than by command names. The known survivor for waiting is `gh pr checks --watch`, and there is
 no equivalent for reviews.
+
+**Before freezing a criterion, grep the OTHER suites for an existing assertion about the same
+behaviour.** A criterion can be perfectly well-formed — demonstrated failing, oracle present, control
+in place — and still be unimplementable, because a *different, already-merged* issue froze a guard
+asserting the opposite. Issue #51's C1 (`--dry-run` must not refuse while a live orphan exists) and
+issue #27's frozen G1 (that exact configuration must refuse) were flat contradictions: same fixture,
+same flag, opposite required outcome. No implementation satisfies both, and the collision was
+invisible from inside #51's own manifest.
+
+The triage that wrote #51's C1 did everything the criteria rules ask for and still missed it, because
+**every one of those rules looks at the criterion, the oracle, and the current behaviour — none looks
+at what else already asserts something about the same behaviour.** The check is one `grep` for the
+flag or function name across `driver/test-*.sh` and `scripts/test_*.py`, and it costs seconds.
+Applied to the next four issues triaged it earned its place twice in four: it found an existing
+assertion that a proposed change would have broken (`test-driver.sh:353`, that the classifier still
+consults `has_success_result`, now carried as a named guard), and it ruled out a suspected collision
+that turned out to concern a different subject.
+
+Two corollaries worth keeping. **A frozen guard belonging to another issue is still frozen** — the run
+that hit this refused to edit it to green its own criterion, correctly, since that is the implementer
+removing an oracle in its way. And **when you do amend one, check what else depended on it**: #27's G1
+had a second job named in its own comment, as the discriminator for #27's C1, so amending it without
+adding a replacement would have silently made a *different, already-merged* issue's criterion vacuous.
 
 **A row that a mechanism could not produce must not render as that mechanism's negative result.**
 The same #44 gate said `threads: 0 unresolved — BY SUBSTITUTE: 0 reviews exist, so no thread can`.
@@ -662,6 +709,20 @@ about mutation-testing a guard that protects a dangerous state.
   the first pass took eligible 1 → 3; the second took it 3 → 1 and **that drop was the signal** — it
   exposed a matcher bug ([defect class 1, instance 10](#1-a-row-satisfied-by-evidence-adjacent-to-what-it-names--open-gap))
   that an activity report would have hidden.
+- **Long runs launched as a harness background task were killed twice, unexplained — and the cause is
+  still open.** 2026-08-01, both attempts on one issue, $23.85 spent for nothing merged. Recorded
+  because the *ruling-out* is the useful part and re-deriving it is expensive. **Not** duration: a run
+  that completed took 58.8 min, while these died at 33.5 and 38.9. **Not** the workload: `make check`
+  on the branch runs in 34s with no process growth. **Not** OOM: the stream shows
+  `[Request interrupted by user]`, an orderly interrupt, not a hard kill. **Not** output volume: every
+  stream caps tool results at the same 17.6 kB. **Not** a scheduled job: no crontab, no session cron,
+  no relevant LaunchAgents. The one hard signal is that both died at exactly `:49:52` past the hour,
+  one hour apart, after *different* elapsed times — and that lead is refuted too: a completed run
+  crossed the same boundary at 38.4 min and lived, where the killed one crossed at 38.9 and did not,
+  and a trivial canary sailed through it. `log show` returns nothing on this host, so it cannot
+  arbitrate. **The workaround does not depend on the cause: drive long runs from a terminal, not from
+  a harness background task.** A foreground call cannot substitute — the harness caps those at 10
+  minutes and these runs take 30–60.
 - **A driver that dies between invoking and classifying leaves no record.** Observed: a run
   completed (98 turns, 19 min, **$9.44**) and opened a PR, then the process was killed before
   classifying — real money spent, a PR open, and an empty `runs.jsonl`. Everything the driver
@@ -689,6 +750,17 @@ a bash assertion caught a *second* divergence being created mid-refactor; the dr
 state caught a bad write-back; the one-day-old amendment policy caught a frozen check. **The single
 error with no mechanism watching it — `git add -A` — went uncaught until after it was pushed.** The
 catch rate tracked the presence of a mechanism, not the presence of care.
+
+**Parking is the mechanism working, and it has never yet been wrong.** On 2026-08-01 four unattended
+runs stopped without opening a PR, and all four were right — two of them catching defects in criteria
+the *supervising* context had written hours earlier. The strongest: a run found that its issue's
+criterion contradicted a frozen guard belonging to a different, already-merged issue, declined to edit
+that guard to green its own criterion, wrote up both sides of the argument, and stopped for
+confirmation. It also rejected a needle-threading option that would have left both suites green while
+being incoherent, and recorded the rejection rather than leaving it unconsidered. **The operator rule
+that follows: read a park's reasoning before overriding it.** The cost of a park is one human decision;
+the cost of overriding a correct one is an oracle quietly weakened by the implementer it was meant to
+constrain.
 
 **Self-created staleness has no trigger.** `CLAUDE.md` said all of `driver/` was drivable. True when
 written — then the classifier moved into `driver/gate.py` four hours later, which made it false, and
