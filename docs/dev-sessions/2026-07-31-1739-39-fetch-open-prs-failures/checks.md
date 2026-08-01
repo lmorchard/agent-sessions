@@ -98,11 +98,11 @@ what eats it. Same single-query fixture as C2, so the stderr could have come fro
 
 **Guards at freeze — all three PASS, run and read individually (2026-07-31):**
 
-- **G1** — `make driver-test`: `112 passed, 0 failed`. `make park-test`: all 22 pre-existing
+- **G1** — `make driver-test`: `112 passed, 0 failed`. `make park-test`: all 21 pre-existing
   assertions pass, none lost or skipped (the 6 failures in that run are the new C1–C3 only).
 - **G2** — `make assertion-lint`: `no presence-grep assertions in 2 file(s) matching
   driver/test-*.sh`.
-- **G3** — the 22 pre-existing park assertions pass unchanged, including the whole
+- **G3** — the 21 pre-existing park assertions pass unchanged, including the whole
   harness-sanity section. That section passing is what makes the new failures attributable.
 
 Also green at freeze, though not named as guards: `make driver-check`, `make docs-check`.
@@ -113,7 +113,7 @@ it C1's zero-invocations clause is vacuous. Safe because the `claude ` prefix is
 gh needle any existing assertion uses (`issue list`, `issue edit N`, `--add-label`,
 `--remove-label`), the two cases that read `$ARGV_LOG` with `hasnt`/`has_call` run `--classify-only`
 (which never invokes claude), and it writes to a file rather than the stream the driver parses.
-Empirically: all 22 pre-existing assertions still pass.
+Empirically: all 21 pre-existing assertions still pass.
 
 ## Tamper rule for this run
 
@@ -121,6 +121,66 @@ Empirically: all 22 pre-existing assertions still pass.
 may change what any frozen check asserts — no case body, assertion, or helper the new cases
 depend on. There is no sanctioned edit to this file after the freeze commit.
 
+## Verification result (2026-07-31, independent verifier, fresh context)
+
+Given only this manifest and the repo — not the plan, not the notes, no account of why any
+failure might be acceptable.
+
+- **C1** pass, 4/4 including the control · **C2** pass, 2/2 both directions · **C3** pass
+- **G1** pass — `make driver-test` 112/0 (plus pytest 104), `make park-test` 28/0, no case lost,
+  skipped or renamed · **G2** pass · **G3** pass, harness-sanity section 7/7
+- **Tamper:** `git diff cc45871 -- driver/test-park-state.sh` → no output. **clean** (a real
+  diff, not clean-by-substitute: `Check files` is non-empty here).
+- `git diff cc45871 --stat` shows only `checks.md` (one line, the sha), `plan.md`, and
+  `driver/agent-session-driver.sh`. No Makefile, script, or other test file touched.
+- The freeze commit's own edit to the check file was **purely additive** — verified by
+  `git diff 7cdd4a5 HEAD -- driver/test-park-state.sh | grep -E "^-"` returning only the diff
+  header. Zero pre-existing lines deleted or modified.
+- `make check`: `all checks passed`.
+
+**Adversarial question 1 — is "never invokes claude" vacuous?** No, and the control is a real
+guard rather than a claim. The only writer of a `^claude ` line is the stub's logging line; the
+control runs the same fixture and flags with a healthy `pr list` and asserts `>= 1`, and it passes.
+Remove the logging line and C1's zero-count would pass silently while the control would fail with
+`at least 1 logged claude call (else the zero-count check above is vacuous)` — the vacuity
+condition *is* the control's failure condition. Also: `run_driver` does `: > "$log"`, and a missing
+log would yield an empty string, which `check "0" ""` treats as failure rather than pass.
+*Verifier's own caveat, carried rather than dropped:* it could not build a mutant empirically —
+bash was restricted in this session — so this rests on the control passing (observed) plus reading
+the coupling in the source, not on an executed mutation.
+
+**Adversarial question 2 — could C3 pass on a driver diagnostic instead of gh's real stderr?** No.
+The needle originates only in the stub's `pr list` arm, and
+`grep -n "stub-gh\|HTTP 503\|api.github.com" driver/agent-session-driver.sh` returns no matches, so
+the driver cannot produce the string from its own vocabulary. The fixture uses `--issue`, so there
+is exactly one query and one possible origin. Nuance the verifier stated: the check proves gh's
+stderr *is not suppressed*, not that the driver labels or frames it — which is exactly what the
+criterion says, so the check is faithful to it.
+
+## Clarifications
+
+(Logged per `frozen-checks.md`. A clarification changes no verdict at either tree; an amendment
+would, and would cost the tier.)
+
+- **2026-07-31 — the pre-existing park assertion count was recorded as 22; it is 21.** Found by
+  the independent verifier. The baseline run at session start was `21 passed, 0 failed`; the freeze
+  run was `22 passed, 6 failed` (28 total), so the new block adds **7** assertions, of which 6
+  failed at freeze and one — the control — passed. The 22nd passing assertion at freeze *was* the
+  new control, miscounted as pre-existing.
+
+  **Why this is a clarification and not an amendment:** the number lived in the recorded evidence
+  under `Guards at freeze`, never in a CHECK command. G1 and G3 are `make driver-test` /
+  `make park-test` with the invariant "no case lost, newly skipped, or newly failing" — deliberately
+  stated as an invariant rather than a count, for exactly this reason. Re-running the old and new
+  wording against both the freeze tree and the current implementation changes no verdict at either.
+  No tier change.
+
+  The freeze commit message (`cc45871`) carries the same wrong number. History is immutable and
+  rewriting it would collapse the tamper baseline, so it is corrected here and in the PR body
+  rather than amended in place.
+
 ## Amendments
 
 (Append-only. Empty unless an amendment was made.)
+
+None. No frozen check was edited, relaxed, skipped, or narrowed after `cc45871`.
