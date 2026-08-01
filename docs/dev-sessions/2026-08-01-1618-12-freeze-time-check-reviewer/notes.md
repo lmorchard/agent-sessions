@@ -84,6 +84,23 @@ these are not false positives, which is what makes it hard. Options, none taken 
 My recommendation is **1**, and to let the sequencing decision the issue already made do its
 job: the adjudication records are the evidence for what to build next.
 
+## Both calls, ratified by Les 2026-08-01
+
+- **Findings volume → option 1, ship as-is.** No disposition bar, no narrowed remit. The skill
+  wording in this PR is final. The adjudication records accumulate and become the evidence for
+  whatever gets built next — which is exactly the sequencing the issue's own decision block
+  already chose for the check-linter.
+- **C2 → restated as a ranking property.** Logged as **amendment A1** on
+  [issue #12](https://github.com/lmorchard/agent-sessions/issues/12), appended below the original
+  text rather than replacing it. New wording: the seeded check SHALL be the check the reviewer
+  escalates, and the only one escalated unanimously across independent reviewers. That held in
+  both rounds on two different manifests, and it can fail, so it is a real test rather than a
+  weakening shaped to fit the result. The tier was already `needs-review`, so the amendment path's
+  downgrade had nothing left to take.
+
+Rejected in the same breath: a third fixture round (two rounds each informed by the previous
+round's findings still produced a defeated manifest, so a third has no reason to converge).
+
 ## Verification
 
 `make check` green before commit. `make skill-readonly` (G1) green — load-bearing here, since the
