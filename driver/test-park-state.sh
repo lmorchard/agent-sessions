@@ -122,8 +122,19 @@ STUB
   # `claude -p` writes a stream-json to stdout. One successful result record is
   # all the driver reads: pick_result takes the max-cost record, has_success_result
   # looks for subtype=success, and the gate verdict comes from the PR, not here.
+  #
+  # The argv line was added for issue #39's C1 ("SHALL NOT invoke claude"). Without
+  # it that assertion is VACUOUS: nothing would ever write a claude line, so a count
+  # of zero would hold whether or not the behaviour exists. The `claude ` prefix
+  # keeps these lines apart from the gh lines, so no existing assertion over
+  # $ARGV_LOG can see them -- the gh needles ("issue list", "issue edit N",
+  # "--add-label", "--remove-label") do not appear in a claude argv, and the two
+  # cases that read the log with `hasnt`/`has_call` run --classify-only, which never
+  # invokes claude at all. The log is a file, not a stream the driver captures, so
+  # writing to it cannot perturb the stream-json contract either.
   cat > "$bin/claude" <<'STUB'
 #!/usr/bin/env bash
+printf 'claude %s\n' "$*" >> "$ARGV_LOG"
 cat >/dev/null
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.5,"session_id":"stub-session","result":"stub run finished"}'
 STUB
@@ -280,6 +291,145 @@ LEDGER
 SEED_OUT="$(run_driver "$DUR_BIN" "$DUR_LOG" --repo "$REPO" --dry-run --state-dir "$SEED_SD")"
 has  "the skip reason cites the latest ledger row"   "current reason"        "$SEED_OUT"
 hasnt "  and not the first appended one"             "first appended reason" "$SEED_OUT"
+
+# ============================================================================
+# FROZEN acceptance checks for issue #39 -- fetch_open_prs swallows failures.
+#
+#   https://github.com/lmorchard/agent-sessions/issues/39
+#
+# Appended 2026-07-31. Same rules as everything above: no replicas, no grepping
+# the subject for a literal, every assertion over the runtime behaviour of the
+# shipped driver run as a subprocess against stubs.
+#
+# Today `fetch_open_prs` is
+#
+#     gh pr list ... 2>/dev/null || echo '[]'
+#
+# so a failed query is indistinguishable from "no open PRs". These three cases
+# are all expected to FAIL at freeze; that is the point.
+# ============================================================================
+
+# THE NEEDLE, chosen here and named once so the implementer has one string to
+# emit and the checks have one string to look for. Short and meaning-bearing on
+# purpose: a full sentence would be brittle, and a single common word ("failed",
+# "error") already appears in today's output and would be vacuous. Nothing in the
+# driver's current output contains this phrase -- verified by these checks
+# failing at freeze.
+QUERY_FAIL_NEEDLE="open-PR query failed"
+
+# The distinctive text the stub writes to stderr. Deliberately unlike anything
+# the driver says on its own, so C3 cannot be satisfied by the driver's own
+# diagnostics -- only by gh's stderr actually reaching the driver's output.
+GH_STDERR_NEEDLE="stub-gh: HTTP 503 from api.github.com while listing PRs"
+
+# A gh stub variant whose `pr list` arm exits 1 with that stderr, and which
+# answers every other read exactly as make_stubs' does. Overwrites only the `gh`
+# file inside a case's own stub dir -- the same move C4 makes with pr-list.json.
+make_gh_prlist_fails() { # $1 = a dir that make_stubs has already populated
+  cat > "$1/gh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "\$ARGV_LOG"
+case "\$*" in
+  "pr list"*)            printf '%s\n' "$GH_STDERR_NEEDLE" >&2; exit 1 ;;
+  *"--json headRefOid"*) printf 'deadbeefcafe\n' ;;
+  *"--json body"*)       cat "\$STUB_DIR/pr-body.txt" ;;
+  "issue list"*)         cat "\$STUB_DIR/issue-list.json" ;;
+  *)                     exit 0 ;;
+esac
+STUB
+  chmod +x "$1/gh"
+}
+
+claude_calls() { # $1 = argv log -- how many times the claude stub ran
+  grep -c '^claude ' "$1" 2>/dev/null || true
+}
+
+# --- #39 C1: a failed open-PR query stops selection before any spend --------
+#
+# CRITERION: IF the open-PR query fails, THEN the selection stage SHALL report
+# the failure and exit non-zero, AND SHALL NOT invoke `claude`.
+#
+# NOT --dry-run: dry-run exits before the run loop, so "zero claude invocations"
+# would hold there no matter what the driver does. This is a full run with
+# selection live, which is the configuration in which today's driver treats the
+# failed query as an empty PR list, finds #8 unblocked, and spends real money.
+#
+# The control run directly below is the non-vacuity proof for the zero-count
+# assertion: same fixture, same flags, healthy `pr list` -- and the count is
+# expected to be >= 1 there. If the claude stub ever stops logging, the control
+# fails and the zero-count check is exposed as meaningless.
+
+echo "#39 C1: a failed open-PR query is reported, exits non-zero, and spends nothing"
+
+QF_SKILL="$TMPROOT/qfail-skill"; mkdir -p "$QF_SKILL/phases"; : > "$QF_SKILL/phases/express.md"
+QF_REPOP="$TMPROOT/qfail-repo"; mkdir -p "$QF_REPOP"
+
+QF_BIN="$TMPROOT/qfail-sel-bin"; make_stubs "$QF_BIN" "pending"
+make_gh_prlist_fails "$QF_BIN"
+QF_LOG="$TMPROOT/qfail-sel.log"; QF_SD="$TMPROOT/qfail-sel-state"
+QF_OUT="$(run_driver "$QF_BIN" "$QF_LOG" --repo "$REPO" \
+            --skill-dir "$QF_SKILL" --repo-path "$QF_REPOP" \
+            --state-dir "$QF_SD" --max-budget-usd 10)"
+QF_RC=$?   # must be read immediately: run_driver's last command IS the driver.
+
+has "selection names the open-PR query failure" "$QUERY_FAIL_NEEDLE" "$QF_OUT"
+if [ "$QF_RC" -ne 0 ]; then
+  ok "  and exits non-zero"
+else
+  bad "  and exits non-zero" "a non-zero exit status" "$QF_RC"
+fi
+check "  and never invokes claude" "0" "$(claude_calls "$QF_LOG")"
+
+# The control. Identical except that `pr list` works.
+CTRL_BIN="$TMPROOT/qfail-ctrl-bin"; make_stubs "$CTRL_BIN" "pending"
+CTRL_LOG="$TMPROOT/qfail-ctrl.log"; CTRL_SD="$TMPROOT/qfail-ctrl-state"
+run_driver "$CTRL_BIN" "$CTRL_LOG" --repo "$REPO" \
+  --skill-dir "$QF_SKILL" --repo-path "$QF_REPOP" \
+  --state-dir "$CTRL_SD" --max-budget-usd 10 >/dev/null
+CTRL_CALLS="$(claude_calls "$CTRL_LOG")"
+if [ "${CTRL_CALLS:-0}" -ge 1 ]; then
+  ok "  control: with a healthy query the same run DOES invoke claude"
+else
+  bad "  control: with a healthy query the same run DOES invoke claude" \
+      "at least 1 logged claude call (else the zero-count check above is vacuous)" \
+      "${CTRL_CALLS:-0}"
+fi
+
+# --- #39 C2/C3: a failed query at post-run discovery ------------------------
+#
+# C2 CRITERION: GIVEN the open-PR query fails during post-run PR discovery, WHEN
+# the driver records the run's outcome, THEN the recorded reason SHALL name the
+# query failure AND SHALL NOT be the `no PR opened` reason.
+#
+# C3 CRITERION: WHEN the open-PR query fails, THEN `gh`'s stderr SHALL appear in
+# the driver's output.
+#
+# `--issue` bypasses selection entirely, so the ONLY `fetch_open_prs` call in
+# this run is the post-run discovery one. That is what makes "fails only at
+# discovery" true structurally rather than by stub bookkeeping, and it is also
+# what makes C3 attributable: there is exactly one query, so the stderr can have
+# come from nowhere else.
+
+echo "#39 C2/C3: a failed query at discovery is recorded as such, and gh's stderr surfaces"
+
+PD_BIN="$TMPROOT/qfail-disc-bin"; make_stubs "$PD_BIN" "pending"
+make_gh_prlist_fails "$PD_BIN"
+PD_LOG="$TMPROOT/qfail-disc.log"; PD_SD="$TMPROOT/qfail-disc-state"
+PD_SKILL="$TMPROOT/qfail-disc-skill"; mkdir -p "$PD_SKILL/phases"; : > "$PD_SKILL/phases/express.md"
+PD_REPOP="$TMPROOT/qfail-disc-repo"; mkdir -p "$PD_REPOP"
+PD_OUT="$(run_driver "$PD_BIN" "$PD_LOG" --repo "$REPO" --issue "$ISSUE" \
+            --skill-dir "$PD_SKILL" --repo-path "$PD_REPOP" \
+            --state-dir "$PD_SD" --max-budget-usd 10)"
+
+# The ledger row for this issue, newest last -- the same "current record, not the
+# first appended" rule C4 above establishes.
+PD_REASON="$(jq -r --arg n "$ISSUE" 'select(.issue == ($n|tonumber)) | .reason // empty' \
+               "$PD_SD/runs.jsonl" 2>/dev/null | tail -1)"
+[ -n "$PD_REASON" ] || PD_REASON="(no runs.jsonl row for #$ISSUE)"
+
+has   "the recorded reason names the query failure" "$QUERY_FAIL_NEEDLE" "$PD_REASON"
+hasnt "  and is not the no-PR-opened reason"        "no PR opened"       "$PD_REASON"
+has   "gh's stderr reaches the driver's output"     "$GH_STDERR_NEEDLE"  "$PD_OUT"
 
 # --- report ----------------------------------------------------------------
 
