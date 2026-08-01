@@ -49,8 +49,23 @@ driver-check:
 driver-test: gate-test
 	@bash driver/test-driver.sh
 
+# A glob, not a list. A list of test paths here is a census of a growing set, and
+# this recipe already proved the failure mode: scripts/test_assertion_lint.py
+# existed, passed, and went unrun under `make check` for as long as it existed --
+# while the detector it tests is the mitigation for findings.md defect class 5.
+# Globbing makes "a new test file is not run" unreachable rather than fixed once.
+#
+# Shell globs rather than $(wildcard): a glob matching nothing reaches pytest as a
+# literal pattern and errors loudly, where $(wildcard) would expand to nothing and
+# let pytest fall back to pyproject's `testpaths` -- a different set, silently.
+#
+# Cost, so it is not a surprise: scripts/test_gate_test_wiring.py is matched by this
+# glob and shells out to `make gate-test` twice, so this target now runs the suite
+# about three times over. Bounded -- the inner runs are marked with
+# AGENT_SESSION_GATE_TEST_INNER and skip that module -- and not optional: issue #50's
+# C1 requires this recipe to run every file matching the globs, and that file matches.
 gate-test:
-	@uv run --quiet pytest driver/test_gate.py scripts/test_docs_check.py scripts/test_run_progress.py scripts/test_commit_lint.py scripts/test_commit_lint_edges.py
+	@uv run --quiet pytest driver/test_*.py scripts/test_*.py
 
 # The frozen acceptance checks for issue #5, wired in AFTER the work landed --
 # deliberately, because guard G1 was "make check green" and it had to pass at the
