@@ -1,7 +1,7 @@
 # Frozen acceptance checks
 
 **Source:** https://github.com/lmorchard/agent-sessions/issues/50
-**Frozen at:** (recorded in the follow-up commit)
+**Frozen at:** `9f20154` (2026-08-01)
 **Check files — read-only from Phase 1 onward:**
 - `scripts/test_gate_test_wiring.py`
 
