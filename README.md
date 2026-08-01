@@ -3,6 +3,9 @@
 Tooling for handing more of a software project's routine work to an AI coding agent — and,
 just as importantly, for knowing which work you shouldn't hand over.
 
+**New here?** [docs/orientation.md](docs/orientation.md) is the full introduction, including a
+glossary of the terms the rest of the docs assume. This page is the short version.
+
 ## The problem
 
 Burning down a project board by hand looks like this, over and over: pick an issue, write a
@@ -21,8 +24,8 @@ So the question this repo is built around isn't *"can an agent do the work?"* It
 > **An agent is only as autonomous as its verifier is trustworthy.**
 
 If a task's definition of done can be checked by something that can't be argued with — a
-test, a lint rule, an assertion, a specific command with a specific expected output — then an
-agent can attempt it unattended, because success isn't a matter of opinion.
+test, a lint rule, a command with a specific expected output — then an agent can attempt it
+unattended, because success isn't a matter of opinion.
 
 If the only honest check is *"a human looks at it and decides,"* then a human belongs there.
 That isn't a failure; it's useful information about the task.
@@ -117,8 +120,8 @@ files a run leaves behind, and how to recover an interrupted one.
 ## Status
 
 The skill is complete and has real-run evidence on all of its routing paths. Every PR it has
-produced has been merged — by a human, by hand. The driver runs, including over multiple issues, against more than
-one repository. This project now tracks its own backlog on [its own
+produced has been merged — by a human, by hand. The driver runs, including over multiple
+issues, against more than one repository. This project now tracks its own backlog on [its own
 board](https://github.com/users/lmorchard/projects/9), using its own tooling.
 
 Conditional auto-merge is designed but deliberately not built.
@@ -127,18 +130,20 @@ Conditional auto-merge is designed but deliberately not built.
 
 Ordered by how likely you are to want it:
 
+- **[docs/orientation.md](docs/orientation.md)** — the newcomer's introduction: the vocabulary,
+  what's in the repo, how one issue flows through it, and what is and isn't proven yet.
 - **[docs/usage.md](docs/usage.md)** — operator's guide: commands, outcomes, artifacts, recovery.
-- **[docs/design.md](docs/design.md)** — what the system is and why it has this shape. Current
-  state and roadmap live here too.
+- **[docs/design.md](docs/design.md)** — what the system is and why it has this shape, with the
+  reasoning trail preserved.
 - **[docs/findings.md](docs/findings.md)** — the durable lessons: recurring defect classes, what
   was measured and what it showed, and a list of verified gotchas. **Read the gotchas before
   writing any command-line flag or gate condition** — several are the opposite of what they
   look like.
 - **[docs/prior-art.md](docs/prior-art.md)** — survey of related work, with claims marked
   verified or not.
-- **[docs/build-log.md](docs/archive/build-log.md)** — the chronological account of the first five moves,
-  now closed. Useful for the *incidents behind the rules* in `findings.md`; its state claims have
-  decayed and it says so.
+- **[docs/build-log.md](docs/archive/build-log.md)** — the chronological account of the first
+  five moves, now closed. Useful for the *incidents behind the rules* in `findings.md`; its
+  state claims have decayed and it says so.
 - **[CLAUDE.md](CLAUDE.md)** — conventions for working in this repo, and which paths are
   off-limits to unattended runs.
 
