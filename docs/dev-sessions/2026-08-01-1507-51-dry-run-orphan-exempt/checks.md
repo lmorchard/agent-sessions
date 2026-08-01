@@ -126,7 +126,11 @@ G3 at freeze: all 28 labels in `g3-baseline-labels.txt` printed as `ok`; tally
 
 (Append-only. Empty unless an amendment was made.)
 
-_None._
+**None applied.** One is **PROPOSED and BLOCKED**, awaiting human confirmation — see
+`notes.md` § "STOP: #51's C1 contradicts #27's frozen guard G1". No check in this manifest or in
+any other suite has been edited. Recorded here rather than acted on, because the amendment path
+in `references/frozen-checks.md` requires human confirmation and a tier downgrade, and this run
+is unattended.
 
 ## Tamper verdict
 

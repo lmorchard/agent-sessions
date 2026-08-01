@@ -1045,10 +1045,34 @@ if [ -f "$STATE_DIR/inflight.json" ]; then
     say "  ORPHAN STILL RUNNING (pid $_ipid, reparented) -- it is unsupervised and still spending."
     say "  Let it finish, then:  --classify-only $(jq -r '.issue' "$STATE_DIR/inflight.json" 2>/dev/null)"
     say "  Or kill it:           kill -TERM $_ipid"
-    die "refusing to start a second run while an orphan is live"
+    # The refusal exists because two concurrent runs cannot share one inflight.json,
+    # and because the orphan is still spending. The property that matters is
+    # therefore "THIS invocation can spend or mutate", not "a run is in progress" --
+    # and --dry-run invokes no claude, writes nothing to the state dir and creates
+    # no worktree. Refusing it protects nothing while costing the operator the one
+    # measurement findings.md tells them to take while a run is live: the
+    # before/after eligible count around a triage pass. Issue #51.
+    #
+    # The warning above still prints under --dry-run, deliberately. It is the
+    # useful half, and suppressing it would hide a genuinely dead run from the
+    # command someone is most likely to reach for while poking at state.
+    #
+    # NOT --classify-only, also deliberately. That path derives an outcome from a
+    # run's live state and writes both a ledger row and park labels; a live run's
+    # state is still moving, so the advice two lines up is to wait, not a door to
+    # open early.
+    if [ "$DRY_RUN" -eq 0 ]; then
+      die "refusing to start a second run while an orphan is live"
+    fi
+    say ""
+  else
+    # Reachable only when the orphan is NOT live. `die` used to guarantee that;
+    # now that --dry-run falls through, the `else` is what preserves it. Printing
+    # "recover it with --classify-only" under a live orphan would advise exactly
+    # the action the branch above tells the operator to wait on.
+    say "  recover it with:  --classify-only $(jq -r '.issue' "$STATE_DIR/inflight.json" 2>/dev/null)"
+    say ""
   fi
-  say "  recover it with:  --classify-only $(jq -r '.issue' "$STATE_DIR/inflight.json" 2>/dev/null)"
-  say ""
 fi
 
 # --classify-only: recover an outcome from live state, no invocation. The run dir
