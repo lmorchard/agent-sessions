@@ -79,20 +79,25 @@ gate-test:
   from the `Makefile` rather than restated, so it fires on a re-pinned list, an added `--ignore`, or
   a changed `python_files`.
 
-**Verification — automated:**
-- [ ] C1's check passes: `uv run pytest
+**Verification — automated:** (each ticked from the output of that exact command, read)
+- [x] C1's check passes: `uv run pytest
       scripts/test_gate_test_wiring.py::test_gate_test_collects_every_glob_matched_test_file`
-- [ ] C2's check passes: `uv run pytest
+      — `1 passed, 1 deselected`
+- [x] C2's check passes: `uv run pytest
       scripts/test_gate_test_wiring.py::test_new_test_file_runs_under_gate_test_with_no_makefile_edit`
-- [ ] G1 still passes: `uv run pytest driver/test_*.py scripts/test_*.py -q` — nothing lost, nothing
-      newly skipped, nothing newly failing. **0 skipped** specifically: a non-zero skip count in the
-      *outer* run would mean the recursion guard is over-applied.
-- [ ] G2 still passes: `make check` exits 0
-- [ ] G3 still passes: `make check` still reports all seven steps — `driver-check`, `driver-test`,
-      `park-test`, `skill-readonly`, `docs-check`, `assertion-lint`, `commit-lint`
-- [ ] `scripts/test_assertion_lint.py`'s tests actually appear in `make gate-test`'s run — the
-      specific thing the issue is about, confirmed by name and not just by a total going up
-- [ ] Tamper diff empty: `git diff 9f20154 -- scripts/test_gate_test_wiring.py`
+      — `1 passed, 1 deselected`, and `ls scripts/` showed no probe residue afterwards
+- [x] G1 still passes: `uv run pytest driver/test_*.py scripts/test_*.py -q` — **113 passed, 0
+      failed, 0 skipped**. Nothing lost, nothing newly skipped, nothing newly failing: 111 at freeze
+      plus this run's 2 new checks. The **0 skipped** is the load-bearing half — a non-zero skip
+      count in the *outer* run would mean the recursion guard had been over-applied.
+- [x] G2 still passes: `make check` exits 0 — `all checks passed`
+- [x] G3 still passes: `make check` reported all seven steps — `driver-check`, `driver-test`
+      (113 + 112), `park-test` (28), `skill-readonly`, `docs-check`, `assertion-lint`, `commit-lint`
+- [x] `scripts/test_assertion_lint.py`'s tests actually run under `make gate-test` — confirmed **by
+      name**, all seven node ids collected, not merely by a total going up
+- [x] Tamper diff empty: `git diff 9f20154 -- scripts/test_gate_test_wiring.py` produced no output.
+      `git diff 9f20154 -- …/checks.md` shows only the sanctioned `Frozen at` write; no CRITERION or
+      CHECK line differs.
 
 **Verification — manual:**
 - None. Both criteria are mechanical; the tier is `auto-ok` precisely because nothing here needs a

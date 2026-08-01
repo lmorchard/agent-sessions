@@ -49,8 +49,29 @@ driver-check:
 driver-test: gate-test
 	@bash driver/test-driver.sh
 
+# Globs, not a list. This recipe used to name its five test files one path at a
+# time, and scripts/test_assertion_lint.py was written, passed, and never added
+# to the list -- so the detector for defect class 5 had tests that had never run,
+# and `make check` was green either way. See issue #50.
+#
+# The omission was the symptom; the census was the defect. A hand-maintained
+# inventory of a growing set is the same staleness shape as the assertion counts
+# that went wrong twice in opposite directions -- adding the one missing filename
+# would have fixed the instance and left the mechanism. So: nothing to maintain.
+#
+# Shell globs rather than $(wildcard ...), deliberately. A wildcard matching
+# nothing expands to NOTHING, which leaves a bare `pytest` that falls back to
+# pyproject.toml's testpaths -- a different set of tests, collected silently. An
+# unmatched shell glob is passed through literally and pytest errors on it. For a
+# recipe whose whole job is "don't quietly run less than you should", loud wins.
+#
+# scripts/test_gate_test_wiring.py holds the frozen acceptance checks for this:
+# C1 compares what this recipe collects against what the globs collect, reading
+# the recipe out of this file with `make -n` rather than restating it, and C2
+# drops a failing test file into scripts/ and requires this recipe to notice it
+# with no edit here.
 gate-test:
-	@uv run --quiet pytest driver/test_gate.py scripts/test_docs_check.py scripts/test_run_progress.py scripts/test_commit_lint.py scripts/test_commit_lint_edges.py
+	@uv run --quiet pytest driver/test_*.py scripts/test_*.py
 
 # The frozen acceptance checks for issue #5, wired in AFTER the work landed --
 # deliberately, because guard G1 was "make check green" and it had to pass at the
