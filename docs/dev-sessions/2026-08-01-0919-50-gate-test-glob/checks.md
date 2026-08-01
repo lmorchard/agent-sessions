@@ -109,8 +109,30 @@ ORACLE EXISTS NOW: `make`, pytest, and process exit status. Nothing to build.
   step still reports" rather than as a count, because the cheap way to make a Makefile change green
   is to drop a step. **Passed at freeze on `7309f61`: all seven reported.**
 
+## Tamper verdict
+
+**`clean`, by the real mechanism** — not `clean-by-substitute`. `Check files` is non-empty, so the
+diff below is a meaningful command rather than an absent result:
+
+```
+$ git diff a06c74d -- scripts/test_gate_test_wiring.py
+(empty)
+```
+
+Confirmed twice: once by this run before pushing, and once by the independent verifier, which also
+checked the blob hash is identical on both sides (`5a2cb34e0c4ee120e8ba4d91cae2dde0e2edcf87`) and
+that the file genuinely existed at the freeze sha — so the empty diff is not vacuous.
+
+`a06c74d` is an ancestor of the pushed head (`git merge-base --is-ancestor` → yes), and the branch
+was **not** squashed, so a reviewer can re-run the diff rather than take this record on trust.
+
+`git diff a06c74d --stat` shows only `Makefile` and this session's own directory. The one post-freeze
+edit to this manifest is disclosed: `**Frozen at:**` gained the sha, which frozen-checks.md names as
+a sanctioned append. No CRITERION line, CHECK command, or guard command differs from the freeze.
+
 ## Amendments
 
 (Append-only. Empty unless an amendment was made.)
 
-_None._
+_None._ No check was edited, relaxed, skipped or narrowed at any point, so the `auto-ok` tier stands
+undowngraded.
