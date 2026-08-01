@@ -44,7 +44,7 @@ Frozen at `cc45871`, sha recorded in `5a91662`.
 - [x] Every criterion's check runs and **fails for the expected reason** — 6 new assertions fail,
       each quoted in `checks.md` with why it is attributable to the absent behaviour
 - [x] Every guard runs and **passes** — `make driver-test` 112/0, `make assertion-lint` green,
-      all 22 pre-existing park assertions unchanged
+      all 21 pre-existing park assertions unchanged
 - [x] Freeze commit made; sha recorded in `checks.md`
 
 ---
@@ -151,13 +151,13 @@ else
 - [x] G1 still passes: `make driver-test` (112 passed, 0 failed) and `make park-test` — no case
       lost, newly skipped, or newly failing
 - [x] G2 still passes: `make assertion-lint`
-- [x] G3 still passes: `make park-test` — the 22 pre-existing assertions unchanged
+- [x] G3 still passes: `make park-test` — the 21 pre-existing assertions unchanged
 - [x] `make check` exits 0
 - [x] Tamper diff empty: `git diff cc45871 -- driver/test-park-state.sh`
 
-**Observed:** `make park-test` → `28 passed, 0 failed` (22 pre-existing + the 6 frozen assertions,
-all six of which failed at the freeze). `make check` → `all checks passed`. Tamper diff → empty
-output.
+**Observed:** `make park-test` → `28 passed, 0 failed` — 21 pre-existing plus the 7 this run added
+(the 6 that failed at the freeze, plus the control, which passed at the freeze). `make check` →
+`all checks passed`. Tamper diff → empty output.
 
 **Verification — manual:**
 - [ ] None. Every criterion is machine-checkable; that is why this issue is `auto-ok`.
