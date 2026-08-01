@@ -484,9 +484,34 @@ park_reason() { # $1 = issue number -> the latest recorded reason for it
 # Open PRs, once. `closingIssuesReferences` is what GitHub itself considers a
 # link -- the issues a merge would actually close -- and it rides along on the
 # list query for free. No second call, no `gh pr view`.
+#
+# NO `2>/dev/null || echo '[]'`, which is how this ended until #39. That turned
+# every failure -- auth, network, rate limit, a `gh` too old to know
+# `closingIssuesReferences` -- into a byte-identical "there are no open PRs",
+# with gh's explanation thrown away. A null rendering as a positive: findings.md
+# class 2, and the callers below read that null as "nothing blocks".
+#
+# So this function no longer decides anything. It propagates gh's stderr and gh's
+# exit status, and the two kinds of caller take OPPOSITE trades on them, because
+# their costs are asymmetric in opposite directions:
+#
+#   select_issues  REFUSES.  The failure precedes all spend, and selection's
+#                  whole job is deciding which issues lack a PR. Without the
+#                  list that decision is a guess wearing an answer's clothes,
+#                  and guessing wrong costs a duplicate $5-20 run.
+#   discovery      DEGRADES, distinguishably. The money is already spent and a
+#                  PR may already be open, so refusing would destroy the only
+#                  record of it. It records that it could not ask, instead of
+#                  recording "no PR opened" about a PR it never looked for.
+#
+# Deliberately NO --json field-list fallback. `pr_blocking_issue` reads
+# `closingIssuesReferences`, so a response served without that field matches
+# nothing -- exactly as an empty list does. A fallback would not repair
+# selection, and would leave the defect in place behind a change that looks
+# like a fix.
 fetch_open_prs() {
   gh pr list --repo "$REPO" --state open --limit 200 \
-     --json number,title,body,headRefName,url,closingIssuesReferences 2>/dev/null || echo '[]'
+     --json number,title,body,headRefName,url,closingIssuesReferences
 }
 
 # TWO matchers, deliberately, because the two callers want opposite errors.
@@ -603,7 +628,14 @@ select_issues() {
 
   load_board
   local prs parked
-  prs="$(fetch_open_prs)"
+  # REFUSE, do not degrade -- see the comment on fetch_open_prs. Every skip
+  # reason below that reads "already has an open PR", and every ELIGIBLE that
+  # depends on no such PR existing, is derived from this one value. On failure
+  # the honest report is that the question could not be asked.
+  #
+  # `die` exits 2, and select_issues is called plainly (not inside `$( )`), so
+  # this ends the process before the run loop rather than a subshell.
+  prs="$(fetch_open_prs)" || die "open-PR query failed -- cannot tell which issues already have open PRs, so selection would be a guess. Refusing to select. (gh's own error is above.)"
   parked="$(printf '%s' "$issues_json" | parked_numbers || true)"
 
   if [ -z "$candidates" ]; then
@@ -879,10 +911,28 @@ run_issue() { # $1 = issue number
       say "  NOTE: claude exited $rc but the stream carries a successful result;"
       say "        classifying from the gate block, not the exit code."
     fi
-    prline="$(pr_for_issue "$n" "$(fetch_open_prs)")"
+    # DEGRADE, distinguishably -- the opposite trade from selection, on purpose.
+    # This run already cost money and may already have opened a PR, so refusing
+    # here would throw away the only record of it. What must not happen is
+    # recording `no PR opened` about a PR the driver never managed to look for:
+    # that is a wrong ledger row, not a wasted stage.
+    #
+    # Split across two statements rather than nested in one `$( )`: command
+    # substitution discards the inner exit status, which is how the failure went
+    # unnoticed here in the first place. See issue #39.
+    local prs_json pr_query_failed=0
+    prs_json="$(fetch_open_prs)" || pr_query_failed=1
+    prline=""
+    if [ "$pr_query_failed" -eq 0 ]; then
+      prline="$(pr_for_issue "$n" "$prs_json")"
+    fi
     if [ -z "$prline" ]; then
       outcome="parked"
-      reason="no PR opened; run's own account: $(printf '%s' "$final" | tr '\n' ' ' | cut -c1-400)"
+      if [ "$pr_query_failed" -eq 1 ]; then
+        reason="open-PR query failed; cannot tell whether a PR was opened. run's own account: $(printf '%s' "$final" | tr '\n' ' ' | cut -c1-400)"
+      else
+        reason="no PR opened; run's own account: $(printf '%s' "$final" | tr '\n' ' ' | cut -c1-400)"
+      fi
     else
       prnum="$(printf '%s' "$prline" | cut -f1)"
       prurl="$(printf '%s' "$prline" | cut -f2)"
@@ -1020,9 +1070,25 @@ if [ -n "$CLASSIFY_ONLY" ]; then
     rundir="(none)"
   fi
 
-  prline="$(pr_for_issue "$n" "$(fetch_open_prs)")"
+  # Same degrade-distinguishably fix as the run path above, and for the reason
+  # its own comment block gives a few lines down: fixing one of these two call
+  # sites and not the other is findings.md class 1, "fixed the cost field, never
+  # generalised". --classify-only is the documented recovery path for an
+  # unrecorded outcome, so a wrong reason here is a wrong reason in exactly the
+  # place someone is looking to find out what happened. Issue #39.
+  _prs_json=""; _pr_query_failed=0
+  _prs_json="$(fetch_open_prs)" || _pr_query_failed=1
+  prline=""
+  if [ "$_pr_query_failed" -eq 0 ]; then
+    prline="$(pr_for_issue "$n" "$_prs_json")"
+  fi
   if [ -z "$prline" ]; then
-    outcome="parked"; reason="no open PR found for #$n"
+    outcome="parked"
+    if [ "$_pr_query_failed" -eq 1 ]; then
+      reason="open-PR query failed; cannot tell whether #$n has an open PR"
+    else
+      reason="no open PR found for #$n"
+    fi
     prurl=""
   else
     prnum="$(printf '%s' "$prline" | cut -f1)"
