@@ -147,4 +147,43 @@ None.
 
 ## Tamper verdict
 
-(Recorded by the independent verifier.)
+Recorded by the independent verifier — a fresh context given this file and the repo, and
+deliberately not given `plan.md`, `notes.md`, or any account of why a failure might be acceptable.
+
+**`clean` — by the real mechanism, not by substitute.** `Check files` is non-empty, so this is the
+whole-file diff and a reviewer can re-run it:
+
+- `git diff 9f20154 -- scripts/test_gate_test_wiring.py` → **empty**. Byte-identical to the freeze.
+- `git diff 9f20154 --stat -- . ':!docs'` → the `Makefile` alone, which is the declared
+  implementation file.
+- This file's own diff is exactly one line — the `Frozen at` sha. **No CRITERION line, no CHECK
+  command, and no guard command differs from the frozen version.** Amendments still `None`.
+
+**Results, each by its own command:** C1 pass (1 collected, 1 passed, exit 0 — not exit 5) · C2 pass
+(1 collected, 1 passed; no probe residue) · G1 pass (113 collected, 113 passed, 0 failed, **0
+skipped**) · G2 pass (exit 0) · G3 pass (7/7, verified against the `check:` prerequisite list as well
+as the output).
+
+**Asked whether the diff could satisfy the checks without doing the work, the verifier said no**, and
+gave the reason: both checks are behavioural end-to-end and neither asserts over text, so no rename
+or reflow could move either side. It re-derived the discrimination independently — the pre-fix
+argument list collects 104 against the globs' 113, a delta of exactly the 7 orphaned tests plus these
+2 checks.
+
+### A defect in G1's *wording*, found by the verifier and deliberately NOT fixed here
+
+`pyproject.toml` already sets `addopts = "-q"`, so this manifest's extra `-q` makes G1's command
+`-qq`, which suppresses the summary line entirely. **The command as frozen cannot itself print the
+collected/passed/skipped numbers the guard is phrased to ask for.** The verifier obtained them by
+running the same argument set without the redundant flag.
+
+Two things follow, and the second is the point:
+
+1. It changes no verdict. Exit status is 0 either way, at the freeze tree and at the implementation
+   tree, so by `frozen-checks.md`'s four-cell test this is at most a clarification — never an
+   amendment, and it costs the tier nothing.
+2. **It is still not being edited mid-run.** This manifest is append-only, and rewriting a guard
+   command in it is the same act whether the rewrite improves it or weakens it. The `-q` was
+   introduced here when the manifest was written — the issue's own G1 has no `-q` — so the honest
+   record is that the transcription added a flag, the guard passed anyway, and the fix belongs to
+   whoever writes the next manifest rather than to this run's diff.
