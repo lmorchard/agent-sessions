@@ -448,10 +448,10 @@ on the agent's own say-so.
 
 ---
 
-## The verifier catches its author — four instances
+## The verifier catches its author — five instances
 
 Dispatching the verifier as `Explore` (**no Edit/Write**, so it structurally cannot touch the
-oracle it grades) is not ceremony. Four times it has caught the person who wrote the thing:
+oracle it grades) is not ceremony. Five times it has caught the person who wrote the thing:
 
 1. **#638** — a scoped tamper rule said "every added line MUST be a `@pytest.mark.filterwarnings`
    decorator"; the author's own mechanical check used a looser regex allowing comments, silently
@@ -465,6 +465,28 @@ oracle it grades) is not ceremony. Four times it has caught the person who wrote
    the review fix was uncommitted and the pushed PR did not contain it.
 4. **#710** — refuted the fabricated measurement above. **First time what it caught was a claim
    already reported to Les as fact.**
+5. **#12's dogfood, 2026-08-01 — the first catch at *freeze* time rather than after
+   implementation**, by the new check-reviewer this instance exists to test. Six independent
+   read-only reviewers over two fixture rounds found a real defect in **every check put to them**,
+   6/6 on the seeded one, and three the author had not planted. The decisive one: every guard read
+   `SKIP_DIRS` from the module rather than from a roster frozen in the manifest, so
+   `SKIP_DIRS = set()` — deleting the feature outright — greened the entire manifest. Two reviewers
+   verified it in-process independently. **Round 2's guards had already been hand-tightened by the
+   author using round 1's findings, and it found this anyway.**
+
+**Instance 5 carries a lesson the first four do not, and it is uncomfortable: a check that passed
+`triage` and `intake` is not thereby a good check.** Round 1's non-seeded checks came straight from
+issue #62's ratified body and all four drew correct findings. So the honest reading of a frozen
+manifest is not *"these were reviewed, so they hold"* — it is that nobody had asked the gameability
+question of them from outside. **Two rounds of deliberate authoring could not produce a manifest
+that survived**, which is the strongest available evidence that the author is structurally the wrong
+context to grade their own checks, and the reason the dispatch is worth its cost.
+
+The open cost, recorded rather than resolved: at ~5 findings per freeze this could become the
+*"false positives train the operator"* failure — except these are not false positives, which is what
+makes it hard. Decided 2026-08-01 to ship without a disposition bar and let the adjudication records
+be the evidence; revisit when there are records from real manifests rather than from a fixture built
+to be reviewed.
 
 Corollary: **confident architectural review is not a substitute for measurement.** A fresh-context
 reviewer's most confident deletion in the consolidation pass was "`criteria-grammar.md` teaches

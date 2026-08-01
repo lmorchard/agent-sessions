@@ -60,14 +60,15 @@ EVIDENCE TO PRESENT: screen recording of a 50k-row export, for the human to grad
   Passed at freeze.
 
 ## Adjudication
-(Written at freeze step 4, before the freeze commit. One disposition per check and guard —
-`accepted` / `strengthened` / `escalated` — including the ones the reviewer cleared.)
+(Written at freeze step 4, before the freeze commit. One disposition per check AND per guard —
+`accepted` / `strengthened` / `escalated` — including the ones the reviewer cleared. **Replace
+every line below.** An adjudication entry copied forward from this template asserts a review
+that never happened, and reads exactly like one that did.)
 
-- C1: accepted — reviewer found no way to green it short of streaming the export.
-- C2: strengthened — original asserted only that no ids were dropped, satisfiable by
-  returning the input unchanged; now also asserts the dedup actually ran.
-- G1: accepted.
-- G2: accepted.
+- C1: accepted — <what the reviewer tried and why nothing cheaper than the work greens it>
+- C2: strengthened — <the hole it found>; the check now also asserts <what was added>
+- G1: escalated — <why it cannot be fixed here, and what it was escalated to>
+- G2: accepted — <as above>
 
 ## Amendments
 (Append-only. Empty unless an amendment was made — see "When a check is genuinely wrong".)

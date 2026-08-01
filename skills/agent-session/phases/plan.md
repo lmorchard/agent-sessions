@@ -56,8 +56,8 @@ model is good at.
    which is why step 4 couldn't have run them. Follow `references/frozen-checks.md`: write
    `checks.md` with ids `C1…Cn`, dispatch a check-author subagent to write the tests, run each
    one, confirm it **fails for the expected reason**, dispatch a read-only **check-reviewer**
-   subagent and record one disposition per check under `## Adjudication`, then commit and record
-   the sha in a follow-up commit. No implementation code in this phase.
+   subagent and record one disposition per check **and per guard** under `## Adjudication`, then
+   commit and record the sha in a follow-up commit. No implementation code in this phase.
 
    The reviewer runs *before* the freeze commit, and is given `checks.md` and the repo but never
    this plan or the criteria's rationale. It is the last point at which a weak check is cheap to
