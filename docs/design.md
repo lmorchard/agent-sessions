@@ -341,7 +341,9 @@ backlog with its own tooling.
 - **`ci-stale` has never fired on a real PR** — fixture tests only ([#6](https://github.com/lmorchard/agent-sessions/issues/6)).
 - **Multi-phase `execute` with real implementer subagents.** Every run so far has been small: #586
   was two greps on a 4-line diff. decafclaw #625 is the specced vehicle, never driven
-  ([#7](https://github.com/lmorchard/agent-sessions/issues/7)), and blocked on a write-capable dispatch grant.
+  ([#7](https://github.com/lmorchard/agent-sessions/issues/7)). It was described here as *blocked on
+  a write-capable dispatch grant*; that was wrong — the grant was never absent. It is unattempted,
+  and what is genuinely unresolved is the verifier's containment (D2, in Resolved decisions).
 
 ## Roadmap → it lives on the board now
 
@@ -480,7 +482,24 @@ Closed, but the *reasoning* is still load-bearing.
   practice: nine parallel scanners produced real findings with the main context clean.
   **Write-capable `execute` dispatch is a separate, narrower grant and is NOT covered** — and the
   grant must be asymmetric, because the verifier's value comes from being structurally unable to
-  edit what it grades. Roadmap item 7 (#625) stays blocked on it.
+  edit what it grades.
+
+  **Settled 2026-08-01, and the framing above was wrong in one way worth keeping.** "Blocked on a
+  grant" reads as a missing permission, and there was none: `Task` has been in the driver's
+  `ALLOWED_TOOLS` all along, alongside `Write` and `Edit`. So the implementer half (**D1: yes,
+  unattended runs may dispatch write-capable implementer subagents**) recorded an existing state
+  rather than opening anything. What was actually missing was a *mechanism for the asymmetry* — one
+  flat session-wide `--allowedTools` cannot say "implementers write, the verifier does not."
+
+  **D2 — how the verifier's read-only-ness is enforced — was spiked, not decided.** See
+  [the spike](dev-sessions/2026-08-01-1932-verifier-containment/spike-verifier-containment.md).
+  `--agents` honors an undocumented per-agent `tools` allowlist that yields an intersection rather
+  than inheritance, which contains `Write`/`Edit` against a control. It does **not** contain a
+  verifier that runs checks: `Bash(python3:*)` and `Bash(pytest:*)` are write primitives, and a
+  cooperative run *looks* contained because the subagent declines rather than being denied. The
+  proposed answer is to give the verifier no `Bash` at all and have the parent run the manifest's
+  named commands, which also moves command selection out of the verifier's judgment. Not yet
+  decided or built.
 - **Where park state lives** → **decided 2026-07-29 (#5): a `driver-parked` label on the issue.**
   This **revises D1 in part**, and the revision is the interesting half. Triage had settled D1 —
   derive the park list from the latest outcome per issue in `runs.jsonl` — and the handoff said not
