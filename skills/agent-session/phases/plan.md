@@ -55,8 +55,14 @@ model is good at.
 5. **Freeze the checks — this is Phase 0 of the plan.** Now the acceptance tests get *authored*,
    which is why step 4 couldn't have run them. Follow `references/frozen-checks.md`: write
    `checks.md` with ids `C1…Cn`, dispatch a check-author subagent to write the tests, run each
-   one, confirm it **fails for the expected reason**, commit, then record the sha in a follow-up
-   commit. No implementation code in this phase.
+   one, confirm it **fails for the expected reason**, dispatch a read-only **check-reviewer**
+   subagent and record one disposition per check **and per guard** under `## Adjudication`, then
+   commit and record the sha in a follow-up commit. No implementation code in this phase.
+
+   The reviewer runs *before* the freeze commit, and is given `checks.md` and the repo but never
+   this plan or the criteria's rationale. It is the last point at which a weak check is cheap to
+   fix: after the commit the read-only rule governs and the same fix costs an amendment and the
+   tier. Don't write the rest of the plan first and review the checks on the way past.
 
    Do this before writing the rest of the plan, not after. A check authored after the
    implementation approach is settled tends to test the approach instead of the criterion.

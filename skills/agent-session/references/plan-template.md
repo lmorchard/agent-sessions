@@ -31,7 +31,10 @@ No implementation in this phase.
       not a typo'd path) — record the observed failure per criterion
 - [ ] Every guard runs and **passes** — a guard already failing is a pre-existing break, and
       knowing that now is what keeps it from reading as your regression later
-- [ ] Freeze commit made; sha recorded in `checks.md`
+- [ ] Check-reviewer dispatched read-only, given `checks.md` and the repo but **not** this plan
+      and not the criteria's rationale; `## Adjudication` in `checks.md` carries one disposition
+      per check *and per guard*, including the ones it cleared
+- [ ] Freeze commit made (it closes the review window); sha recorded in `checks.md`
 
 ---
 

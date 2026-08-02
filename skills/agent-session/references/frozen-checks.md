@@ -59,6 +59,17 @@ EVIDENCE TO PRESENT: screen recording of a 50k-row export, for the human to grad
 - G2: `test_real_pty_echo_and_cleanup` still RUNS and passes — not skipped, not deleted.
   Passed at freeze.
 
+## Adjudication
+(Written at freeze step 4, before the freeze commit. One disposition per check AND per guard —
+`accepted` / `strengthened` / `escalated` — including the ones the reviewer cleared. **Replace
+every line below.** An adjudication entry copied forward from this template asserts a review
+that never happened, and reads exactly like one that did.)
+
+- C1: accepted — <what the reviewer tried and why nothing cheaper than the work greens it>
+- C2: strengthened — <the hole it found>; the check now also asserts <what was added>
+- G1: escalated — <why it cannot be fixed here, and what it was escalated to>
+- G2: accepted — <as above>
+
 ## Amendments
 (Append-only. Empty unless an amendment was made — see "When a check is genuinely wrong".)
 ````
@@ -82,9 +93,35 @@ Phase 0 of every plan, no implementation in it:
    import error, a typo'd path, or a missing fixture is not yet a check; it would pass later
    for reasons unrelated to the criterion. Record the observed failure per criterion in
    `AT FREEZE`.
-4. Commit. Then record that commit's sha as `Frozen at` **in a follow-up commit** — a commit
+4. **Review the checks before locking them.** Dispatch a **check-reviewer subagent** with a fresh
+   context and **no Edit/Write** — it must be structurally unable to fix what it grades. Give it
+   `checks.md` and the repo. Do **not** give it the implementation plan, and do **not** give it
+   the criteria's rationale: a reviewer told what the author meant reads each check as that
+   intent rather than as what the check literally asserts, which is the whole thing being tested.
+
+   Its remit is one question, asked once per check and once per guard:
+
+   > What could make this check green that is not the work its criterion names?
+
+   That is `acceptance-criteria.md` § 2's gameability test, asked by a context that did not write
+   the check. Nothing wider. It does not grade the implementation — that is the verifier's job at
+   the end of `execute`, and there is no implementation yet — and it does not reopen whether the
+   criterion is the right criterion.
+
+   Record the result in `checks.md` under `## Adjudication`: **one disposition per check and per
+   guard**, `accepted` / `strengthened` / `escalated`, *including the ones it cleared*. A cleared
+   check and a check the reviewer never reached produce the same silence otherwise. Strengthening
+   a check here is **not** an amendment and costs no tier — nothing is frozen yet, which is the
+   entire reason this step sits before step 5 rather than after it.
+
+5. Commit. Then record that commit's sha as `Frozen at` **in a follow-up commit** — a commit
    cannot contain its own hash, so this is two commits, not one. The freeze commit (the first)
    is the tamper-diff baseline; the second just writes the sha down.
+
+   **The freeze commit is the closing event for the review window.** After it, the read-only rule
+   below governs and a check only changes through the amendment path. The window is not "until
+   the implementer is satisfied," because that is a standing licence to edit frozen checks. The
+   adjudication record is inside the freeze commit, so it is part of the tamper baseline too.
 
    Re-anchor the sha if the branch is ever rebased. **The freeze commit must remain an ancestor of
    the pushed head** — nothing in `pr` may collapse it away, because a baseline absent from `origin`
@@ -126,6 +163,13 @@ is exactly what produces a rationalized pass.
 
 It reports, per criterion: the command it ran, the observed output, and `pass` / `fail`. Plus
 the tamper diff below. It renders no opinion on whether a failure is acceptable.
+
+**This is a different dispatch from the freeze step 4 check-reviewer, and the two must not be
+merged.** The reviewer grades *check against criterion* before the lock, when the implementation
+does not exist and cannot be shaped toward; the verifier grades *implementation against check*
+after, and is trustworthy precisely because it never saw the plan. One context doing both would
+be reading the implementation while deciding whether the check is fair — the failure this whole
+file exists to prevent.
 
 ## The tamper check
 
