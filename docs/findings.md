@@ -446,6 +446,19 @@ self-satisfiable if the agent may resolve threads it merely disagrees with. On #
 4 comments were factually wrong; skipping them was right, resolving them would have cleared the row
 on the agent's own say-so.
 
+**Independence from the plan is not independence from the framing — the brief is a channel too.**
+`frozen-checks.md` withholds the implementation plan from the check-author so the oracle cannot be
+shaped to the implementation. On decafclaw #727 that held perfectly, and the oracle was contaminated
+anyway, through the *brief*. The implementer wrote: *"the text is invariant over the switched-to
+status, so you can produce it once and evaluate it against every `ProjectState`."* True of the
+**buggy** code, and faithfully encoded — the check produced one sample and graded it against all six
+phases, a pairing that never occurs at runtime. The result was an oracle that **mandated the weaker
+fix and forbade the better one**, discovered only when a correct implementation failed a check that
+its own criterion said it satisfied. So: **a check-author brief states the criterion, never the shape
+of the code being replaced.** What it cost when missed was not a wrong merge — the amendment path
+caught it, stopped, and routed to a human, which is the machinery working — but a mandatory stop, a
+tier downgrade and a human decision were all avoidable at the brief.
+
 ---
 
 ## The verifier catches its author — five instances
@@ -635,6 +648,7 @@ the entries most likely to be silently re-broken.**
 | **npm 11 prunes 27 nested optional `@esbuild/*` platform entries that npm 10 records**, so `npm install` rewrites `package-lock.json` deterministically. A *verification* target must not run a command whose job is to mutate — use **`npm ci`**, which cannot write the lockfile and additionally fails when `package.json` and the lockfile disagree. | decafclaw #716 → #717 |
 | **A hard line-wrap inside a code fence misleads readers.** It is what misled Copilot into a wrong review comment on #638. Test commands in their line-wrapped form. | move 2 |
 | **Editing a running bash script can silently change what it executes — and it fails *open*.** bash reads a script incrementally, so a **truncate-and-rewrite in place** (`cat >`, Python's `open(w)`) makes the running process continue into replacement text: measured, a script went on to execute two lines that **did not exist when it started**, exiting 0 with no error and no signal. An **atomic replace via rename** (`mv`) is unaffected, because the process keeps its original inode. **Measured for this harness: Claude Code's `Write` and `Edit` both change the inode** (`363717959 → 363717969`, `363717979 → 363718025`), so they are safe. Do not rely on that — the general mitigation is to `exec` from a snapshot copy rather than to know every editor's write strategy. | move 7, verified both directions |
+| **A conditional `git stash push -- <path>` paired with an unconditional `git stash pop` targets whatever is on top.** When the push matches nothing — the work was already committed — it creates **no entry**, so the pop applies and *drops* an unrelated stash. Measured: a teeth probe ate a `419-sticky-widget-slot` stash belonging to another workstream and mixed its two files into the run's worktree. Recovered with `git stash store <sha>` after diffing to confirm, but **the stack ordering changed**, so anything relying on `stash@{0}` was silently repointed. To read a past tree, use `git show <sha>:<path>` or a worktree; never `stash` in a repo someone else may be working in. | decafclaw #727, 2026-08-02 |
 
 **A live hazard this closed for decafclaw but not in general: when the project gates dirty the
 tree, two things downstream read the mess as signal.** The tamper check's *"no collateral edits"*
