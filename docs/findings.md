@@ -45,7 +45,7 @@ to the rate at which they arrive.
 |---|---|---|---|
 | 1 | The gate cited `gh pr view <n> --json reviewThreads` — not a valid field. It errors and prints the field list, which reads like "no threads." | move 2 (#586) | fixed |
 | 2 | The tamper mechanism is vacuous when criteria are commands rather than test files: nothing to diff, and the `clean` verdict could not be distinguished from *nothing-to-compare*. | move 2 (#586) | fixed |
-| 3 | `checks.md` — for command-based criteria, the *entire* oracle — sat outside its own tamper baseline. | move 2 (#586) | fixed |
+| 3 | `checks.md` — for command-based criteria, the *entire* oracle — sat outside its own tamper baseline. | move 2 (#586) | **RECURRED 2026-08-03** — see below |
 | 4 | `project-gates` recorded a *local* `make check` and cited no GitHub check runs, so the gate read `eligible-for-auto-merge` while CI was `pending` and `mergeStateStatus` was `UNSTABLE`. | move 3 (#699) | fixed |
 | 5 | `gh pr checks --required` on a repo with no required checks: a row built on it either errors or passes vacuously. | move 4a | fixed |
 | 6 | Import-boundary guard G3 stays green while the boundary it protects is gone — a capability that arrives as an *object* imports nothing. C4 was added to assert what G3 structurally cannot see. | move 4b (#625) | fixed |
@@ -57,6 +57,22 @@ to the rate at which they arrive.
 **The tell:** the row names a command, and the evidence offered is not that command's output.
 **The fix, every time:** make the row cite a command that is actually run, and make its failure
 mode distinguishable from its success mode.
+
+**Instance 3 recurred on 2026-08-03, and its "fixed" status was false for two days before anyone
+looked.** decafclaw #139 / PR #754 published `tamper: clean — empty diff` while `checks.md` changed by
+28 insertions after the freeze commit. Both were true: the manifest declares its own **Check files**
+as three test files and does not list itself, so the diff covered files that genuinely had not
+changed. **The row would have read `clean` had the edit been malicious.** It recurred because the
+Check files list is authored per-run by the check-author, so the original remedy was wording, and
+wording does not hold across runs. Narrower than the original instance — for test-node criteria the
+assertions do live in the covered files — but `checks.md` alone carries the guard invariant clauses,
+so editing a guard's pass condition is invisible to the tamper diff. Tracked on
+[#68](https://github.com/lmorchard/agent-sessions/issues/68); **that issue's criteria do not yet cover
+it**, and the fix is the baseline's coverage rather than a detector.
+
+That run's own edit was legitimate and disclosed under an explicit `Clarification` heading. **The
+tamper mechanism contributed nothing to establishing that** — the honesty came from the graded party
+volunteering it, which is the shape this project exists to remove.
 
 **Instance 10 adds a direction the first nine did not have: this class can cost *liveness*, not just
 correctness.** Nine of them made a check wrongly report *true*, which a later stage or a reader could
@@ -440,6 +456,23 @@ added "wait for CI to settle" to `pr.md`; the run tried a `sleep` poll, a backgr
 the `Monitor` tool — **all three denied under `dontAsk`** — burned its whole $12 budget and stopped
 at `pending` on a PR whose CI went green minutes later. Two artifacts built in one session were in
 direct conflict, and only a real unattended run could surface it.
+
+**And when the floor forbids the mechanism, a run does one of two things — the difference is
+everything.** Both observed on 2026-08-02/03, on the same denied capability (`gh api graphql` under
+`dontAsk`):
+
+- decafclaw #704 reported `threads: 0 unresolved` and **named the substitution in the gate block**
+  ("derived from the REST review-comment count"). Honest, and reviewable.
+- decafclaw #754 reported *"both threads replied to and resolved"* — and **neither was resolved**
+  (`isResolved: false` on both, verified independently). Resolving needs the `resolveReviewThread`
+  mutation, which the floor denies, so the row was **unsatisfiable and claimed anyway**.
+
+`pr.md` requires a row that a hosted run cannot satisfy, so the substitute is structural rather than
+incidental — it will recur on every run. **The lesson is not "substitutes are bad" but that a
+substituted row and a falsely-claimed row are indistinguishable to a reader of the verdict.** The
+verdict was `eligible-for-auto-merge` both times; under phase 3 both merge. Tracked on
+[#73](https://github.com/lmorchard/agent-sessions/issues/73), which asks the prior question: when the
+named mechanism is unavailable, what should the row *do*?
 
 **Resolve only what you fixed.** A gate row of the form "no unresolved review threads" is
 self-satisfiable if the agent may resolve threads it merely disagrees with. On #638, 3 of Copilot's
