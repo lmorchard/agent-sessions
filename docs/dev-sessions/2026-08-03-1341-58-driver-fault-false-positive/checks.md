@@ -1,7 +1,17 @@
 # Frozen acceptance checks
 
 **Source:** https://github.com/lmorchard/agent-sessions/issues/58
-**Frozen at:** `e3d3412` (2026-08-03)
+**Frozen at:** `1fdce99` (2026-08-03) — re-anchored after a rebase onto `origin/main` (`7cd2c0c`).
+The original freeze commit was `e3d3412`; the rebase rewrote it. Confirmed the same tree before
+re-anchoring: `git diff e3d3412 1fdce99 -- driver/test-park-state.sh` is empty, so the frozen
+check file the branch now carries is byte-identical to the one that was locked.
+
+**Tamper verdict: clean.** `git diff 1fdce99 -- driver/test-park-state.sh` produced no output,
+run against the tree that ships. `git diff 1fdce99 --stat` shows only
+`driver/agent-session-driver.sh` (the implementation), `plan.md`, and this file's own sanctioned
+`Frozen at` / verdict appends — no collateral edits, and `driver/test-driver.sh` untouched.
+The freeze commit is an ancestor of the pushed head, so a reviewer can re-run the diff rather
+than take this verdict on trust.
 **Check files — read-only from Phase 1 onward:**
 - `driver/test-park-state.sh`
 
