@@ -7,11 +7,17 @@ re-anchoring: `git diff e3d3412 1fdce99 -- driver/test-park-state.sh` is empty, 
 check file the branch now carries is byte-identical to the one that was locked.
 
 **Tamper verdict: clean.** `git diff 1fdce99 -- driver/test-park-state.sh` produced no output,
-run against the tree that ships. `git diff 1fdce99 --stat` shows only
-`driver/agent-session-driver.sh` (the implementation), `plan.md`, and this file's own sanctioned
-`Frozen at` / verdict appends — no collateral edits, and `driver/test-driver.sh` untouched.
-The freeze commit is an ancestor of the pushed head, so a reviewer can re-run the diff rather
-than take this verdict on trust.
+run against the tree that ships.
+
+For collateral edits, run `git diff 1fdce99 --stat` — the invariant is that the only **code** file
+it lists is `driver/agent-session-driver.sh`, that `driver/test-driver.sh` does not appear, and
+that everything else is session prose under this directory plus this file's own sanctioned
+`Frozen at` / verdict appends. Stated as an invariant rather than as a list on purpose: an earlier
+version of this paragraph enumerated the files, and went stale within the session as more session
+docs were written. The independent verifier caught it. Cite the command, not the enumeration.
+
+The freeze commit is an ancestor of the pushed head, so a reviewer can re-run all of this rather
+than take the verdict on trust.
 **Check files — read-only from Phase 1 onward:**
 - `driver/test-park-state.sh`
 
