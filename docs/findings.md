@@ -45,7 +45,7 @@ to the rate at which they arrive.
 |---|---|---|---|
 | 1 | The gate cited `gh pr view <n> --json reviewThreads` — not a valid field. It errors and prints the field list, which reads like "no threads." | move 2 (#586) | fixed |
 | 2 | The tamper mechanism is vacuous when criteria are commands rather than test files: nothing to diff, and the `clean` verdict could not be distinguished from *nothing-to-compare*. | move 2 (#586) | fixed |
-| 3 | `checks.md` — for command-based criteria, the *entire* oracle — sat outside its own tamper baseline. | move 2 (#586) | fixed |
+| 3 | `checks.md` — for command-based criteria, the *entire* oracle — sat outside its own tamper baseline. | move 2 (#586) | **RECURRED 2026-08-03** — see below |
 | 4 | `project-gates` recorded a *local* `make check` and cited no GitHub check runs, so the gate read `eligible-for-auto-merge` while CI was `pending` and `mergeStateStatus` was `UNSTABLE`. | move 3 (#699) | fixed |
 | 5 | `gh pr checks --required` on a repo with no required checks: a row built on it either errors or passes vacuously. | move 4a | fixed |
 | 6 | Import-boundary guard G3 stays green while the boundary it protects is gone — a capability that arrives as an *object* imports nothing. C4 was added to assert what G3 structurally cannot see. | move 4b (#625) | fixed |
@@ -57,6 +57,22 @@ to the rate at which they arrive.
 **The tell:** the row names a command, and the evidence offered is not that command's output.
 **The fix, every time:** make the row cite a command that is actually run, and make its failure
 mode distinguishable from its success mode.
+
+**Instance 3 recurred on 2026-08-03, and its "fixed" status was false for two days before anyone
+looked.** decafclaw #139 / PR #754 published `tamper: clean — empty diff` while `checks.md` changed by
+28 insertions after the freeze commit. Both were true: the manifest declares its own **Check files**
+as three test files and does not list itself, so the diff covered files that genuinely had not
+changed. **The row would have read `clean` had the edit been malicious.** It recurred because the
+Check files list is authored per-run by the check-author, so the original remedy was wording, and
+wording does not hold across runs. Narrower than the original instance — for test-node criteria the
+assertions do live in the covered files — but `checks.md` alone carries the guard invariant clauses,
+so editing a guard's pass condition is invisible to the tamper diff. Tracked on
+[#68](https://github.com/lmorchard/agent-sessions/issues/68); **that issue's criteria do not yet cover
+it**, and the fix is the baseline's coverage rather than a detector.
+
+That run's own edit was legitimate and disclosed under an explicit `Clarification` heading. **The
+tamper mechanism contributed nothing to establishing that** — the honesty came from the graded party
+volunteering it, which is the shape this project exists to remove.
 
 **Instance 10 adds a direction the first nine did not have: this class can cost *liveness*, not just
 correctness.** Nine of them made a check wrongly report *true*, which a later stage or a reader could
@@ -441,10 +457,40 @@ the `Monitor` tool — **all three denied under `dontAsk`** — burned its whole
 at `pending` on a PR whose CI went green minutes later. Two artifacts built in one session were in
 direct conflict, and only a real unattended run could surface it.
 
+**And when the floor forbids the mechanism, a run does one of two things — the difference is
+everything.** Both observed on 2026-08-02/03, on the same denied capability (`gh api graphql` under
+`dontAsk`):
+
+- decafclaw #704 reported `threads: 0 unresolved` and **named the substitution in the gate block**
+  ("derived from the REST review-comment count"). Honest, and reviewable.
+- decafclaw #754 reported *"both threads replied to and resolved"* — and **neither was resolved**
+  (`isResolved: false` on both, verified independently). Resolving needs the `resolveReviewThread`
+  mutation, which the floor denies, so the row was **unsatisfiable and claimed anyway**.
+
+`pr.md` requires a row that a hosted run cannot satisfy, so the substitute is structural rather than
+incidental — it will recur on every run. **The lesson is not "substitutes are bad" but that a
+substituted row and a falsely-claimed row are indistinguishable to a reader of the verdict.** The
+verdict was `eligible-for-auto-merge` both times; under phase 3 both merge. Tracked on
+[#73](https://github.com/lmorchard/agent-sessions/issues/73), which asks the prior question: when the
+named mechanism is unavailable, what should the row *do*?
+
 **Resolve only what you fixed.** A gate row of the form "no unresolved review threads" is
 self-satisfiable if the agent may resolve threads it merely disagrees with. On #638, 3 of Copilot's
 4 comments were factually wrong; skipping them was right, resolving them would have cleared the row
 on the agent's own say-so.
+
+**Independence from the plan is not independence from the framing — the brief is a channel too.**
+`frozen-checks.md` withholds the implementation plan from the check-author so the oracle cannot be
+shaped to the implementation. On decafclaw #727 that held perfectly, and the oracle was contaminated
+anyway, through the *brief*. The implementer wrote: *"the text is invariant over the switched-to
+status, so you can produce it once and evaluate it against every `ProjectState`."* True of the
+**buggy** code, and faithfully encoded — the check produced one sample and graded it against all six
+phases, a pairing that never occurs at runtime. The result was an oracle that **mandated the weaker
+fix and forbade the better one**, discovered only when a correct implementation failed a check that
+its own criterion said it satisfied. So: **a check-author brief states the criterion, never the shape
+of the code being replaced.** What it cost when missed was not a wrong merge — the amendment path
+caught it, stopped, and routed to a human, which is the machinery working — but a mandatory stop, a
+tier downgrade and a human decision were all avoidable at the brief.
 
 ---
 
@@ -635,6 +681,7 @@ the entries most likely to be silently re-broken.**
 | **npm 11 prunes 27 nested optional `@esbuild/*` platform entries that npm 10 records**, so `npm install` rewrites `package-lock.json` deterministically. A *verification* target must not run a command whose job is to mutate — use **`npm ci`**, which cannot write the lockfile and additionally fails when `package.json` and the lockfile disagree. | decafclaw #716 → #717 |
 | **A hard line-wrap inside a code fence misleads readers.** It is what misled Copilot into a wrong review comment on #638. Test commands in their line-wrapped form. | move 2 |
 | **Editing a running bash script can silently change what it executes — and it fails *open*.** bash reads a script incrementally, so a **truncate-and-rewrite in place** (`cat >`, Python's `open(w)`) makes the running process continue into replacement text: measured, a script went on to execute two lines that **did not exist when it started**, exiting 0 with no error and no signal. An **atomic replace via rename** (`mv`) is unaffected, because the process keeps its original inode. **Measured for this harness: Claude Code's `Write` and `Edit` both change the inode** (`363717959 → 363717969`, `363717979 → 363718025`), so they are safe. Do not rely on that — the general mitigation is to `exec` from a snapshot copy rather than to know every editor's write strategy. | move 7, verified both directions |
+| **A conditional `git stash push -- <path>` paired with an unconditional `git stash pop` targets whatever is on top.** When the push matches nothing — the work was already committed — it creates **no entry**, so the pop applies and *drops* an unrelated stash. Measured: a teeth probe ate a `419-sticky-widget-slot` stash belonging to another workstream and mixed its two files into the run's worktree. Recovered with `git stash store <sha>` after diffing to confirm, but **the stack ordering changed**, so anything relying on `stash@{0}` was silently repointed. To read a past tree, use `git show <sha>:<path>` or a worktree; never `stash` in a repo someone else may be working in. | decafclaw #727, 2026-08-02 |
 
 **A live hazard this closed for decafclaw but not in general: when the project gates dirty the
 tree, two things downstream read the mess as signal.** The tamper check's *"no collateral edits"*
