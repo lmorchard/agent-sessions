@@ -240,11 +240,18 @@ Confirmed independently by the verifier subagent, which ran both diffs itself an
 `git diff 2d7c4a6 --stat` for collateral: **no test file appears in the diff at all.** The only
 non-session-artifact change is `scripts/docs_check.py`.
 
-**One difference, sanctioned and named rather than left for a reader to notice:** `checks.md`
-itself differs from the freeze commit by two lines — the `Frozen at` header, written in the
-follow-up commit `a842815` because a commit cannot contain its own hash. `frozen-checks.md` names
-this as an inert append. No CRITERION line, CHECK command, guard command or `AT FREEZE` line
-differs. `checks.md` is not in `Check files`, so it is outside the tamper scope either way.
+**The differences in `checks.md` itself, sanctioned and named rather than left for a reader to
+notice.** Two hunks: the `Frozen at` header, written in the follow-up commit `a842815` because a
+commit cannot contain its own hash; and this `## Tamper verdict` section appended at the end.
+`frozen-checks.md` names both as inert appends. **No CRITERION line, CHECK command, guard command
+or `AT FREEZE` line differs.** `checks.md` is not in `Check files`, so it is outside the tamper
+scope either way.
+
+*Don't state a count here.* An earlier draft of this paragraph claimed the file "differs by two
+lines" — wrong, and wrong in a self-referential way that no care would have prevented: the diff is
+larger than any figure written inside it, because the figure is part of what it measures. The
+verifier caught it. `git diff 2d7c4a6 -- <this file>` is the only honest answer, which is the
+project's own rule (*cite the command, not the number*) landing on the tamper record itself.
 
 ## Amendments
 
