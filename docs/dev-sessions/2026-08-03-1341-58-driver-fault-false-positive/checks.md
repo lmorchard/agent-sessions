@@ -1,7 +1,7 @@
 # Frozen acceptance checks
 
 **Source:** https://github.com/lmorchard/agent-sessions/issues/58
-**Frozen at:** (recorded in the follow-up commit — a commit cannot contain its own hash)
+**Frozen at:** `e3d3412` (2026-08-03)
 **Check files — read-only from Phase 1 onward:**
 - `driver/test-park-state.sh`
 
