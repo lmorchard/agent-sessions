@@ -101,23 +101,153 @@ what makes "so is this a skill-authoring project?" a confusing question — it's
 The skill is **not installed** in `~/.claude/skills/`. You exercise it by pointing a session at a
 mode's phase file. That's deliberate — it keeps the version under test the version in the repo.
 
-Layout worth knowing:
+Top-level layout:
 
-- `skills/agent-session/SKILL.md` — the dispatcher.
-- `skills/agent-session/phases/` — one file per mode.
-- `skills/agent-session/references/` — the shared engine. `acceptance-criteria.md` and
-  `frozen-checks.md` are the two novel ones; the rest are templates.
-- `driver/agent-session-driver.sh` — selection, invocation, outcome recording.
-- `driver/gate.py` — parses the gate block and classifies the outcome. This is the module that
-  decides what a run's result *was*, which is why it's treated specially (see below).
-- `scripts/` — repo-health detectors: doc-rot, assertion linting, commit-message linting, a live
-  progress reader over a run's transcript.
+- `skills/agent-session/` — the skill: `SKILL.md` (the dispatcher), `phases/` (one file per mode),
+  `references/` (the shared engine). Detailed below.
+- `driver/` — the unattended loop and its test suites. Detailed below.
+- `scripts/` — repo-health detectors and a live progress reader. Detailed below.
 - `docs/dev-sessions/` — one directory per work session, each with its spec, plan, frozen checks
-  and notes. This is the real archaeological record.
+  and notes. This is the real archaeological record, and it is frozen by design: the content is
+  history, not maintained documentation.
+
+### `SKILL.md` and `phases/` — one file per mode
+
+`SKILL.md` is a dispatcher and almost nothing else. It parses the mode argument, reads **only**
+that mode's phase file, and refuses to guess when the argument is missing or ambiguous. Modes
+never co-reside in context, which is why adding one costs nothing.
+
+Each phase file is worth knowing by what it *refuses* as much as by what it does — the refusals
+are where the governing principle actually bites.
+
+| File | What the mode does | What it refuses to do |
+|---|---|---|
+| `phases/intake.md` | Interviews one request or issue into criteria + checks + guards + a tier, then files or updates the issue | Accept a check whose oracle doesn't exist yet, accept a check that already passes, or fudge a weak check to keep `auto-ok` |
+| `phases/triage.md` | Batch version: a subagent per issue proposes criteria **and runs them**, you ratify in one pass, issues are augmented in place | Let a scanning subagent run the full suite (N of them in parallel thrash the machine), or let an unrun check read as verified |
+| `phases/plan.md` | Freezes the checks as Phase 0, then plans vertical slices against current code, each phase naming the criteria it advances | Plan against a spec whose criteria are bare prose; write the rest of the plan before the freeze |
+| `phases/execute.md` | Implements phase by phase, one commit per phase, ticking a checkbox only from observed output; ends by dispatching the independent verifier | Edit a frozen check to make it pass; skip the independent verification because the diff was small |
+| `phases/pr.md` | Rebase, re-verify, self-review, push, open the PR, run the review cycle, derive the verdict row by row | Merge; squash away the freeze commit; resolve a review thread it merely disagreed with |
+| `phases/express.md` | Chains plan → execute → pr unattended; its Phase 0 checks marker, readiness and size before starting | Invent criteria for an unmarked issue; take on an XL issue just because `express` was the mode asked for |
+
+`pr.md` carries by far the most scar tissue, and that's instructive rather than incidental:
+nearly every paragraph past its gate table is there because some real run reached a wrong verdict
+that specific way.
+
+### `references/` — the shared engine
+
+Split front/back, matching the two halves of the loop. Nothing here is a mode; these are the
+files more than one mode reads, kept in one place because two copies of a rule drift and a
+drifted rule is a correctness bug.
+
+**Front half — making criteria checkable** (read by `intake`, `triage`):
+
+| File | What it holds |
+|---|---|
+| `acceptance-criteria.md` | **The core of the front half.** The one rule (every criterion names its own verifier); the concrete-test → property → human-judgment escalation ladder; the two tests every check must pass (its oracle exists *now*, and it can't pass without the work); criteria vs. guards; how the tier derives; and the exact `## Tier:` heading format downstream parsers anchor on |
+| `criteria-grammar.md` | Syntax reference only: the EARS patterns plus Given-When-Then, and how to pick between them. Both forms exist to force a condition → observable-response shape that maps onto an assertion |
+| `spec-template.md` | The spec skeleton, plus the **readiness checklist** that gates on verifiability rather than on placeholders — with a separate variant for an issue augmented in place, since those never had the template's sections to begin with |
+
+**Back half — keeping the checks trustworthy** (read by `plan`, `execute`, `pr`):
+
+| File | What it holds |
+|---|---|
+| `frozen-checks.md` | **The core of the back half.** The `checks.md` manifest; the freeze procedure, including a read-only check-reviewer asking one question per check (*what could make this green that isn't the work?*); the read-only rule; the independent verifier; the tamper diff; what substitutes when the criteria are commands rather than test files; and the clarification-vs-amendment test with its four-cell table |
+| `session-setup.md` | Branch, worktree, session directory, `spec.md` from the issue, and the tier read from the issue **body** rather than its label. Shared by `plan` and `express` so a drifted worktree path can't make one of them test the wrong branch |
+| `plan-template.md` | The `plan.md` skeleton: Phase 0 is the freeze, every phase names the criteria it advances, every checkbox cites a check by its exact command |
+| `pr-body-template.md` | The PR body skeleton, including a field-by-field spec for the `agent-session:gate` block — this is the schema `driver/gate.py` parses |
+
+**Either half:**
+
+| File | What it holds |
+|---|---|
+| `documentarian-prompt.md` | How to frame a research subagent so it maps what exists instead of proposing a fix: describe, don't propose; cite `file:line`; answer only what was asked; say plainly when something doesn't exist. Carries the oracle-existence question that feeds the tier |
+| `github-projects.md` | Optional board transitions, plus the measured warning that board vocabularies differ — a board made by `gh project create` has no `Ready` and no `In review`, which is two of the three columns the skill moves through |
+
+If you only read two files in this directory, read `acceptance-criteria.md` and
+`frozen-checks.md`. Everything else is a template, a syntax reference, or an integration detail.
+
+### `driver/` and `scripts/`
+
+| File | What it is |
+|---|---|
+| `driver/agent-session-driver.sh` | Select an eligible issue → invoke the skill headlessly → classify the outcome from the PR's gate block → record it. Host-agnostic on purpose: every path is a flag, there are no prompts, and all mutable state lives under one `--state-dir` |
+| `driver/gate.py` | Parses the gate block and classifies the outcome. Importable **so its tests exercise the shipping code** — extraction was the fix for a hand-copied classifier in the test suite that had silently diverged from the driver it was supposed to be testing |
+| `driver/test-driver.sh`, `test-park-state.sh`, `test_gate.py` | The fixture suites for the above |
+| `scripts/docs_check.py` | Doc-rot detector: dead relative links, tables split by prose, and stated assertion counts that no longer match the suite |
+| `scripts/assertion_lint.py` | Catches presence-grep assertions in the bash suites — a `grep -q` for a literal that a *comment* would satisfy just as well as the behaviour |
+| `scripts/commit_lint.py` | Catches a closing keyword a commit message only quotes. Commit messages aren't markdown, so backticks don't quote anything, and GitHub closed a live backlog item off a sentence that was merely describing a test fixture |
+| `scripts/run_progress.py` | A reader over a run's `stream.jsonl`, so a fifty-minute unattended run isn't a black box. Deliberately a *reader* — letting the run narrate its own progress is the same defect one level up |
+
+Notice the pattern in `scripts/`: every one is a detector, and every one exists because a written
+rule had already failed to prevent the defect it catches. That is the project's most-repeated
+lesson, in file form.
+
+`make help` lists the targets; `make check` is the aggregate that runs the suites and the
+detectors together, and it's the row the merge gate cites as *local project gates*.
+
+### The seams — text formats one component writes and another parses
+
+The components are coupled by strings embedded in GitHub artifacts, not by an API. That's what
+makes the system work across a headless run, a fresh context and a human's browser tab — and it's
+also where the sharpest failures live, because a malformed seam usually looks fine to a reader.
+
+| Seam | Written by | Read by | How it breaks |
+|---|---|---|---|
+| `<!-- agent-session:spec -->` | `intake` / `triage`, into the issue body | `session-setup`, `express` Phase 0, driver selection | An issue that merely *quotes* the marker reads as specced — a detector can't tell a mention from a claim |
+| `## Tier: auto-ok` | `intake` / `triage` | `session-setup`, driver selection | Anchored on `^## Tier:`, token taken from the heading line only. No colon, the token only in the prose beneath, or both tokens on one line each break it a different way. **Exactly one such heading per body** |
+| `C1…Cn` ids | `plan`, at the freeze | `plan.md`, the commits, the verifier's report, the PR table, the gate block | Ids must stay stable for the whole run; everything downstream cites them |
+| The freeze commit sha | `plan`, re-anchored by `pr` after a rebase | The tamper diff | A rebase rewrites it and a squash orphans it. A baseline absent from `origin` turns the tamper check into a self-report |
+| `<!-- agent-session:gate -->` | `pr` | `driver/gate.py`, and humans | The block is machine-readable, so a verdict written before it was derived is one an automated reader can act on. It opens as `pending` for exactly that reason |
+| `driver-parked` label | The driver | The driver's own selection | Selection reads the **label**, not the append-only park log — reading a history as current state was the original bug here |
+
+The label and the board fields are the *only* things the driver writes to a target repo. Issue
+bodies, comments, PR bodies, reviews and thread resolutions are out of bounds, and merging always
+is.
+
+### The cast of subagents — and what each is deliberately not told
+
+Verifier independence isn't a policy in this system, it's a dispatch pattern. The last column is
+the one that matters — what each subagent is *not* given is the mechanism.
+
+| Subagent | Dispatched by | Given | Deliberately withheld |
+|---|---|---|---|
+| Documentarian | `intake`, `triage`, `plan` | The repo and 3–5 neutral "how does X work today?" questions | The feature being designed — a researcher told the goal starts proposing the fix |
+| Triage scanner | `triage`, one per issue | One issue body, the repo, read-only tools, and permission to run **targeted commands only** | Nothing withheld; the constraint here is what it may *run*, not what it may see |
+| Check-author | `plan`, Phase 0 | The spec and the criteria | The implementation plan — a test author who's read the plan tests the plan rather than the criterion |
+| Check-reviewer | `plan`, Phase 0, **before** the freeze commit | `checks.md` and the repo, with no Edit or Write tools | The plan *and* the criteria's rationale — a reviewer told what the author meant reads each check as that intent instead of as what it literally asserts |
+| Implementer | `execute`, one per phase | The plan, and the frozen files named by path as read-only | Nothing; a failing frozen check is a report-back, not a fix-up |
+| Verifier | End of `execute`, again in `pr` | `checks.md` and the repo | The plan, the notes, and any account of why a failure might be acceptable — that context is exactly what produces a rationalised pass |
+
+The check-reviewer and the verifier look similar enough to want merging, and merging them would
+break the whole thing. The reviewer grades **check against criterion** while no implementation
+exists to shape the answer; the verifier grades **implementation against check**, and is
+trustworthy precisely because it never saw the plan.
+
+The reviewer also sits *before* the freeze commit on purpose. Up to that moment, strengthening a
+weak check is free. After it, the same fix costs an amendment and the run's tier.
 
 ---
 
 ## How one issue actually flows
+
+The shape, before the detail. Follow the artifacts rather than the modes — each stage's output is
+the next stage's contract, and the human appears at exactly two places:
+
+```
+  human ──┐                                                        ┌── human
+          ▼                                                        ▼
+      ┌────────┐   issue body    ┌───────┐  checks.md   ┌─────────┐   PR + gate   ┌───────┐
+      │ intake │ ─ marker ─────▶ │ plan  │ ─ freeze ──▶ │ execute │ ─ block ────▶ │ merge │
+      │ triage │   criteria      │       │   commit     │   pr    │   verdict     │       │
+      └────────┘   tier          └───────┘              └─────────┘               └───────┘
+                                     │                       ▲
+                                     └── check-author ────────┘
+                                         check-reviewer   verifier
+                                         (before freeze)  (never saw the plan)
+```
+
+`express` is the middle two boxes run end to end without stopping. The driver wraps the same
+span and adds selection and outcome recording around it.
 
 **1. Intake.** `intake` interviews you about one issue, one question at a time, always with a
 recommended answer so you're ratifying rather than facing a blank page. It researches the
@@ -142,10 +272,26 @@ unresolved review threads, tier `auto-ok`, no risk-gated paths — and writes it
 **4. Merge.** A human does this. Always, so far, and by design: the deny rule on the merge command
 is a mechanism, not an intention.
 
-The driver wraps steps 2–3: it finds an eligible issue (open, marker present, tier `auto-ok`, no
-open PR referencing it, not parked — all read from GitHub, no local state), runs `express`, reads
-the gate block rather than re-deriving it, and records the outcome. [usage.md](usage.md) has the
-full outcome table and the recovery paths.
+### What the driver adds around steps 2–3
+
+Four steps, and two of them carry the interesting properties:
+
+1. **Select.** Open, carries the marker, its anchored `## Tier:` line says `auto-ok`, no open PR
+   references it, no `driver-parked` label. Every one of those is **read from GitHub**, so
+   selection consults no local state and answers the same way on any machine. A dry run prints one
+   line per *excluded* issue with its reason, because a queue read that yields nothing has to
+   distinguish "no work available" from "my query is broken."
+2. **Invoke** `express` headlessly, writing `inflight.json` *before* the call so an interrupted run
+   leaves evidence, and streaming the transcript to disk so `run_progress.py` can report on a live
+   run from outside it.
+3. **Classify** by *reading* the gate block the run wrote, never by re-deriving the verdict. The
+   driver is a recorder here, not a second opinion — which is also why `gate.py` is treated as the
+   oracle and kept off-limits to unattended work.
+4. **Record**, and park anything that didn't reach a verdict by labelling the issue, so future
+   selection skips it until a human or a later run clears it.
+
+[usage.md](usage.md) has the full outcome table, the state directory layout, and the recovery
+paths for a run that died mid-flight.
 
 ---
 
