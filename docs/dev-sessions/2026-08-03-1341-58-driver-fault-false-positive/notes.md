@@ -55,6 +55,12 @@ loop worked as intended.
   non-zero, which `stream_has_events` reads as "no events". Deliberate and commented: it preserves
   today's behaviour for a case nobody has evidence about, rather than silently reclassifying it.
   The frozen check does not exercise it — the fixture's events are well-formed JSON.
+
+  **The Copilot review caught that the first draft's reason string said "empty stream" here**,
+  which is false for a truncated one — this issue's own defect in miniature, an assertion the
+  driver has not earned, reintroduced by the fix for it. Reworded to "no readable events", which
+  is true in both cases. The *classification* is deliberately left conservative; changing it would
+  go beyond both the frozen criteria and the evidence. Good catch, and a pointed one.
 - **`cost_known` is consulted in one branch only** (the nonzero-exit / no-success-result path).
   A run whose cost is equally undeterminable but which times out (rc 124) or reaches the gate
   records no such note. C2's CHECK exercises the path the implementation covers; widening it

@@ -781,6 +781,11 @@ has_success_result() { # $1 = stream.jsonl path
 # input. Unparseable garbage makes jq exit non-zero and so reads as "no events" --
 # the conservative direction, since it preserves today's classification for a case
 # nobody has evidence about rather than silently reclassifying it. See issue #58.
+#
+# So a false answer means "no READABLE events", which is not the same as "the file
+# is empty" -- and the reason string below says the former for exactly that reason.
+# Claiming an empty stream about a truncated one would be this issue's own defect
+# in miniature: an assertion the driver is not in a position to make.
 stream_has_events() { # $1 = stream.jsonl path
   [ -s "$1" ] || return 1
   jq -se 'length > 0' "$1" >/dev/null 2>&1
@@ -918,19 +923,24 @@ run_issue() { # $1 = issue number
     outcome="failed"; reason="timed out after ${RUN_TIMEOUT}s"
   elif [ "$rc" -ne 0 ] && [ -z "$session" ] && [ "${cost:-0}" = "0" ] \
        && ! stream_has_events "$raw"; then
-    # An EMPTY stream, no session id and no spend means the invocation never
+    # No readable events, no session id and no spend means the invocation never
     # reached the model, so this is the DRIVER being broken, not the run failing.
     # Worth separating: a driver fault is fixed by editing this script, an
     # escalation is not, and the first #585 attempt spent $0 dying on a bad path
     # while looking like a normal failed run. Never park it -- parking would hide
     # the driver's own bug behind a skip reason on a perfectly good issue.
     #
-    # The empty-stream conjunct is what keeps that separation honest. Without it
-    # the branch inferred "never started" from two empty variables, so an
-    # extractor miss on a real run was recorded as a fact ABOUT the run -- $10.93
-    # logged as $0 on #50. See issue #58.
+    # The stream conjunct is what keeps that separation honest. Without it the
+    # branch inferred "never started" from two empty variables, so an extractor
+    # miss on a real run was recorded as a fact ABOUT the run -- $10.93 logged as
+    # $0 on #50. See issue #58.
+    #
+    # "no readable events" rather than "empty stream": a truncated or garbled
+    # stream is non-empty and still lands here, so the stronger wording would be
+    # an assertion the driver has not earned. Same discipline the branch itself
+    # is being taught.
     outcome="driver-fault"
-    reason="claude exited $rc before starting (empty stream, no session, no spend) -- see $rundir/stderr.txt"
+    reason="claude exited $rc before starting (no readable events, no session, no spend) -- see $rundir/stderr.txt"
   elif [ "$rc" -ne 0 ] && ! has_success_result "$raw"; then
     outcome="failed"
     if [ "$cost_known" -eq 1 ]; then
