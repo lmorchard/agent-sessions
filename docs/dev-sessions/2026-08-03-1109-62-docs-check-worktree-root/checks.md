@@ -1,7 +1,7 @@
 # Frozen acceptance checks
 
 **Source:** https://github.com/lmorchard/agent-sessions/issues/62
-**Frozen at:** _(recorded in the follow-up commit)_
+**Frozen at:** `2d7c4a6` (2026-08-03) — the tamper-diff baseline.
 
 **Check files — read-only from Phase 1 onward:**
 - `scripts/test_docs_check.py`
