@@ -770,6 +770,22 @@ has_success_result() { # $1 = stream.jsonl path
      "$1" >/dev/null 2>&1
 }
 
+# The driver-fault branch needs POSITIVE evidence that the invocation never reached
+# the model, not merely the absence of an extractable cost. A stream with events in
+# it is a run that started, whatever pick_result could make of it: on #50 a stream
+# carrying 95 turns and $10.93 was recorded as `cost_usd: 0, no spend` because the
+# result record had not been flushed when the driver read it. An effectively empty
+# stream is the never-started shape, and it is the only one that branch may claim.
+#
+# `-s` answers the zero-byte case without depending on jq's behaviour on empty
+# input. Unparseable garbage makes jq exit non-zero and so reads as "no events" --
+# the conservative direction, since it preserves today's classification for a case
+# nobody has evidence about rather than silently reclassifying it. See issue #58.
+stream_has_events() { # $1 = stream.jsonl path
+  [ -s "$1" ] || return 1
+  jq -se 'length > 0' "$1" >/dev/null 2>&1
+}
+
 # --- stage: invoke ---------------------------------------------------------
 
 build_prompt() { # $1 = issue url
@@ -872,6 +888,14 @@ run_issue() { # $1 = issue number
   session="$(printf '%s' "$result"| jq -r '.session_id // ""' 2>/dev/null || true)"
   printf '%s' "$final" > "$rundir/final.txt"
 
+  # `cost` reads 0 both when the run genuinely spent nothing and when pick_result
+  # found no record to read. Only the second is an unknown, and only the second may
+  # be described as one: saying "undetermined" about a cost that WAS read is this
+  # bug inverted -- a false claim in the other direction, on a row that has the real
+  # number sitting next to it. Guard G4 asserts it does not happen.
+  local cost_known=0
+  printf '%s' "$result" | jq -e 'has("total_cost_usd")' >/dev/null 2>&1 && cost_known=1
+
   # Denials are greppable, in three measured phrasings: the rule-specific
   # "with command <cmd> has been denied", the generic don't-ask-mode form, and the
   # path-rule form ("denied by your permission settings") that Edit/Write deny
@@ -892,17 +916,32 @@ run_issue() { # $1 = issue number
   local outcome reason prline prnum prurl gate
   if [ "$rc" -eq 124 ]; then
     outcome="failed"; reason="timed out after ${RUN_TIMEOUT}s"
-  elif [ "$rc" -ne 0 ] && [ -z "$session" ] && [ "${cost:-0}" = "0" ]; then
-    # No session id and no spend means the invocation never reached the model, so
-    # this is the DRIVER being broken, not the run failing. Worth separating: a
-    # driver fault is fixed by editing this script, an escalation is not, and the
-    # first #585 attempt spent $0 dying on a bad path while looking like a normal
-    # failed run. Never park it -- parking would hide the driver's own bug behind
-    # a skip reason on a perfectly good issue.
+  elif [ "$rc" -ne 0 ] && [ -z "$session" ] && [ "${cost:-0}" = "0" ] \
+       && ! stream_has_events "$raw"; then
+    # An EMPTY stream, no session id and no spend means the invocation never
+    # reached the model, so this is the DRIVER being broken, not the run failing.
+    # Worth separating: a driver fault is fixed by editing this script, an
+    # escalation is not, and the first #585 attempt spent $0 dying on a bad path
+    # while looking like a normal failed run. Never park it -- parking would hide
+    # the driver's own bug behind a skip reason on a perfectly good issue.
+    #
+    # The empty-stream conjunct is what keeps that separation honest. Without it
+    # the branch inferred "never started" from two empty variables, so an
+    # extractor miss on a real run was recorded as a fact ABOUT the run -- $10.93
+    # logged as $0 on #50. See issue #58.
     outcome="driver-fault"
-    reason="claude exited $rc before starting (no session, no spend) -- see $rundir/stderr.txt"
+    reason="claude exited $rc before starting (empty stream, no session, no spend) -- see $rundir/stderr.txt"
   elif [ "$rc" -ne 0 ] && ! has_success_result "$raw"; then
-    outcome="failed"; reason="claude exited $rc"
+    outcome="failed"
+    if [ "$cost_known" -eq 1 ]; then
+      reason="claude exited $rc"
+    else
+      # The run started and did not finish, and the driver cannot say what it
+      # cost. Say that, rather than letting the ledger's `cost_usd: 0` stand as a
+      # claim -- a missing row prompts someone to go looking, a confident zero
+      # does not.
+      reason="claude exited $rc; cost undetermined (no result record in the stream) -- see $rundir/stderr.txt"
+    fi
   else
     # rc != 0 with a successful result in the stream is the spurious-trailing-record
     # case. Say so out loud rather than swallowing it -- the exit code is still a real
