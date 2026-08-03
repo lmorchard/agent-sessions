@@ -53,9 +53,18 @@ skips: list[str] = []
 
 
 def md_files() -> list[Path]:
+    """Every maintained markdown file under ROOT.
+
+    Exclusions are matched against each path **relative to ROOT**, never against
+    its absolute components. Matching absolutely means a directory can exclude
+    *itself*: run from `.worktrees/<branch>/` and ROOT's own path carries
+    `.worktrees`, so every file beneath it matched and the checker scanned nothing
+    while still exiting 0 -- a null rendering as a pass, in the one detector built
+    to catch that shape. See issue #62.
+    """
     out = []
     for p in ROOT.rglob("*.md"):
-        if any(part in SKIP_DIRS for part in p.parts):
+        if any(part in SKIP_DIRS for part in p.relative_to(ROOT).parts):
             continue
         out.append(p)
     return sorted(out)
