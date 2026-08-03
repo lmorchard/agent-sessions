@@ -224,6 +224,29 @@ its own `tmp_path`. Results were identical running the file alone and inside the
 ordering dependence. `scanned()` would raise `ValueError` rather than silently pass if a fix made
 `md_files()` return paths outside `ROOT` — it fails loudly, which is right.
 
+## Tamper verdict
+
+`clean`, taken against the tree that ships and re-runnable by anyone:
+
+```
+git diff 2d7c4a6 -- scripts/test_docs_check.py scripts/test_gate_test_wiring.py   # empty
+```
+
+`2d7c4a6` is an ancestor of the pushed head (`git merge-base --is-ancestor` confirms), and the
+branch was not squashed, so a reviewer can re-run the command rather than take this record on
+trust. `origin/main` had not advanced at rebase time, so the freeze sha needed no re-anchoring.
+
+Confirmed independently by the verifier subagent, which ran both diffs itself and read
+`git diff 2d7c4a6 --stat` for collateral: **no test file appears in the diff at all.** The only
+non-session-artifact change is `scripts/docs_check.py`.
+
+**One difference, sanctioned and named rather than left for a reader to notice:** `checks.md`
+itself differs from the freeze commit by two lines — the `Frozen at` header, written in the
+follow-up commit `a842815` because a commit cannot contain its own hash. `frozen-checks.md` names
+this as an inert append. No CRITERION line, CHECK command, guard command or `AT FREEZE` line
+differs. `checks.md` is not in `Check files`, so it is outside the tamper scope either way.
+
 ## Amendments
 
-_(Append-only. Empty — no check was changed after the freeze commit.)_
+_(Append-only. Empty — no check was changed after the freeze commit. Every strengthening in the
+Adjudication above was made pre-freeze, which is why none appears here.)_
