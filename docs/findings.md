@@ -26,9 +26,9 @@ The dominant defect class, and the one the merge gate exists to prevent. A gate 
 check cites a specific mechanism; something *near* that mechanism supplies the answer; the row
 reports true. Nothing lies, and the row means nothing.
 
-**Nine of the ten below are fixed; the tenth is open. The gap is not the instances — it is that
-nobody has ever looked.** Eight of the ten were found by an unattended run stumbling into them; **two
-were found by looking**, and both of those came from *verifying a change rather than auditing the
+**Nine of the eleven below are fixed; two are open. The gap is not the instances — it is that
+nobody has ever looked.** Eight of the eleven were found by an unattended run stumbling into them;
+**three were found by looking**, and all three came from *verifying a change rather than auditing the
 code*. So the number remaining is **unknown**, and phase 3 converts each remaining one into an
 automatic merge.
 
@@ -53,10 +53,20 @@ to the rate at which they arrive.
 | 8 | `amendments: none` was true only under one of two readings of the amendment policy. The policy now names both trees, and under it #668 was an amendment. | move 5 (#668) | closed 2026-07-27 |
 | 9 | **The driver's test suite tests a replica of the classifier, not the classifier.** `test-driver.sh` hand-copies driver logic — one helper is annotated *"Mirrors the driver's extraction + comparison exactly"* with nothing enforcing that — and it has **already diverged**: `classify_outcome` is 53 lines in the driver and 15 in the copy, with **zero `ci-stale` awareness** in the copy. | verified 2026-07-27 | closed by [#9](https://github.com/lmorchard/agent-sessions/issues/9) |
 | 10 | **`pr_for_issue` matches a bare `#N` anywhere in an open PR's body, title or branch name**, so a PR that merely *mentions* an issue removes it from selection. The function's own comment says *"an express PR carries `Closes #N`"* and the code never requires the keyword. A docs PR listing six issue numbers hid six issues; `closingIssuesReferences` was empty on it. | verified 2026-07-29 | closed by [#23](https://github.com/lmorchard/agent-sessions/issues/23) |
+| 11 | **The `threads` row can be satisfied by the run resolving its own threads.** On PR #78 Copilot raised one thread naming a real defect the change had introduced; the run fixed it, replied, and **resolved the thread itself** under the operator's `gh` credential — `resolvedBy` reads as the operator and is indistinguishable from a human's. The row read `0 unresolved`, and the reason correctly noted the `graphql` query was real and the review had genuinely landed. Every part of that is true, and the row still imports no outside opinion. | verified 2026-08-03 | open — [#79](https://github.com/lmorchard/agent-sessions/issues/79) |
 
 **The tell:** the row names a command, and the evidence offered is not that command's output.
 **The fix, every time:** make the row cite a command that is actually run, and make its failure
 mode distinguishable from its success mode.
+
+**Instance 11 sharpens what "adjacent" means, and it is the reason disclosure is not the fix.** The
+prior instances were fixed by making the row cite the real mechanism and disclose substitutions. #78
+did both — the row named `graphql reviewThreads`, ran it, got a true answer, and said in the reason
+that this was *"the real mechanism this time, not a substitute."* The defect survives all of that,
+because the mechanism itself is **satisfiable by the implementer**. So the sweep in #2 needs a second
+question beyond *"what could satisfy this that is not the thing it names?"* — namely **"who can
+satisfy this, and are they the author?"** A row that only the author can clear is not a check on the
+author.
 
 **Instance 3 recurred on 2026-08-03, and its "fixed" status was false for two days before anyone
 looked.** decafclaw #139 / PR #754 published `tamper: clean — empty diff` while `checks.md` changed by
@@ -152,7 +162,22 @@ table's own column and not in a sentence above it.)*
    root, 0 from inside a worktree**, both exiting 0. Every `express` run works in a worktree, so
    **`project-gates: make check green` has included a doc-rot detector that examined nothing on every
    PR this project has published.** Tracked as
-   [#62](https://github.com/lmorchard/agent-sessions/issues/62).
+   [#62](https://github.com/lmorchard/agent-sessions/issues/62); **closed 2026-08-03 by PR #75**,
+   which matched `SKIP_DIRS` relative to `ROOT` so a directory can no longer exclude itself.
+
+   **It had a mirror with the opposite symptom, and the pair is the real lesson.** From the repo
+   *root*, the same name list failed to skip a worktree it did not happen to name: Claude Code
+   creates them at `.claude/worktrees/` — no dot — so a second session's whole repo copy was scanned
+   and its frozen session records lost the `docs/dev-sessions/` exemption, producing 11 failures that
+   were all exempt in their real location. `make check` could not go green on this repo while any
+   `.claude/worktrees/` copy existed. **One name list, two opposite failures: it excluded its own
+   `ROOT`, and it failed to exclude a real worktree.** The fix that closed both was to stop matching
+   names and ask for a marker — a worktree root carries `.git` as a *file* (`gitdir: …`), a nested
+   checkout as a directory — which identifies the class rather than enumerating spellings.
+   **The same name-matching mistake was live in the code that *creates* these directories on the same
+   day**, found by watching two runs pick `.worktrees/` while the repo's precedent was
+   `.claude/worktrees/`: [#80](https://github.com/lmorchard/agent-sessions/issues/80). Fixing the
+   reader did not fix the writer, and nothing connected them.
 
 **Instance 9 is the one to sit with.** The other eight are checks that reported a wrong *value*; this
 is a detector reporting a correct value about an empty set. It was found by an unattended run
@@ -332,6 +357,29 @@ forms.** A rule that fires on inert changes (comments, appends) produces false p
 `checks.md` can be inside its own baseline: no CRITERION/CHECK/guard line may differ, appends are
 inert.
 
+**At freeze, lock anything red whose green condition is an exit status.** Earned on #62, 2026-08-03,
+and the sharpest single move either run made. The check-reviewer found a *third* red test outside the
+declared tamper surface: `scripts/test_gate_test_wiring.py`, whose failing assertion is literally
+`make gate-test` returncode `== 0` — necessarily false while the run's own criteria are red by design.
+Its reasoning for adding it to the frozen Check files: **"a red test file outside the declared tamper
+surface, whose message points at an exit-status assertion, is an invitation."** It was also another
+session's frozen check file, so editing it would have been a cross-session violation. The
+generalisable rule is about *shape*, not that file: a test that is red for a reason the run did not
+cause, and that goes green when a command exits 0, is the cheapest thing in the tree to make pass
+wrongly. Enumerate those at freeze and put them under the tamper diff even when the work has no
+reason to touch them.
+
+**"Passes today" in an issue body is a dated claim, and amending an issue is exactly when you inherit
+one unverified.** #62's G3 read *"Passes today at 103 files"*, written 2026-08-01 and true then. Two
+days later a second worktree existed and the same command exited 1. The guard was carried into the
+frozen manifest by an amendment that added a criterion whose own evidence *contradicted* it — the
+amender re-verified the thing being added and not the thing already there. The check-reviewer's
+verdict: **"G3 as literally worded has no configuration in which it genuinely passes today."** Two
+further teeth in the same finding: the guard's "non-zero file count" clause was **unobservable from
+the command it named** (`main()` prints no count), and the guard was **gameable by deleting the second
+worktree** — greening it with no fix at all. So at freeze, re-run every inherited guard rather than
+trusting its recorded status, and state guards so that no environment change can satisfy them.
+
 **Amendment vs. clarification.** An amendment changes what a check *asserts* → stop, human-confirm,
 log, downgrade the run to `needs-review`. A clarification fixes wording that never matched its own
 intent → logged, human-adjudicated, no downgrade. **Settled 2026-07-27: re-run both wordings
@@ -494,7 +542,7 @@ tier downgrade and a human decision were all avoidable at the brief.
 
 ---
 
-## The verifier catches its author — five instances
+## The verifier catches its author — seven instances
 
 Dispatching the verifier as `Explore` (**no Edit/Write**, so it structurally cannot touch the
 oracle it grades) is not ceremony. Five times it has caught the person who wrote the thing:
@@ -539,6 +587,34 @@ reviewer's most confident deletion in the consolidation pass was "`criteria-gram
 EARS to a model that already knows EARS." Plausible, and wrong — the model knows *of* EARS but
 defaults nearly everything to `WHEN`, losing Ubiquitous and `WHILE` and missing `IF/THEN` for the
 error path 3 times in 5.
+
+**Instances 6 and 7 are the records instance 5 asked for** — it shipped without a disposition bar and
+said to *"revisit when there are records from real manifests rather than from a fixture built to be
+reviewed."* Both are from real manifests, on 2026-08-03:
+
+6. **#62 — the first freeze-time catch on a real manifest, and it caught the operator.** Three
+   findings worth the dispatch, all adjudicated *pre-freeze* so none cost the tier: G3 had **no
+   configuration in which it genuinely passed** and was additionally **gameable by deleting a stray
+   worktree** (greening it with no fix at all); G4's second arm **passed vacuously**, and was shipped
+   flagged as such "so the green tick is not read as coverage it does not yet have"; and the
+   exit-status invitation now recorded as its own rule above. G3 and G4 were both written by *me* an
+   hour earlier while amending the issue — so this is the first instance where the author it caught
+   was the human operator rather than a prior run.
+7. **#62 — the verifier caught a self-referential count in the tamper record.** An earlier draft
+   claimed the frozen manifest *"differs by two lines"*; the true diff is larger than any figure
+   written inside it, **because the figure is part of what it measures.** No amount of care prevents
+   that class; only citing the command does. The shipped record says so explicitly: *"`git diff
+   <freeze> -- <this file>` is the only honest answer."*
+
+**A blind spot the same day, recorded because it bounds the claim above.** On #78 the internal
+verifier passed the change, and **Copilot** found the real defect: `stream_has_events` reported
+"empty stream" for a stream that was merely unparseable — reintroducing, inside the fix for it, the
+exact defect the issue was about. The run's own reply names it: *"that is this issue's own defect in
+miniature."* Verified independently that `jq -se` exits non-zero on a truncated final line, which is
+what a `SIGTERM`'d run produces, so this was the issue's own scenario. **The verifier grades against
+the frozen checks, and no criterion covered it** — so a defect outside the manifest is outside the
+verifier's remit by construction. Two graders with different remits caught different things; neither
+was redundant.
 
 ---
 
@@ -755,9 +831,20 @@ about mutation-testing a guard that protects a dangerous state.
   freeze sha and forces rebase + re-anchor + full re-verify. `origin/main` moved three times during
   #649 and four consecutive runs paid it in move 3. The machinery held every time; the wall-clock
   cost is the planning input.
-- **Real `express` runs cost $4.41–$11.87.** Move 5's two-issue loop came in at $11.76 and $11.20,
-  total $22.96 — both would have exhausted the old $12 ceiling. `make run` now defaults to
-  `--max-budget-usd 25` and `make loop` does two issues; the hand-assembled command is obsolete.
+- **Real `express` runs cost $4.41–$11.87 through 2026-08-01, then $19.56–$23.63 on 2026-08-03.**
+  Move 5's two-issue loop came in at $11.76 and $11.20, total $22.96 — both would have exhausted the
+  old $12 ceiling, which is why `make run` now defaults to `--max-budget-usd 25` and `make loop` does
+  two issues. **The later figures are the planning input, and they are close enough to the ceiling to
+  matter**: the two runs on 2026-08-03 cost $20.97 (#62) and $19.56 (#58), 84% and 78% of $25, and
+  #52's run hit $23.63. Both 2026-08-03 runs reached `gate-eligible` with zero amendments, so this is
+  the price of a *clean* run rather than of a troubled one. What plausibly drives it is the
+  re-verification cycle: both re-dispatched the independent verifier after the tree changed, which is
+  correct and not free.
+- **In-flight spend is unobservable.** Cost appears only in the terminal `result` event — verified
+  2026-08-03 by scanning a live run's `stream.jsonl`: **zero** cost fields across 1.7 MB while the run
+  was in progress. So `make watch` can report turns and elapsed time but not money, and the budget
+  ceiling can only be *enforced* at exit, never monitored toward. This is also the other half of the
+  killed-run defect (class 2, instance 8): the field is not hard to parse, it does not exist yet.
 - **A ~1-in-8 triage conversion rate** should govern board-driver expectations. Of 8 issues scanned,
   3 came out `auto-ok` but only 1 was genuinely ready. **Second data point, 2026-07-29: 3 scanned, 2
   `auto-ok`, both with a discriminating criterion that was actually run** — a much better rate on a
@@ -791,7 +878,12 @@ about mutation-testing a guard that protects a dangerous state.
   and a trivial canary sailed through it. `log show` returns nothing on this host, so it cannot
   arbitrate. **The workaround does not depend on the cause: drive long runs from a terminal, not from
   a harness background task.** A foreground call cannot substitute — the harness caps those at 10
-  minutes and these runs take 30–60.
+  minutes and these runs take 30–60. **Narrowed 2026-08-03: a `nohup`-detached launch from inside a
+  harness session survived twice**, on runs of ~50 and ~53 minutes, both to a clean `gate-eligible`
+  exit. So the distinction is not terminal-vs-harness but **detached-vs-harness-tracked**, which is a
+  cheaper workaround than it looked: `nohup make run-self … &` with output to a log file, then poll the
+  log and the run's `stream.jsonl`. Two survivals do not refute a nondeterministic kill, so this
+  narrows the workaround without closing the cause.
 - **A driver that dies between invoking and classifying leaves no record.** Observed: a run
   completed (98 turns, 19 min, **$9.44**) and opened a PR, then the process was killed before
   classifying — real money spent, a PR open, and an empty `runs.jsonl`. Everything the driver
