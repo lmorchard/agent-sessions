@@ -52,10 +52,56 @@ failures: list[str] = []
 skips: list[str] = []
 
 
+def under_nested_worktree(p: Path) -> bool:
+    """True if any directory strictly between ROOT and `p` carries a `.git` entry.
+
+    A linked git worktree's root holds `.git` as a *file* (`gitdir: …`); a nested
+    clone or submodule holds it as a *directory*. Either one marks a working tree
+    that is not this one -- whatever it is named, and wherever the tool that made
+    it decided to put it.
+
+    That last part is why this is a marker and not another name. `md_files()` used
+    to decide what was a worktree by matching directory names, and no name list can
+    be right: `.worktrees/` is the fallback this repo never uses, while Claude Code
+    actually creates them at `.claude/worktrees/`. Enumerating spellings is the
+    hand-maintained-inventory shape issue #50 argued against; this identifies the
+    class instead. Stdlib only, no subprocess.
+
+    **ROOT is excluded from the walk, and that is a requirement rather than an
+    optimisation.** ROOT always carries a `.git` entry of its own -- a directory in
+    a main checkout, a file in a worktree -- so a rule that included it would skip
+    everything and reintroduce #62's original bug through its own fix. Guard G4
+    exists for exactly this. Walking the *relative* parts is what makes the
+    exclusion structural: it cannot climb above ROOT and find the repo's own `.git`.
+    """
+    d = ROOT
+    for part in p.relative_to(ROOT).parts[:-1]:
+        d = d / part
+        if (d / ".git").exists():
+            return True
+    return False
+
+
 def md_files() -> list[Path]:
+    """Every maintained markdown file under ROOT.
+
+    Exclusions are matched against each path **relative to ROOT**, never against
+    its absolute components. Matching absolutely means a directory can exclude
+    *itself*: run from `.worktrees/<branch>/` and ROOT's own path carries
+    `.worktrees`, so every file beneath it matched and the checker scanned nothing
+    while still exiting 0 -- a null rendering as a pass, in the one detector built
+    to catch that shape. See issue #62.
+
+    Two rules, and they are not redundant. `SKIP_DIRS` still excludes by name, which
+    is what catches a bare `.worktrees/` or `node_modules/` holding no checkout of
+    its own; `under_nested_worktree()` excludes by marker, which is what catches a
+    real worktree at a path no name list happened to mention.
+    """
     out = []
     for p in ROOT.rglob("*.md"):
-        if any(part in SKIP_DIRS for part in p.parts):
+        if any(part in SKIP_DIRS for part in p.relative_to(ROOT).parts):
+            continue
+        if under_nested_worktree(p):
             continue
         out.append(p)
     return sorted(out)
