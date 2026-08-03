@@ -566,6 +566,277 @@ fi
 kill "$ORPHAN_PID" 2>/dev/null
 wait "$ORPHAN_PID" 2>/dev/null
 
+# ============================================================================
+# FROZEN acceptance checks for issue #58 -- "no session, no spend" is inferred
+# from an ABSENT result record, so an extractor miss is recorded as a fact about
+# the run.
+#
+#   https://github.com/lmorchard/agent-sessions/issues/58
+#
+# Appended 2026-08-03. Same rules as everything above: no replicas, no grepping
+# the subject for a literal, every assertion over the runtime behaviour of the
+# shipped driver run as a subprocess against stubs.
+#
+# Today the classifier is
+#
+#     elif [ "$rc" -ne 0 ] && [ -z "$session" ] && [ "${cost:-0}" = "0" ]; then
+#       outcome="driver-fault"
+#       reason="claude exited $rc before starting (no session, no spend) ..."
+#
+# and `session` / `cost` both come from `pick_result`, which emits NOTHING when
+# the stream carries no `type=="result"` record. So "the extractor found nothing"
+# is rendered as "the run never started and spent nothing" -- recorded live for a
+# run that spent $10.93.
+#
+# C1 and C2 are expected to FAIL at freeze. G3 is expected to PASS and must KEEP
+# passing: it is what stops C1 being satisfied by deleting the driver-fault
+# branch, which is the cheap fix and would lose the distinction the branch was
+# added for (a driver fault is fixed by editing the script; an escalation is not).
+# ============================================================================
+
+# THE NEEDLE for C2, chosen here and named once so the implementer has one string
+# to emit and the check has one string to look for. Two words, meaning-bearing:
+# a full sentence would be brittle, and a single common word ("unknown", "cost")
+# either already appears in today's output or would match by accident. Verified
+# absent from the driver source and from every reason it can currently write
+# (`grep -niE 'undetermin' driver/` finds nothing) -- and confirmed absent from
+# the runtime output by C2 failing at freeze.
+COST_UNKNOWN_NEEDLE="cost undetermined"
+
+# The claim the reason must stop making. This is the literal substring today's
+# driver-fault reason carries, which is what makes its absence meaningful --
+# but only alongside the positive needle above, which is why C2 asserts both.
+# A `hasnt` on its own would be satisfied by any rewording, including a wrong one.
+NO_SPEND_CLAIM="no spend"
+
+# The nonzero status both #58 stubs exit with. Named once so the two fixtures
+# differ in exactly ONE thing -- whether the stream carries events -- and the
+# difference between C1's outcome and G3's cannot be attributed to the exit code.
+NORESULT_EXIT=3
+
+# The cost G4's result record carries. The figure from the live incident, on
+# purpose: #58 was recorded as "no spend" for a run that spent this much.
+KNOWN_COST=10.93
+
+# A `claude` stub that emits real events and then dies WITHOUT a result record:
+# the truncated-stream shape, which is what a killed or disconnected run leaves
+# behind. Overwrites only the `claude` file inside a case's own stub dir -- the
+# same move make_gh_prlist_fails makes with `gh`. The argv line is kept so
+# claude_calls can prove the stub ran.
+#
+# NO `system`/`init` RECORD, deliberately, and this is the load-bearing detail.
+# A first draft carried one for realism. It made the fixture differ from G3's in
+# TWO respects -- the stream has events (the criterion's GIVEN) and a session_id
+# exists somewhere in the stream (not the criterion) -- so "scan the whole stream
+# for any session_id" would green C1, keep G3 green, and be unconstrained by any
+# assertion here, while a stream with events and no init record still classified
+# driver-fault. That is the criterion's own GIVEN left broken by a fix the checks
+# accepted. Two assistant events and nothing else: events are the only variable.
+make_claude_no_result() { # $1 = a dir that make_stubs has already populated
+  cat > "$1/claude" <<STUB
+#!/usr/bin/env bash
+printf 'claude %s\n' "\$*" >> "\$ARGV_LOG"
+cat >/dev/null
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"stub run started"}]}}'
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"stub run still going"}]}}'
+exit $NORESULT_EXIT
+STUB
+  chmod +x "$1/claude"
+}
+
+# The G4 stub: make_claude_no_result's stream PLUS a result record that carries a
+# real cost. Nonzero exit, non-empty session, no SUCCESS result -- so this lands
+# in the `failed` branch, and the cost was never in doubt.
+make_claude_cost_known() { # $1 = a dir that make_stubs has already populated
+  cat > "$1/claude" <<STUB
+#!/usr/bin/env bash
+printf 'claude %s\n' "\$*" >> "\$ARGV_LOG"
+cat >/dev/null
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"stub run started"}]}}'
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"stub run still going"}]}}'
+printf '%s\n' '{"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":$KNOWN_COST,"session_id":"stub-errored-session","result":"boom"}'
+exit $NORESULT_EXIT
+STUB
+  chmod +x "$1/claude"
+}
+
+# A `claude` stub for the genuine never-started case: nothing on stdout at all,
+# so the captured stream is zero bytes, and a nonzero exit. This is the run the
+# driver-fault branch exists for.
+make_claude_never_starts() { # $1 = a dir that make_stubs has already populated
+  cat > "$1/claude" <<STUB
+#!/usr/bin/env bash
+printf 'claude %s\n' "\$*" >> "\$ARGV_LOG"
+cat >/dev/null
+exit $NORESULT_EXIT
+STUB
+  chmod +x "$1/claude"
+}
+
+# --- #58 C1/C2: a truncated stream is not a never-started run ---------------
+#
+# C1 CRITERION: GIVEN a run whose `stream.jsonl` contains events but no parseable
+# `result` record, WHEN the driver classifies a nonzero exit, THEN it SHALL NOT
+# classify the run `driver-fault`.
+#
+# C2 CRITERION: WHEN the cost of a run cannot be determined, THEN the recorded
+# reason SHALL say so, and SHALL NOT assert that the run did not spend.
+#
+# One fixture, both criteria: they are two halves of the same misreading, and
+# splitting the fixture would let a fix satisfy one shape of stream and not the
+# other.
+#
+# `--issue` bypasses selection, so this is the classification path and nothing
+# else. The four attributability assertions immediately below MUST PASS at
+# freeze; they are what makes the C failures mean "the driver did the wrong
+# thing" rather than "the stub is broken". Specifically they rule out, in order:
+# a stub that never ran, an empty ledger, an empty stream (which would be G3's
+# fixture, not this one), and a stream that accidentally carries a result record
+# (which would route to a different branch entirely).
+
+echo "#58 C1/C2: a stream with events but no result record is not a never-started run"
+
+NRS_BIN="$TMPROOT/noresult-bin"; make_stubs "$NRS_BIN" "pending"
+make_claude_no_result "$NRS_BIN"
+NRS_LOG="$TMPROOT/noresult.log"; NRS_SD="$TMPROOT/noresult-state"
+NRS_SKILL="$TMPROOT/noresult-skill"; mkdir -p "$NRS_SKILL/phases"; : > "$NRS_SKILL/phases/express.md"
+NRS_REPOP="$TMPROOT/noresult-repo"; mkdir -p "$NRS_REPOP"
+NRS_OUT="$(run_driver "$NRS_BIN" "$NRS_LOG" --repo "$REPO" --issue "$ISSUE" \
+             --skill-dir "$NRS_SKILL" --repo-path "$NRS_REPOP" \
+             --state-dir "$NRS_SD" --max-budget-usd 10)"
+
+# The ledger row for this issue, newest last -- the same "current record, not the
+# first appended" rule C4 above establishes.
+NRS_ROW="$(jq -rc --arg n "$ISSUE" 'select(.issue == ($n|tonumber))' \
+             "$NRS_SD/runs.jsonl" 2>/dev/null | tail -1)"
+NRS_OUTCOME="$(printf '%s' "$NRS_ROW" | jq -r '.outcome // empty' 2>/dev/null || true)"
+NRS_REASON="$(printf '%s' "$NRS_ROW"  | jq -r '.reason  // empty' 2>/dev/null || true)"
+NRS_RUNDIR="$(printf '%s' "$NRS_ROW"  | jq -r '.run_dir // empty' 2>/dev/null || true)"
+[ -n "$NRS_OUTCOME" ] || NRS_OUTCOME="(no runs.jsonl row for #$ISSUE)"
+[ -n "$NRS_REASON" ]  || NRS_REASON="(no runs.jsonl row for #$ISSUE)"
+NRS_STREAM="${NRS_RUNDIR:-/nonexistent}/stream.jsonl"
+NRS_EVENTS="$(jq -s 'length' "$NRS_STREAM" 2>/dev/null || echo 0)"
+NRS_RESULTS="$(jq -s '[.[] | select(.type=="result")] | length' "$NRS_STREAM" 2>/dev/null || echo -1)"
+
+NRS_CALLS="$(claude_calls "$NRS_LOG")"
+if [ "${NRS_CALLS:-0}" -ge 1 ]; then
+  ok "attributability: the fixture really invoked the claude stub"
+else
+  bad "attributability: the fixture really invoked the claude stub" \
+      "at least 1 logged claude call" "${NRS_CALLS:-0}"
+fi
+if [ -n "$NRS_ROW" ]; then
+  ok "  and the run really wrote a ledger row for #$ISSUE"
+else
+  bad "  and the run really wrote a ledger row for #$ISSUE" \
+      "a runs.jsonl row" "$(cat "$NRS_SD/runs.jsonl" 2>/dev/null || echo MISSING)"
+fi
+# Pinned to the exact record count, not `>= 1`. The fixture is deterministic, and
+# an exact count is what stops a session-bearing `system`/`init` line creeping
+# back in and re-introducing the second variable the stub's comment warns about.
+check "  and the captured stream carries exactly the fixture's 2 events" "2" "${NRS_EVENTS:-0}"
+check "  and really carries no result record" "0" "$NRS_RESULTS"
+
+hasnt "C1: the run is NOT classified driver-fault" "driver-fault" "$NRS_OUTCOME"
+has   "C2: the recorded reason names the cost as undetermined" \
+      "$COST_UNKNOWN_NEEDLE" "$NRS_REASON"
+hasnt "C2:   and does not claim the run did not spend" \
+      "$NO_SPEND_CLAIM" "$NRS_REASON"
+
+# --- #58 G3: a genuine never-started run is STILL driver-fault --------------
+#
+# GUARD: an empty stream, no session and no cost is still `driver-fault`.
+#
+# This must PASS at freeze and keep passing. Without it, C1 is satisfied by
+# deleting the driver-fault branch -- which is the cheap fix, and would throw
+# away the one distinction the branch was added for. The fixture differs from
+# C1/C2's in exactly one respect: the stub writes nothing to stdout. Same exit
+# status, same gh stub, same flags.
+
+echo "#58 G3: a genuine never-started run is still driver-fault"
+
+NST_BIN="$TMPROOT/nostart-bin"; make_stubs "$NST_BIN" "pending"
+make_claude_never_starts "$NST_BIN"
+NST_LOG="$TMPROOT/nostart.log"; NST_SD="$TMPROOT/nostart-state"
+NST_SKILL="$TMPROOT/nostart-skill"; mkdir -p "$NST_SKILL/phases"; : > "$NST_SKILL/phases/express.md"
+NST_REPOP="$TMPROOT/nostart-repo"; mkdir -p "$NST_REPOP"
+run_driver "$NST_BIN" "$NST_LOG" --repo "$REPO" --issue "$ISSUE" \
+  --skill-dir "$NST_SKILL" --repo-path "$NST_REPOP" \
+  --state-dir "$NST_SD" --max-budget-usd 10 >/dev/null 2>&1
+
+NST_ROW="$(jq -rc --arg n "$ISSUE" 'select(.issue == ($n|tonumber))' \
+             "$NST_SD/runs.jsonl" 2>/dev/null | tail -1)"
+NST_OUTCOME="$(printf '%s' "$NST_ROW" | jq -r '.outcome // empty' 2>/dev/null || true)"
+NST_RUNDIR="$(printf '%s' "$NST_ROW" | jq -r '.run_dir // empty' 2>/dev/null || true)"
+[ -n "$NST_OUTCOME" ] || NST_OUTCOME="(no runs.jsonl row for #$ISSUE)"
+NST_STREAM="${NST_RUNDIR:-/nonexistent}/stream.jsonl"
+NST_BYTES="$(wc -c < "$NST_STREAM" 2>/dev/null | tr -d ' ' || echo -1)"
+
+# The fixture self-check, for the same reason C1/C2 has one: a zero-byte stream
+# is the whole premise, and a stub that failed to run would produce one too.
+check "attributability: the never-started fixture's stream is zero bytes" "0" "${NST_BYTES:-missing}"
+NST_CALLS="$(claude_calls "$NST_LOG")"
+if [ "${NST_CALLS:-0}" -ge 1 ]; then
+  ok "  and the claude stub really ran (so the zero bytes are its output, not its absence)"
+else
+  bad "  and the claude stub really ran (so the zero bytes are its output, not its absence)" \
+      "at least 1 logged claude call" "${NST_CALLS:-0}"
+fi
+
+check "G3: the never-started run is still classified driver-fault" "driver-fault" "$NST_OUTCOME"
+
+# --- #58 G4: the needle is CONDITIONAL, not decoration ----------------------
+#
+# GUARD: WHEN the cost of a run IS determinable, the reason SHALL NOT claim it is
+# undetermined.
+#
+# This is C2's negative control, and without it C2 is satisfiable by emitting
+# $COST_UNKNOWN_NEEDLE unconditionally -- append it to the `failed` branch's
+# reason and both C2 assertions green with the driver never asking whether the
+# cost was determinable. That manufactures #58 inverted: a run whose result
+# record says $10.93 gets cost_usd 10.93 in the ledger with "cost undetermined"
+# in the reason beside it. A false fact about the run, which is the class this
+# issue exists to close.
+#
+# The fixture differs from C1/C2's in exactly one respect: a trailing result
+# record. Nonzero exit and no SUCCESS result, so it lands in the `failed` branch.
+#
+# --max-budget-usd 100, NOT 10, and the reason matters: at $10.93 of $10 this run
+# is over budget. The budget reclassification at agent-session-driver.sh:970 only
+# rewrites incomplete/parked/no-gate, so `failed` is safe today -- but depending
+# on that is a hidden coupling to a case list #58 is not touching, and a check
+# that breaks when an unrelated list grows is a check that trains people to wave
+# it through. A ceiling the fixture cannot reach removes the coupling entirely.
+
+echo "#58 G4: a determinable cost is not reported as undetermined"
+
+CK_BIN="$TMPROOT/costknown-bin"; make_stubs "$CK_BIN" "pending"
+make_claude_cost_known "$CK_BIN"
+CK_LOG="$TMPROOT/costknown.log"; CK_SD="$TMPROOT/costknown-state"
+CK_SKILL="$TMPROOT/costknown-skill"; mkdir -p "$CK_SKILL/phases"; : > "$CK_SKILL/phases/express.md"
+CK_REPOP="$TMPROOT/costknown-repo"; mkdir -p "$CK_REPOP"
+run_driver "$CK_BIN" "$CK_LOG" --repo "$REPO" --issue "$ISSUE" \
+  --skill-dir "$CK_SKILL" --repo-path "$CK_REPOP" \
+  --state-dir "$CK_SD" --max-budget-usd 100 >/dev/null 2>&1
+
+CK_ROW="$(jq -rc --arg n "$ISSUE" 'select(.issue == ($n|tonumber))' \
+            "$CK_SD/runs.jsonl" 2>/dev/null | tail -1)"
+CK_REASON="$(printf '%s' "$CK_ROW"  | jq -r '.reason   // empty' 2>/dev/null || true)"
+CK_COST="$(printf '%s' "$CK_ROW"    | jq -r '.cost_usd // empty' 2>/dev/null || true)"
+CK_RUNDIR="$(printf '%s' "$CK_ROW"  | jq -r '.run_dir  // empty' 2>/dev/null || true)"
+[ -n "$CK_REASON" ] || CK_REASON="(no runs.jsonl row for #$ISSUE)"
+CK_STREAM="${CK_RUNDIR:-/nonexistent}/stream.jsonl"
+CK_RESULTS="$(jq -s '[.[] | select(.type=="result")] | length' "$CK_STREAM" 2>/dev/null || echo -1)"
+
+# Attributability: this fixture's whole premise is that a result record is
+# present and its cost reached the ledger. Both are asserted, so a `hasnt` that
+# held because the run never happened would be caught here instead.
+check "attributability: the cost-known fixture's stream carries one result record" "1" "$CK_RESULTS"
+check "  and its cost really reached the ledger" "$KNOWN_COST" "${CK_COST:-missing}"
+
+hasnt "G4: a run whose cost IS determinable is not reported as undetermined" \
+      "$COST_UNKNOWN_NEEDLE" "$CK_REASON"
+
 # --- report ----------------------------------------------------------------
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
