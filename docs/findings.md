@@ -853,6 +853,29 @@ about mutation-testing a guard that protects a dangerous state.
   already knew what a criterion was, where the earlier eight were ordinary wishlist issues. If that
   is the cause, the conversion rate is a property of the *backlog*, not of `triage`, and neither
   figure generalises to a fresh repo.
+- **A dry queue was attributed to the wrong trigger for days, because the sample was curated.** The
+  standing explanation for decafclaw's empty queue was that trigger 2 fires on everything —
+  established honestly by scanning its Ready column: 8 issues, all authorization work, 0 `auto-ok`.
+  Reading the *unmarked* backlog on 2026-08-03 inverts it. decafclaw's `CLAUDE.md` **marks nothing
+  off-limits**, so trigger 2's project-configurable half contributes almost no gating and fires on an
+  estimated 15–20%, concentrated in one identifiable cluster (skill loading/discovery, schedule tiers,
+  `skill_permissions.json`, the email allowlist, credential skills, dependency changes). **The real
+  gate is trigger 1**, and it is severe: of 166 unmarked open issues, **16 contain acceptance criteria
+  of any kind** and **47 carry an explicit open question, deferred decision or "pick one."** The Ready
+  column was a *curation artifact* — someone had triaged the security-hardening cluster into it — so
+  the 8-of-8 result was never a sample of the backlog. Prior `auto-ok` specs in decafclaw's own
+  `docs/dev-sessions/` corroborate this and were sitting there the whole time.
+  **The lesson is about the inference, not decafclaw: N-of-N on a curated set is not a rate.** A
+  column someone filled on purpose is the least representative thing on a board, and it is also the
+  most convenient thing to scan. Check what selected the sample before generalising from it.
+- **Where triage density actually is, measured 2026-08-03 on a 17-issue spread:** trigger 2 fired on
+  3–4, trigger 1 on 11. Extrapolated yield for a full 166-issue pass is **~15–25 `auto-ok`** — a real
+  refill, at the cost of ~140 low-yield scans. The density is in the **recent, agent-filed,
+  file:line-precise tier** (issues at #≥600 plus `bug`-labeled, ~40 unique), which prior runs wrote
+  with the file, the line and often the exact test to mirror already named. So: **filter before
+  scanning** — skip the old exploratory tier, and skip any body matching
+  `open question|pick one|evaluate the options|Deferred —|worth deciding`, which is pre-failed on
+  trigger 1.
 - **Judge a `triage` pass by the eligible count it produced, not by the issues it touched.** "Scanned
   N, augmented K" is an *activity* report, and it is adjacent to the thing that matters — whether work
   the loop can pick up now exists. A pass can augment a dozen issues, report truthfully, and leave the
