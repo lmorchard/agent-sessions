@@ -108,7 +108,7 @@ run can weaken the assertions protecting routing it cannot itself edit.
 
 ## Loose ends
 
-- `gate/driver-outcome-routing` is committed but **not pushed** — no PR opened.
-- **PR #81 is still open** and edits `findings.md`. The operational figures above belong in
-  `findings.md` but would conflict, so they are parked here until #81 lands.
+- **PR #81 has since merged**, so the operational figures above are no longer parked — the durable
+  half is promoted into `findings.md`'s operational figures in this same branch. What stays here is
+  the per-issue narrative, which is provenance rather than a lesson.
 - The locked worktree at `.claude/worktrees/docs+orientation-repo-detail` is still present.
