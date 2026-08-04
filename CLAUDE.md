@@ -65,6 +65,21 @@ For this repo, the gated paths worth calling out by name, because the *reason* i
   not cover it, and this line was added because the move-7 partition missed it: `driver/` was
   wholly drivable before the classifier moved there.
 
+- **`driver/agent-session-driver.sh` — the outcome *routing*, gated 2026-08-03 by Les.** The file
+  holds the parking case lists and the budget-reclassification thresholds, so a run could in
+  principle edit them to flatter its own record. This was previously named as an accepted residual
+  risk with the note *"revisit if a run ever touches that routing."* **That clause has now fired
+  three times** — on #39, on #58, and it would fire again on [#82](https://github.com/lmorchard/agent-sessions/issues/82)
+  — and PR #78's gate block escalated it in writing rather than resolving it. A revisit trigger that
+  keeps firing and never converts is not a trigger; it is a deferral. So it converted.
+
+  **The cost is stated, because it is real and it is the reason this was a human's call.** Path
+  granularity cannot express *"this file except its classification path,"* so gating the routing
+  gates the whole driver script — the largest single piece of orchestration in the repo, and the
+  thing most likely to need work. Driver changes now route to a human. If that proves too coarse,
+  the fix is to extract the routing into its own module the way `gate.py` was extracted, and gate
+  *that*; **it is not to quietly widen the allowlist back.**
+
 Plus the standing defaults trigger 2 already names: auth/authorization, secrets, data
 migration/deletion, deploy/infra/CI config, dependency changes.
 
@@ -72,15 +87,15 @@ migration/deletion, deploy/infra/CI config, dependency changes.
 
 Decided 2026-07-29, because the question kept recurring one detector at a time and each answer was
 being re-derived by analogy. **Gated means the code decides whether *this run's own work* is
-acceptable to merge.** That is the outcome classifier and nothing else. A test suite, a lint recipe or
-a doc-rot detector grades the *work*; only `gate.py` grades the *verdict*, and a verdict is what
-converts into an automatic merge under phase 3.
+acceptable to merge.** That is the outcome classifier, and — since 2026-08-03 — the routing that
+consumes its verdict. A test suite, a lint recipe or a doc-rot detector grades the *work*; only
+`gate.py` and the driver's routing decide the *verdict*, and a verdict is what converts into an
+automatic merge under phase 3.
 
 So `scripts/docs_check.py` is **drivable**, and so is a future check-linter, however detector-shaped
 they look.
 
-**The residual risk, named rather than gated away** — because this is the same trade already accepted
-below for the driver's routing. A run that edits `docs/` *and* `scripts/docs_check.py` in one change
+**The residual risk, named rather than gated away.** A run that edits `docs/` *and* `scripts/docs_check.py` in one change
 could weaken the detector that would have caught its own doc rot, and `make check` would still be
 green. The broad reading would close that, but it would also sweep in `driver/test-driver.sh`,
 `driver/test_gate.py`, `driver/test-park-state.sh` and the `Makefile` recipes — every one of which is
@@ -90,8 +105,9 @@ check` in every PR, and a human at the merge gate. Revisit if a run ever actuall
 
 ### Drivable (the allowlist)
 
-- **`driver/`, except `driver/gate.py`** — orchestration, its bash fixture suites, and its Python
-  tests.
+- **`driver/`, except `driver/gate.py` and `driver/agent-session-driver.sh`** — its bash fixture
+  suites (`test-driver.sh`, `test-park-state.sh`) and its Python tests (`test_gate.py`). Note what
+  this leaves: as of 2026-08-03 the driver's *tests* are drivable and the driver itself is not.
 - **`docs/`** — including `findings.md` and session notes.
 - **`Makefile`**.
 - **`scripts/`** — `docs_check.py` and its tests, per the narrow reading above. Added 2026-07-29; it
@@ -109,11 +125,14 @@ deploy/infra/CI config or a dependency. **Widening this line is a decision to pu
 a drift to discover in a diff**, which is the whole reason it is written down rather than inferred
 from what the driver happens to call today.
 
-**Residual risk, stated rather than gated away.** `agent-session-driver.sh` still contains the
-outcome *routing* — the parking case lists, the budget reclassification thresholds — and a run could
-in principle edit those to flatter its own record. Path granularity cannot express "this file except
-its classification path," so this is not gated. The mitigations are the fixture suite
-(`make driver-test`), `make driver-check`, and running watched. Revisit if a run ever touches that routing.
+**The residual risk this partition creates, named at the moment it was created.** Gating
+`agent-session-driver.sh` while leaving `driver/test-driver.sh` drivable means **the routing is
+protected and the fixtures protecting it are not**. A run cannot edit the parking case lists, but it
+can weaken the assertions that would have caught someone else doing so, and `make driver-test` would
+stay green. This is deliberate — the fixture suites are a large share of what makes this repo
+dogfoodable, and defect class 1 has never once been an implementer sabotaging a test it was allowed
+to touch. The mitigations are `make driver-check`, running watched, and a human at the merge gate.
+**Do not resolve a future case by analogy to this line**; the allowlist above is the answer.
 
 ## Governing principle
 

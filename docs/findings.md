@@ -876,6 +876,59 @@ about mutation-testing a guard that protects a dangerous state.
   scanning** — skip the old exploratory tier, and skip any body matching
   `open question|pick one|evaluate the options|Deferred —|worth deciding`, which is pre-failed on
   trigger 1.
+- **The filter above was then run, 2026-08-03, and the prediction held — but the yield came from
+  somewhere else entirely.** 16 issues scanned from the filtered tier produced **2** `auto-ok`
+  unassisted (~12%, consistent with the 1-in-8 figure). Then six questions to the operator produced
+  **six more**, taking decafclaw's eligible count 0 → 8. Two moves; the second cost one conversation
+  turn and was worth three times the first.
+
+  **The reason is a single dominant shape: nine of fourteen `needs-review` verdicts were "the issue
+  lists two or three options and deliberately does not pick one."** Not under-specification — these
+  were well-researched issues that stopped short of a decision, several saying so outright (*"Not
+  proposing one — that's the work"*). Trigger 1's *withheld-decision* clause, not its
+  human-judgment clause, is what actually gates a mature backlog. The five that did **not** convert
+  were gated for real: two on trigger 2 (an authorization gate, a shell pre-approval surface), one
+  on deletion, one the test-coverage hard case, one moving an authoritative durable record.
+
+  So **`triage`'s highest-leverage output is not augmented issues; it is a list of decisions, each
+  with the evidence already gathered and each branch already priced.** The scanning is what makes
+  the questions cheap to answer — in six cases the scanner had already verified that the check on
+  the far side of the decision discriminates today — but the questions are what move the queue.
+  A pass that reports only "augmented K" under-reports itself, in the same way the bullet below
+  says "scanned N" does.
+
+  Two caveats on the filter itself, recorded so the figure is not read as cleaner than it was: the
+  pre-fail regex correctly caught #601 (whose criteria reduce only to a keyword grep), but it
+  **missed #335 entirely** — `#<600` and `enhancement`, so neither arm of the filter caught it. It
+  was added by hand and came out `needs-review` anyway, so the miss cost nothing *this time*. That
+  is luck, not evidence the filter is sound.
+- **Batch triage sees four things a per-issue `intake` structurally cannot**, observed in one pass
+  on 2026-08-03. This is an argument for the batch mode independent of throughput, because every
+  one of these is a *relation between* issues and no single-issue context contains it:
+  **(1)** two issues were the same bug filed three hours apart, the later one saying "filing
+  separately" because its author never saw the earlier; **(2)** three separate issues were blocked
+  on one missing capability — no repeat/sampling flag in the eval runner, so no K-of-N pass rate —
+  discovered independently by three scanners that could not see each other, and filable as one
+  `auto-ok` issue that unblocks all three; **(3)** one issue's headline work had already shipped in
+  two merged PRs, so its title named a done thing; **(4)** one issue was two unrelated halves, and
+  the deferred half was holding the ready half at `needs-review`.
+- **A countable or quoted fact inside an *issue body* is exactly as perishable as one inside a doc**,
+  and the documentation rule in `CLAUDE.md` applies to both. Five instances in one pass, 2026-08-03,
+  every one found by a scanner *running* something rather than reading it — which is the whole
+  reason the brief mandates running each proposed check:
+  - **The obvious test passes today and grades nothing.** pytest's `tmp_path` is pre-resolved
+    (`_pytest/tmpdir.py:156`), so an issue about resolved-vs-unresolved path divergence would have
+    had a test in which the divergence never occurs. It needed a real symlinked root.
+  - **The obvious test throws.** jsdom implements no `scrollIntoView`, so
+    `vi.spyOn(Element.prototype, 'scrollIntoView')` fails outright and an unguarded call reddens
+    every existing test in the file — new criterion green, guard red.
+  - **A title's numbers were config-dependent.** `97 / 40 / 58` re-ran locally as `30 / 67`. A
+    criterion pinned to the literals would trip whenever someone adds a tool. State the invariant.
+  - **A premise was false against the code.** *"The index loader already handles multiple
+    segments"* — it does not; the reader touches only the live path and the read-state resolver
+    *deliberately discards* archived ids. Verified empirically, not inferred.
+  - **A count was unre-derivable.** "4 failing cases" could not be checked without paying for a
+    model run, because nothing persists the results. Criteria must say "0 failing", never "these 4".
 - **Judge a `triage` pass by the eligible count it produced, not by the issues it touched.** "Scanned
   N, augmented K" is an *activity* report, and it is adjacent to the thing that matters — whether work
   the loop can pick up now exists. A pass can augment a dozen issues, report truthfully, and leave the
