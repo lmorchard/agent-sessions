@@ -93,13 +93,20 @@ guards: G1 pass · G2 pass · G3 pass · G4 pass
 tamper: clean
 freeze: 1fdce99
 project-gates: make check green
-ci: pending
-threads: pending
+ci: no checks configured
+threads: 0 unresolved
 risk-paths: none
 amendments: none
-verdict: pending
-reason: opened with pending per pr.md step 6 -- CI, threads and the post-review verifier report do not exist yet
+verdict: eligible-for-auto-merge
+reason: all rows satisfied against head 330ba53, sourced from a post-review independent verifier run. One row is annotated rather than reported clean -- ci, because this repo has no .github/workflows, so nothing verified CI and `make check` (green) is the only gate that ran. threads is the real mechanism this time, not a substitute -- the graphql reviewThreads query returned one thread, resolved, and the Copilot review genuinely landed, so `0 unresolved` is not the vacuous no-review-arrived case. SEE THE GOVERNANCE NOTE BELOW: risk-paths is `none` mechanically, but this PR edits the outcome-routing path CLAUDE.md declines to gate, and its "revisit if a run ever touches that routing" clause has now fired a second time.
 ```
+
+**Review cycle:** one Copilot comment, **fixed** (`52e3155`) — the first draft's `driver-fault`
+reason said "empty stream", which is false for a truncated one. Reworded to "no readable events".
+Thread resolved because the fix landed, not because the point was disputed. Re-verified afterwards
+by a fresh-context verifier: nothing skipped, nothing lost, tamper diff still empty.
+
+Nothing was skipped or deferred.
 
 ## References
 
