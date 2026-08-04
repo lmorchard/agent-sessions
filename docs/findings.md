@@ -845,6 +845,29 @@ about mutation-testing a guard that protects a dangerous state.
   was in progress. So `make watch` can report turns and elapsed time but not money, and the budget
   ceiling can only be *enforced* at exit, never monitored toward. This is also the other half of the
   killed-run defect (class 2, instance 8): the field is not hard to parse, it does not exist yet.
+- **A mis-tier is cheapest at intake and most expensive at execute time — $15.62, measured.** A
+  decafclaw issue tiered `auto-ok` turned out to fail trigger 1, and nothing discovered it until a
+  run had already been dispatched and was working the issue. The work itself was fine and later
+  shipped; the money bought the *discovery* that the tier was wrong. Set against a triage scan of
+  roughly a dollar an issue, that is the argument for scanning generously rather than tiering
+  optimistically: **the cheapest place to find a withheld decision is before a run is paid for.**
+  Recorded 2026-08-03, carried across two handoffs unfiled before landing here — which is its own
+  small lesson about where cost figures go to die.
+- **"Merged" is not "clean": a worktree whose branch is fully merged can still hold the only copy of
+  something.** 2026-08-03, during routine cleanup. `git merge-base --is-ancestor` reported the
+  branch merged — true, and it says nothing whatever about the working tree. That worktree held an
+  uncommitted `pr-body.md` carrying the run's **final gate block**, where `main` had only the
+  `pending` rows `pr.md` step 6 opens with; it was also the sole record that the `threads` row was
+  satisfied by the real `graphql` mechanism rather than a substitute, and it carried the governance
+  note **the routing-gate decision earlier that same day was made on**. `git worktree remove
+  --force` would have destroyed all of it silently, and the branch-level check would have said the
+  removal was safe.
+
+  This is defect class 1 wearing work clothes: a check that reports a true value about the wrong
+  question. **Before removing a worktree, run `git status --porcelain` inside it** — the branch's
+  merge state is not the answer. Two files in the same directory *were* safely discarded, and the
+  thing that made that judgment cheap was that one said so in its own header (*"Throwaway repro …
+  Deleted before the PR"*). Scratch that announces itself as scratch is worth writing that way.
 - **A ~1-in-8 triage conversion rate** should govern board-driver expectations. Of 8 issues scanned,
   3 came out `auto-ok` but only 1 was genuinely ready. **Second data point, 2026-07-29: 3 scanned, 2
   `auto-ok`, both with a discriminating criterion that was actually run** — a much better rate on a
