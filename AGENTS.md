@@ -14,10 +14,10 @@ conventions + gotchas only.
 
 ## What this is (and isn't)
 
-- **Claude Code skill authoring**, `dev-session` lineage. The skill lives at
-  `skills/agent-session/` in *this repo* — it is NOT installed in `~/.claude/skills/`. Test
+- **Codex skill authoring**, `dev-session` lineage. The skill lives at
+  `skills/agent-session/` in *this repo* — it is NOT installed in `~/.Codex/skills/`. Test
   it by running its phase files manually (dogfooding), not via a registered skill.
-- **The reference skill it derives from** is at `~/.claude/skills/dev-session/` (phases +
+- **The reference skill it derives from** is at `~/.Codex/skills/dev-session/` (phases +
   references). Adapt from it; don't edit it.
 
 ## Project board
@@ -37,7 +37,7 @@ by `gh project create`, which applies no template, so it started on the bare `To
 ## Risk-gated paths (off-limits to unattended work)
 
 `references/acceptance-criteria.md`'s **trigger 2** is project-configurable — it fires on *"anything
-the project's CLAUDE.md marks off-limits."*
+the project's AGENTS.md marks off-limits."*
 
 **The default is `needs-review`: anything not named drivable below is gated.** This is an allowlist,
 not a denylist, and the direction is the whole point. Decided 2026-07-29 after the partition went
@@ -154,7 +154,7 @@ implementation). Every mode moves a weak-oracle "a human decides" toward a stron
   execution's per-phase work). Working context stays in the subagent, not the main loop.
 - **The board-driver is NOT part of the skill.** The unattended burndown loop (pick Ready
   issue → run → tiered merge) is orchestration that *invokes* the skill, each run a fresh
-  context. It lives above the skill (headless `claude -p` / GHA). Don't build it into a mode.
+  context. It lives above the skill (headless `Codex -p` / GHA). Don't build it into a mode.
 
 ## Criteria + tier (the core contract)
 

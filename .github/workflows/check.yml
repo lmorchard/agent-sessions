@@ -1,0 +1,29 @@
+name: Check
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11" # A reasonable default if none is strictly specified.
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+
+      - name: Run checks
+        run: make check
