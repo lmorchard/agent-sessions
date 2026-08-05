@@ -28,7 +28,7 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
    unrelated files, drowning out your actual changes and corrupting the self-review diff.
    Resolve conflicts now, not after the PR is open.
 
-2.    **Re-run local checks and guards after the rebase**, even if they were green
+2. **Re-run local checks and guards after the rebase**, even if they were green
    minutes ago. `origin/main` may have changed a fixture or behavior they depend on.
 
    **(If using frozen checks) Re-anchor the freeze sha first.** A rebase rewrites the freeze commit, so the sha recorded

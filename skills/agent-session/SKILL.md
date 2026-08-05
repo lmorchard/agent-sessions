@@ -83,5 +83,7 @@ Not every task needs the full `plan` → `execute` → `pr` ceremony with frozen
 
 **Large/Architectural (new features, multi-session work, high ambiguity):** Use the full structured flow below, freezing checks and building vertical slices to ensure verifiable outcomes.
 
+## When NOT to use this skill
+
 - Feel-driven work (subjective visual/interaction feel a spec can't pin down) — prototype
   interactively instead, as `dev-session` does.
