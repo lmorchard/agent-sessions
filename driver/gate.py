@@ -69,6 +69,9 @@ def extract_gate(body: str, marker: str = GATE_MARKER) -> str:
     Port of the driver's awk: find the marker line, treat the next ``` as the
     opening fence, and stop at the following one.
     """
+    if not marker:
+        return ""
+
     found = False
     opened = False
     out: list[str] = []

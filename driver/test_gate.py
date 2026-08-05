@@ -43,6 +43,11 @@ def test_extract_gate_absent_marker_is_empty():
     assert gate.extract_gate("no gate here\n```\nstuff\n```") == ""
 
 
+def test_extract_gate_empty_marker_is_empty():
+    """`extract_gate()` will behave incorrectly if called with an empty `marker`. Add guard."""
+    assert gate.extract_gate("some\n\n```\nstuff\n```", marker="") == ""
+
+
 def test_extract_gate_stops_at_closing_fence():
     assert "trailing prose" not in gate.extract_gate(body_with("2/2 pass"))
 
