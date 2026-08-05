@@ -502,3 +502,19 @@ def test_cli_rejects_invalid_project_and_repository_arguments(arguments):
 
     assert completed.returncode == 2
     assert "error:" in completed.stderr
+
+
+def test_make_board_audit_binds_this_repository():
+    completed = subprocess.run(
+        ["make", "-n", "board-audit"],
+        cwd=Path(__file__).resolve().parent.parent,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert completed.stdout.split() == [
+        "python3", "scripts/board_audit.py",
+        "--owner", "lmorchard", "--project", "9",
+        "--repo", "lmorchard/agent-sessions",
+    ]
