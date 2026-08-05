@@ -293,7 +293,12 @@ def main(argv: list[str] | None = None) -> int:
     rev_range = args[0] if args else DEFAULT_RANGE
 
     try:
-        found = scan_range(rev_range)
+        commits = commit_messages(rev_range)
+        found = [
+            (sha, lineno, text)
+            for sha, message in commits
+            for lineno, text in scan_message(message)
+        ]
     except subprocess.CalledProcessError as exc:
         # A range git cannot resolve is a broken invocation, not a clean tree.
         # Failing loudly here is the same lesson as assertion-lint's empty-scope
@@ -327,7 +332,7 @@ def main(argv: list[str] | None = None) -> int:
     if failures:
         print(
             f"\ncommit-lint: {len(failures)} quoted closing keyword(s) in "
-            f"{rev_range}. Commit messages are NOT rendered as markdown, so the "
+            f"{len(commits)} commits ({rev_range}). Commit messages are NOT rendered as markdown, so the "
             f"backticks are literal and GitHub will close the issue anyway -- "
             f"this is how #7 was closed by accident. There is no escape that "
             f"works in a commit message: reword instead, e.g. \"the fixture's "
@@ -335,7 +340,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    print(f"commit-lint: no quoted closing keywords in {rev_range}")
+    if not commits:
+        print(f"commit-lint: scanned 0 commits in {rev_range}")
+        return 0
+
+    print(f"commit-lint: no quoted closing keywords in {len(commits)} commits ({rev_range})")
     return 0
 
 

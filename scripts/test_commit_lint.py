@@ -252,6 +252,15 @@ def test_entry_point_exits_zero_on_an_empty_range(fixture_repo):
     `make check` must stay green on it (G2)."""
     proc = run_entry_point(fixture_repo.path, "HEAD..HEAD")
     assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "scanned 0 commits" in proc.stdout
+
+def test_entry_point_reports_commit_count_on_clean_range(fixture_repo):
+    proc = run_entry_point(
+        fixture_repo.path, f"{fixture_repo.base}..{fixture_repo.clean}"
+    )
+    assert proc.returncode == 0
+    assert "in 1 commits" in proc.stdout
+
 
 
 # --- G1, executable: this repo's real history -------------------------------
