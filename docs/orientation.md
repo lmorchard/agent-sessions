@@ -327,7 +327,7 @@ about to turn this loose, read the spend column in `runs.jsonl` first.
   not built. Nothing merges by machine today.
 - **Multi-phase execution with real write-capable implementer subagents.** Every run so far has
   been small. This is blocked on a permission grant that hasn't been given.
-- **The `ci-stale` outcome has never fired on a real PR** — fixture tests only.
+- **The `ci-stale` outcome fires on real PRs when the PR head diverges from the `ci:` gate row** (verified live in #6).
 
 The honest summary of the shape: the machinery is real and load-bearing, the evidence base is
 shallow — young, and almost entirely one person driving a couple of repositories — and the project

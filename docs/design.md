@@ -338,7 +338,7 @@ backlog with its own tooling.
 
 - **Phase 3 (conditional auto-merge)** — untouched, gated on two board items plus the open decision
   below.
-- **`ci-stale` has never fired on a real PR** — fixture tests only ([#6](https://github.com/lmorchard/agent-sessions/issues/6)).
+- **`ci-stale` correctly catches diverging PR heads** — verified on a real PR ([#6](https://github.com/lmorchard/agent-sessions/issues/6)).
 - **Multi-phase `execute` with real implementer subagents.** Every run so far has been small: #586
   was two greps on a 4-line diff. decafclaw #625 is the specced vehicle, never driven
   ([#7](https://github.com/lmorchard/agent-sessions/issues/7)). It was described here as *blocked on
