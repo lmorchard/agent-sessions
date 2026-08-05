@@ -44,9 +44,10 @@ It exits 0 when the audit is clean or contains warnings only.
 `lmorchard/agent-sessions`. It remains separate from `make check`. The existing pytest glob runs
 the detector's offline tests without GitHub access.
 
-After the detector demonstrates the current strict contradictions, the operator moves #58, #62,
-and #71 to `Done`. The operator leaves #12 and #88 unchanged because their warnings require human
-judgment.
+After the detector demonstrates the current strict contradictions, the operator moves the closed
+issues #19, #58, #60, #62, #71, and #77 to `Done`, and moves the open unscheduled issues #72 and
+#74 to `Backlog`. The operator leaves #3, #12, and #88 unchanged because their warnings require
+human judgment.
 
 ## Classification contract
 
@@ -128,6 +129,9 @@ The command reports one strict finding per item before contextual warnings, so a
   preserves useful stderr without presenting an empty response as an empty board.
 - JSON decoding failures name the query that produced malformed output.
 - Missing top-level arrays, required item fields, or issue lookup records are failures, not skips.
+- GitHub represents an unassigned project status by omitting the `status` key. Normalize that shape
+  to no status so the strict missing-status rule can classify it; do not require an explicit JSON
+  null that the live command does not emit.
 - A list response whose length equals its requested limit is a failure because the four `gh` list
   commands do not expose a consistent next-page signal. Raising the limit is safe; silently
   accepting a saturated result is not.
@@ -142,6 +146,7 @@ The command reports one strict finding per item before contextual warnings, so a
 - suppression of redundant warnings on strict failures;
 - repository filtering and exclusion of drafts;
 - query failure, malformed JSON, and omitted required fields;
+- omitted and explicit-null item statuses, both classified as no status;
 - saturated list responses that might be truncated;
 - exact `gh` query arguments, using a field-list-aware stub executable;
 - CLI exit 1 for failures and exit 0 for warnings only;
