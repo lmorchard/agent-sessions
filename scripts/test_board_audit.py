@@ -189,18 +189,20 @@ def test_parse_board_items_keeps_target_issues_and_ignores_drafts_and_other_repo
             },
             "status",
         ),
-        (
-            {
-                "title": "Missing status",
-                "content": {"type": "Issue", "repository": "acme/widgets", "number": 1},
-            },
-            "status",
-        ),
     ],
 )
 def test_parse_board_items_rejects_missing_or_invalid_target_fields(record, context):
     with pytest.raises(board_audit.AuditError, match=context):
         board_audit.parse_board_items([record], "acme/widgets")
+
+
+def test_parse_board_items_normalizes_omitted_status_to_none():
+    assert board_audit.parse_board_items([
+        {
+            "title": "No project status",
+            "content": {"type": "Issue", "repository": "acme/widgets", "number": 1},
+        },
+    ], "acme/widgets") == [board_audit.BoardItem(1, "No project status", None)]
 
 
 def test_parse_board_items_accepts_an_explicit_null_status():

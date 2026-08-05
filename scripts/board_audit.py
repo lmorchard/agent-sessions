@@ -143,8 +143,6 @@ def parse_board_items(records: list[dict[str, object]], repo: str) -> list[Board
             continue
         number = require_int(content.get("number"), f"{context} content number")
         title = require_str(record.get("title"), f"{context} title")
-        if "status" not in record:
-            raise AuditError(f"{context} status must be a string or null")
         status = record.get("status")
         if status is not None and not isinstance(status, str):
             raise AuditError(f"{context} status must be a string or null")
