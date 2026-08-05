@@ -48,9 +48,12 @@ def require_int(value: object, context: str) -> int:
 
 def run_gh(args: list[str], label: str) -> object:
     """Run one read-only GitHub CLI query and decode its JSON response."""
-    completed = subprocess.run(
-        ["gh", *args], capture_output=True, text=True, check=False,
-    )
+    try:
+        completed = subprocess.run(
+            ["gh", *args], capture_output=True, text=True, check=False,
+        )
+    except OSError as error:
+        raise AuditError(f"{label} query failed: {error}") from error
     if completed.returncode != 0:
         detail = completed.stderr.strip() or f"exit {completed.returncode}"
         raise AuditError(f"{label} query failed: {detail}")

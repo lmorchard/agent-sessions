@@ -300,6 +300,16 @@ def test_run_gh_preserves_query_label_and_stderr_on_nonzero_exit(monkeypatch):
         board_audit.run_gh(["issue", "list"], "issues")
 
 
+def test_run_gh_translates_os_errors_to_labeled_audit_errors(monkeypatch):
+    def missing_gh(*args, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory", "gh")
+
+    monkeypatch.setattr("subprocess.run", missing_gh)
+
+    with pytest.raises(board_audit.AuditError, match=r"issues query failed: \[Errno 2\]"):
+        board_audit.run_gh(["issue", "list"], "issues")
+
+
 def test_run_gh_rejects_malformed_json(monkeypatch):
     monkeypatch.setattr(
         "subprocess.run",
