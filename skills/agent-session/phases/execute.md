@@ -34,6 +34,8 @@ fix-up.
 
 ## Process
 
+0. **Check Ceremony Threshold:** If this is a small, tactical task (bug fix, < 3 steps), **skip `execute`'s heavy phased structure entirely**. Just implement the fix and jump to `pr`. Only proceed with the steps below for large, architectural, or multi-session tasks that have a `plan.md`.
+
 1. **Load and review.** Read `plan.md`, `checks.md`, and `spec.md`. Confirm the freeze commit
    exists (`checks.md`'s `Frozen at` sha resolves) — if it doesn't, Phase 0 never happened;
    go back to `plan`. Check existing checkboxes and resume from the first unchecked phase.

@@ -75,8 +75,15 @@ them only on reaching the relevant step:
 issue → run → tiered merge) is orchestration that *invokes* this skill repeatedly, each run a
 fresh context. It lives above the skill as a script / GitHub Action. Nothing here merges a PR.
 
-## When NOT to use
+## The Ceremony Threshold (When NOT to use full modes)
 
-- One-line tweaks / doc fixes where a spec costs more than the change.
+Not every task needs the full `plan` → `execute` → `pr` ceremony with frozen checks and discrete phases.
+
+**Small/Tactical (< 3 steps, bug fixes, single-file refactors):** Skip the heavy artifacts (`checks.md`, `plan.md`). Keep state in-context and use the `todowrite` tool to track steps silently. Jump straight to fixing the issue and opening a PR.
+
+**Large/Architectural (new features, multi-session work, high ambiguity):** Use the full structured flow below, freezing checks and building vertical slices to ensure verifiable outcomes.
+
+## When NOT to use this skill
+
 - Feel-driven work (subjective visual/interaction feel a spec can't pin down) — prototype
   interactively instead, as `dev-session` does.
