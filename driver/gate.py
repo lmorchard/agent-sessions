@@ -56,18 +56,28 @@ _TIER_HEADING_RE = re.compile(r"^##[ \t]*Tier[ \t]*:")
 _NO_VERDICT_OUTCOMES = ("incomplete", "parked", "no-gate")
 
 
+def has_marker(text: str, marker: str) -> bool:
+    """Return True if `marker` sits on a line by itself in `text`."""
+    if not marker or not text:
+        return False
+    return any(line.strip() == marker for line in text.split("\n"))
+
+
 def extract_gate(body: str, marker: str = GATE_MARKER) -> str:
     """Return the fenced block that follows `marker`, or "" if absent.
 
     Port of the driver's awk: find the marker line, treat the next ``` as the
     opening fence, and stop at the following one.
     """
+    if not marker:
+        return ""
+
     found = False
     opened = False
     out: list[str] = []
     for line in (body or "").split("\n"):
         if not found:
-            if marker in line:
+            if line.strip() == marker:
                 found = True
             continue
         if line.startswith("```"):
@@ -194,7 +204,7 @@ def tier_of(body: str, marker: str = SPEC_MARKER) -> str:
     not resolved -- and it fired for real when a re-tiering appended a second
     `## Tier:` heading instead of replacing the first.
     """
-    if marker and marker not in (body or ""):
+    if marker and not has_marker(body, marker):
         return "missing"
     lines = [ln for ln in (body or "").split("\n") if _TIER_HEADING_RE.search(ln)]
     if not lines:
@@ -222,7 +232,7 @@ def tier_batch(issues: list, marker: str = SPEC_MARKER) -> list[tuple[str, str, 
     rows: list[tuple[str, str, str]] = []
     for issue in issues or []:
         body = issue.get("body")
-        if body is None or marker not in body:
+        if body is None or not has_marker(body, marker):
             continue
         title = str(issue.get("title", "")).replace("\t", " ")
         rows.append((str(issue.get("number", "")), tier_of(body, marker=marker), title))

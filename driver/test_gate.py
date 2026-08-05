@@ -43,6 +43,11 @@ def test_extract_gate_absent_marker_is_empty():
     assert gate.extract_gate("no gate here\n```\nstuff\n```") == ""
 
 
+def test_extract_gate_empty_marker_is_empty():
+    """`extract_gate()` will behave incorrectly if called with an empty `marker`. Add guard."""
+    assert gate.extract_gate("some\n\n```\nstuff\n```", marker="") == ""
+
+
 def test_extract_gate_stops_at_closing_fence():
     assert "trailing prose" not in gate.extract_gate(body_with("2/2 pass"))
 
@@ -259,3 +264,56 @@ def test_tier_batch_null_body_is_skipped_not_crashed():
 def test_tier_batch_surfaces_conflict_rather_than_picking():
     body = gate.SPEC_MARKER + "\n## Tier: `needs-review`\n## Tier: `auto-ok` (revised)"
     assert gate.tier_batch([{"number": 5, "title": "t", "body": body}])[0][1] == "conflict"
+
+
+# --- issue #19: marker line-anchoring tests -------------------------------
+
+def test_inline_code_span_spec_marker_does_not_count_as_spec_marker():
+    """#19 C1: spec marker in inline code span must not trigger tier_batch or tier_of."""
+    quoting_body = (
+        "An issue quoting `<!-- agent-session:spec -->` inline in prose\n\n"
+        "## Tier: `auto-ok`"
+    )
+    bare_body = (
+        f"{gate.SPEC_MARKER}\n\n"
+        "An issue with bare marker\n\n"
+        "## Tier: `auto-ok`"
+    )
+    # (a) tier_batch on a code-span-only body returns []
+    assert gate.tier_batch([{"number": 1, "title": "t", "body": quoting_body}]) == []
+    # (b) tier_of on the same body returns "missing"
+    assert gate.tier_of(quoting_body) == "missing"
+    # (c) positive control: bare marker body emits row with tier
+    assert gate.tier_batch([{"number": 2, "title": "t2", "body": bare_body}]) == [
+        ("2", "auto-ok", "t2")
+    ]
+
+
+def test_inline_code_span_gate_marker_does_not_extract_gate():
+    """#19 C2: gate marker in inline code span must not extract a gate block."""
+    quoting_pr_body = (
+        "PR body quoting `<!-- agent-session:gate -->` inline\n"
+        "```yaml\n"
+        "verdict: eligible-for-auto-merge\n"
+        "```"
+    )
+    bare_pr_body = body_with("2/2 pass @ abc1234")
+
+    # (a) extract_gate on code-span-only PR body returns empty string
+    assert gate.extract_gate(quoting_pr_body) == ""
+    # (b) positive control: real gate block is extracted
+    assert "verdict: eligible-for-auto-merge" in gate.extract_gate(bare_pr_body)
+
+
+def test_corpus_bodies_snapshot_verdicts():
+    """#19 GUARD: snapshot corpus bodies whose marker sits alone on line 1 keep exact verdicts."""
+    corpus = [
+        (f"{gate.SPEC_MARKER}\n## Tier: `auto-ok`", "auto-ok"),
+        (f"{gate.SPEC_MARKER}\n## Tier: `needs-review`", "needs-review"),
+        (f"{gate.SPEC_MARKER}\n## Tier: undecided", "unparsed"),
+        (f"{gate.SPEC_MARKER}\nno tier heading", "missing"),
+        (f"{gate.SPEC_MARKER}\n## Tier: `needs-review`\n## Tier: `auto-ok` (revised)", "conflict"),
+    ]
+    for body, expected in corpus:
+        assert gate.tier_of(body) == expected
+
