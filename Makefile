@@ -4,7 +4,7 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help check driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint dry-run run loop watch run-self dry-run-self skill-readonly
+.PHONY: help check driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly
 
 help:
 	@echo "check            run every check -- the targets listed below, in one go"
@@ -175,6 +175,9 @@ loop:
 # run under that repo's state dir, so it can be started before the run is.
 watch:
 	@python3 scripts/run_progress.py --repo $(REPO) --watch --interval $(INTERVAL)
+
+watch-self:
+	@python3 scripts/run_progress.py --repo lmorchard/agent-sessions --watch --interval $(INTERVAL)
 
 # Drive THIS repo. Needs --allow-nested-skill-dir, because $(SKILL) lives inside
 # $(CURDIR) and #10's guard now refuses that configuration by default (exit 2).

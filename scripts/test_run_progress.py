@@ -18,6 +18,7 @@ run on disk changed.
 
 import json
 import sys
+import pytest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -170,3 +171,42 @@ def test_missing_stream_is_not_started(tmp_path):
     # before the run has made anything at all.
     absent = run_progress.read_progress(tmp_path / "nonexistent-run")
     assert absent.started is False
+
+
+def test_missing_state_dir_is_configuration_error(tmp_path, capsys, monkeypatch):
+    """C2 — a non-existent state directory is a configuration error, not a wait."""
+    import run_progress
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    
+    # State dir does not exist -> configuration error
+    args = ["--repo", "lmorchard/missing"]
+    
+    # Check that main returns 2
+    exit_code = run_progress.main(args)
+    assert exit_code == 2
+    
+    captured = capsys.readouterr()
+    assert "waiting --" not in captured.err
+    assert "waiting --" not in captured.out
+    assert "error: state directory" in captured.err
+    assert "does not exist (misconfigured repo?)" in captured.err
+
+    # Same for watch mode - should fail fast on misconfiguration
+    exit_code = run_progress.main(["--repo", "lmorchard/missing", "--watch"])
+    assert exit_code == 2
+    captured = capsys.readouterr()
+    assert "waiting --" not in captured.err
+    assert "waiting --" not in captured.out
+    assert "error: state directory" in captured.err
+
+    # Create the state directory but leave it empty of runs -> wait
+    state_dir = run_progress.default_state_dir("lmorchard/empty")
+    state_dir.mkdir(parents=True)
+    
+    # One-shot mode fails with 2 but doesn't complain about misconfiguration
+    exit_code = run_progress.main(["--repo", "lmorchard/empty"])
+    assert exit_code == 2
+    
+    captured = capsys.readouterr()
+    assert "error: state directory" not in captured.err
+    assert "no run directories" in captured.err
