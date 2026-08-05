@@ -23,6 +23,8 @@ model is good at.
 
 ## Process
 
+0. **Check Ceremony Threshold:** If this is a small, tactical task (bug fix, < 3 steps), **skip `plan.md` and `checks.md` entirely**. Proceed directly to implementing the fix in-context (or use the `todowrite` tool) and move to the `pr` phase once tests pass. Only proceed with the steps below for large, architectural, or multi-session tasks.
+
 1. **Session setup if not already done.** If there's no worktree and session directory for
    this issue, run `references/session-setup.md` first. It also reads the tier, which the plan
    records and `execute`/`pr` route on.

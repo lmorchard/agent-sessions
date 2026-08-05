@@ -10,29 +10,28 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
 ## Inputs
 
 - Branch state (commits ahead of `origin/main`, current diff)
-- `checks.md` — the frozen manifest and the verifier's report
-- `spec.md` — design decisions and the tier
-- `plan.md` — referenced from the PR body
+- The GitHub issue this resolves
+- `checks.md` (if available, for large/architectural tasks)
+- `spec.md` (if available)
 
 ## Outputs
 
-- Branch pushed **with its freeze commit intact**; PR opened with per-criterion results and the
-  `agent-session:gate` block
-- Review comments assessed and worthwhile ones fixed
-- Review fixes pushed, gate block refreshed
+- Branch pushed; PR opened with a gate block (simplified for small tasks).
 - **A gate verdict reported**: `eligible-for-auto-merge` or `human-merge-required` + reason
 
-## Rebase and re-verify
+## Process
+
+0. **Ceremony Threshold:** If this is a small/tactical task, there won't be a `checks.md` or a freeze commit. Skip steps related to the tamper diff and frozen manifest. Do the self-review, run tests (`make check`), push, and open the PR. Write a simplified gate block that relies on local tests and CI. Only proceed with the full tamper-diff and frozen-check rules if those artifacts exist.
 
 1. **Rebase onto `origin/main` first.** `git fetch origin && git rebase origin/main`. Sessions
    run long and main advances; pre-rebase, `git diff origin/main..HEAD` can show dozens of
    unrelated files, drowning out your actual changes and corrupting the self-review diff.
    Resolve conflicts now, not after the PR is open.
 
-2. **Re-run the criteria's checks and the guards after the rebase**, even if they were green
+2.    **Re-run local checks and guards after the rebase**, even if they were green
    minutes ago. `origin/main` may have changed a fixture or behavior they depend on.
 
-   **Re-anchor the freeze sha first.** A rebase rewrites the freeze commit, so the sha recorded
+   **(If using frozen checks) Re-anchor the freeze sha first.** A rebase rewrites the freeze commit, so the sha recorded
    in `checks.md` points outside the branch's history — diffing against it blends upstream
    changes into your tamper diff. Find the rebased freeze commit, confirm it's the same tree
    (`git diff <old> <new> -- <check files>` is empty), record the new sha, and diff against that.
@@ -61,11 +60,13 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
    verified was verified against the older base. If new commits appear, redo the rebase and
    re-verification.
 
-5. **Run the tamper check, record the verdict, and push the branch as-is.** Run
+5. **(If using frozen checks) Run the tamper check, record the verdict, and push the branch as-is.** Run
    `git diff <freeze-sha> -- <check files>` and **record the verdict in `checks.md` and the gate
    block**. If `Check files` is empty, run the substitutes from `frozen-checks.md`'s "When the
    criteria are commands, not test files" instead and record `clean-by-substitute` + its basis; the
    bare command proves nothing there.
+
+   If skipping the frozen checks ceremony, simply push the branch.
 
    **Do not squash the branch.** The freeze commit must stay an ancestor of the pushed head, because
    that is what lets somebody other than the implementer re-run the tamper diff. `git reset --soft
@@ -135,7 +136,7 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
 
 ## Merge gate
 
-14. **Derive the verdict.** Not a judgment call — read each row and take the result:
+14. **Derive the verdict.** Not a judgment call — read each row and take the result. *(For small tasks without frozen checks, ignore the first four rows and grade solely on local project gates, CI checks, unresolved threads, tier, and risk-gated paths).*
 
     | Condition | Source |
     |---|---|

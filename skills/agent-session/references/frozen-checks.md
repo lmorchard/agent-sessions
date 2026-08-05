@@ -4,6 +4,8 @@ Read by `plan`, `execute`, and `pr`. This is the back half's core, the counterpa
 `acceptance-criteria.md`: that file makes criteria *checkable*, this one makes the checks
 *trustworthy* while an agent implements against them.
 
+**Ceremony Threshold:** If the task is small/tactical, skip the `checks.md` manifest and freeze phase entirely. Only apply this contract for large tasks that require strict verifiable multi-phase planning.
+
 ## The failure mode this prevents
 
 An implementer that can edit its own oracle has no oracle. The failure is not dramatic — it

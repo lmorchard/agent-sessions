@@ -60,10 +60,9 @@ and a drifted worktree path means a run that tests the wrong branch.
       silently** — a red baseline makes every later check ambiguous, since you can no longer
       tell your failure from the pre-existing one.
 
-8. **Create the session directory** at `{base}/{timestamp}-{slug}/`, **inside the worktree**
-   (untracked files in the main checkout are not visible from worktrees). Write the captured
-   spec to `spec.md`. Leave `checks.md`, `plan.md`, and `notes.md` empty — `plan` populates
-   `checks.md` at the freeze.
+8. **Determine Ceremony Threshold.** 
+   - **Small/Tactical:** Skip creating a session directory or any markdown files. Track state in-context with `todowrite`.
+   - **Large/Architectural:** Create the session directory at `{base}/{timestamp}-{slug}/`, **inside the worktree** (untracked files in the main checkout are not visible from worktrees). Write the captured spec to `spec.md`. Leave `checks.md`, `plan.md`, and `notes.md` empty — `plan` populates `checks.md` at the freeze.
 
 9. **Project board hook.** If a board is configured (`references/github-projects.md`), move
    the issue to `in_progress`. If not, report `board: not configured` in step 10 rather than
