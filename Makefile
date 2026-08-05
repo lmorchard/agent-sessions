@@ -20,8 +20,9 @@ help:
 	@echo "run              one real unattended run (nothing merges)"
 	@echo "loop             burn down up to 2 eligible issues (nothing merges)"
 	@echo "watch            digest the newest run's stream.jsonl on a loop; reads, never writes"
-	@echo "run-self         drive THIS repo (needs --allow-nested-skill-dir; ISSUE=n to pin)"
+	@echo "run-self         drive THIS repo (needs --allow-nested-skill-dir)"
 	@echo "dry-run-self     selection only against this repo's own board"
+	@echo "                 ISSUE=n pin one issue, bypassing selection (run, run-self)"
 	@echo "                 ISSUES=n BUDGET=n override queue depth / per-issue ceiling"
 	@echo ""
 	@echo "  REPO=$(REPO)  REPO_PATH=$(REPO_PATH)  BOARD=$(BOARD)"
@@ -147,10 +148,17 @@ BUDGET ?= 25
 ISSUES ?= 1
 INTERVAL ?= 10
 
+# ISSUE=n pins one issue and bypasses selection. It was wired into `run-self` and
+# not here, silently -- `make run ISSUE=704` ran #704 by luck, because selection
+# happened to agree. The moment you reach for ISSUE= is the moment you want
+# determinism, so getting selection's choice instead is worst exactly then. See #71.
+#
+# scripts/test_run_issue_flag.py holds the frozen checks, and it grades both recipes
+# from one derivation -- so the asymmetry cannot come back on either side.
 run:
 	@bash $(DRIVER) --repo $(REPO) --board $(BOARD) \
 	  --skill-dir $(SKILL) --repo-path $(REPO_PATH) \
-	  --max-issues $(ISSUES) --max-budget-usd $(BUDGET)
+	  --max-issues $(ISSUES) --max-budget-usd $(BUDGET) $(if $(ISSUE),--issue $(ISSUE),)
 
 # The multi-issue burndown. Same target as `run` with a bigger queue depth --
 # separate only because it was assembled by hand twice and is worth discovering.
