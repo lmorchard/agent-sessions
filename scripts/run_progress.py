@@ -361,6 +361,11 @@ def main(argv: list[str] | None = None) -> int:
             # running across the end of one run should pick up the next.
             run_dir = _resolve_run_dir(args)
             if run_dir is None:
+                missing_msg = _check_missing_state_dir(args)
+                if missing_msg:
+                    print(f"run_progress.py: {missing_msg}", file=sys.stderr)
+                    return 2
+
                 if fatal_if_unresolved:
                     print(f"run_progress.py: {_no_run_message(args)}", file=sys.stderr)
                     return 2
@@ -390,6 +395,19 @@ def _no_run_message(args) -> str:
         looked = default_state_dir(args.repo) / "runs"
         return f"no run directories under {looked} (for --repo {args.repo})"
     return "give a RUNDIR, or --state-dir DIR, or --repo OWNER/NAME"
+
+
+def _check_missing_state_dir(args) -> str | None:
+    """Check if the state directory itself is missing, indicating a configuration error."""
+    if args.state_dir:
+        state_dir = Path(args.state_dir)
+        if not state_dir.exists():
+            return f"error: state directory {state_dir} does not exist (misconfigured repo?)"
+    if args.repo:
+        state_dir = default_state_dir(args.repo)
+        if not state_dir.exists():
+            return f"error: state directory {state_dir} does not exist (misconfigured repo?)"
+    return None
 
 
 if __name__ == "__main__":
