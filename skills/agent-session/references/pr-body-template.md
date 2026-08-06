@@ -65,7 +65,7 @@ Field values, so the block stays parseable:
 | `freeze` | the freeze commit sha |
 | `project-gates` | `make check green` \| `red: <what failed>` — the **local** run only |
 | `ci` | `N/N pass @ <sha>` \| `N/M pass @ <sha> — pending: <names>` \| `N/M pass @ <sha> — FAILING: <names>` \| `no checks configured`. **The sha is required** — see below |
-| `threads` | `N unresolved` |
+| `threads` | `N unresolved` \| `no review yet` |
 | `risk-paths` | `none` \| the risk-gated paths this PR touches |
 | `amendments` | `none` \| `Cn: <old> → <new>` |
 | `verdict` | `pending` \| `eligible-for-auto-merge` \| `human-merge-required` |
@@ -99,6 +99,10 @@ because `project-gates: make check green` described the author's laptop and soun
 the project's gates. `no checks configured` exists so that a repo with no CI states the fact rather
 than passing by omission — an empty check list means nothing failed, which is not the same as
 everything passing.
+
+`no review yet` exists for when a requested review has not arrived; reporting `0 unresolved` in that
+case would treat an absent review as a clean pass. A review that hasn't arrived is not a failure
+and not a pass; it is not yet derivable, and holds the verdict at `pending`.
 
 **The block reports; it does not act.** Nothing in this skill merges a PR or enables
 auto-merge — `eligible-for-auto-merge` means a human or the board-driver *may* merge, and both

@@ -163,7 +163,9 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
 
     Note that a bot review carrying **no** inline comments produces zero threads while still
     registering as a review — so check the review itself landed (`gh pr view <n> --json reviews`)
-    rather than reading `0 unresolved` as proof a reviewer ran.
+    rather than reading `0 unresolved` as proof a reviewer ran. If no review has arrived yet,
+    report `threads: no review yet` and set `verdict: pending` — a review that hasn't arrived is not
+    a failure and not a pass; it is not yet derivable.
 
     **The CI row is a claim about a commit, so derive it LAST — after the final push — and record
     the sha it describes.** Anything that pushes afterwards invalidates it: a force-push to amend
