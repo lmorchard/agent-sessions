@@ -832,12 +832,11 @@ about mutation-testing a guard that protects a dangerous state.
   freeze sha and forces rebase + re-anchor + full re-verify. `origin/main` moved three times during
   #649 and four consecutive runs paid it in move 3. The machinery held every time; the wall-clock
   cost is the planning input.
-- **Real `express` runs cost $4.41–$11.87 through 2026-08-01, then $19.56–$23.63 on 2026-08-03.**
+- **Real `express` runs cost $4.41–$11.87 through 2026-08-01, with individual runs hitting $23.63 (2026-07-31, run #47) and $19.56–$20.97 (2026-08-03).**
   Move 5's two-issue loop came in at $11.76 and $11.20, total $22.96 — both would have exhausted the
-  old $12 ceiling, which is why `make run` now defaults to `--max-budget-usd 25` and `make loop` does
+  old $12 ceiling, which is why `make run` defaults to `--max-budget-usd 35` and `make loop` does
   two issues. **The later figures are the planning input, and they are close enough to the ceiling to
-  matter**: the two runs on 2026-08-03 cost $20.97 (#62) and $19.56 (#58), 84% and 78% of $25, and
-  #52's run hit $23.63. Both 2026-08-03 runs reached `gate-eligible` with zero amendments, so this is
+  matter**: the runs on 2026-08-03 cost $20.97 (#62) and $19.56 (#58), and #52's run hit $23.63 (67% of the $35 ceiling). Both 2026-08-03 runs reached `gate-eligible` with zero amendments, so this is
   the price of a *clean* run rather than of a troubled one. What plausibly drives it is the
   re-verification cycle: both re-dispatched the independent verifier after the tree changed, which is
   correct and not free.
