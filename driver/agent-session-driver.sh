@@ -288,9 +288,7 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 command -v "$PYTHON_BIN" >/dev/null || die "required command not found: $PYTHON_BIN"
 GH_QUERY_PY="$(cd "$(dirname "$0")" && pwd)/gh_query.py"
 HOOK_SCRIPT="$(cd "$(dirname "$0")" && pwd)/merge-block-hook.sh"
-HOOK_SETTINGS_FILE="$(cd "$(dirname "$0")" && pwd)/settings.json"
-jq --arg script "$HOOK_SCRIPT" '.hooks.PreToolUse[0].command = $script' "$HOOK_SETTINGS_FILE" > "$HOOK_SETTINGS_FILE.tmp" && mv "$HOOK_SETTINGS_FILE.tmp" "$HOOK_SETTINGS_FILE"
-
+HOOK_SETTINGS_TEMPLATE="$(cd "$(dirname "$0")" && pwd)/settings.json"
 
 # Every path must be absolute before we go any further. The invoke stage runs in
 # a subshell that cd's to --repo-path, so a relative path resolved at startup
@@ -379,6 +377,9 @@ elif command -v gtimeout >/dev/null; then TIMEOUT_CMD="gtimeout"
 fi
 
 mkdir -p "$STATE_DIR/runs"
+HOOK_SETTINGS_FILE="$STATE_DIR/settings.json"
+jq --arg script "$HOOK_SCRIPT" '.hooks.PreToolUse[0].command = $script' "$HOOK_SETTINGS_TEMPLATE" > "$HOOK_SETTINGS_FILE"
+
 RUNS_LOG="$STATE_DIR/runs.jsonl"
 PARKED_LOG="$STATE_DIR/parked.jsonl"
 touch "$RUNS_LOG" "$PARKED_LOG"
