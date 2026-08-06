@@ -968,7 +968,16 @@ run_issue() { # $1 = issue number
       prurl="$(printf '%s' "$prline" | cut -f2)"
       _body="$(gh pr view "$prnum" --repo "$REPO" --json body -q .body 2>/dev/null || true)"
       GATE_HEAD_SHA="$(gh pr view "$prnum" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || true)"
-      _ci_checks="$(gh pr checks "$prnum" --repo "$REPO" --json name,bucket 2>/dev/null || echo "[]")"
+      _checks_out=""
+      _checks_rc=0
+      _checks_out="$(gh pr checks "$prnum" --repo "$REPO" --json name,bucket 2>&1)" || _checks_rc=$?
+      if [ "$_checks_rc" -eq 0 ]; then
+        _ci_checks="$_checks_out"
+      elif case "$_checks_out" in *"no checks reported"*|*"no required checks reported"*) true ;; *) false ;; esac; then
+        _ci_checks="[]"
+      else
+        _ci_checks=""
+      fi
       # Read the JSON, not the stdout line. Two reasons, both learned on #657:
       #
       #   1. Parsing stdout means anything else written there corrupts the value.
@@ -1153,7 +1162,16 @@ if [ -n "$CLASSIFY_ONLY" ]; then
     prurl="$(printf '%s' "$prline" | cut -f2)"
     _body="$(gh pr view "$prnum" --repo "$REPO" --json body -q .body 2>/dev/null || true)"
     GATE_HEAD_SHA="$(gh pr view "$prnum" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || true)"
-    _ci_checks="$(gh pr checks "$prnum" --repo "$REPO" --json name,bucket 2>/dev/null || echo "[]")"
+    _checks_out=""
+    _checks_rc=0
+    _checks_out="$(gh pr checks "$prnum" --repo "$REPO" --json name,bucket 2>&1)" || _checks_rc=$?
+    if [ "$_checks_rc" -eq 0 ]; then
+      _ci_checks="$_checks_out"
+    elif case "$_checks_out" in *"no checks reported"*|*"no required checks reported"*) true ;; *) false ;; esac; then
+      _ci_checks="[]"
+    else
+      _ci_checks=""
+    fi
     # Same read as the run path above, for the same reasons -- and this is the
     # call site that MATTERS most: --classify-only is the documented recovery path
     # for an unrecorded outcome, and on #657 it reproduced the same corruption it
