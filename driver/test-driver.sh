@@ -1797,6 +1797,99 @@ else
 fi
 rm -rf "$S74_G2_TMP"
 
+# --- #87: DENIALS (n) counts all denials, not distinct phrasings ---
+echo "#87: denials count"
+
+S87_TMP="$(mktemp -d)"
+mkdir -p "$S87_TMP/bin"
+cat > "$S87_TMP/issues.json" <<'JSON'
+[{"number":87,"title":"issue 87 test","body":"<!-- agent-session:spec -->\n\n## Tier: `auto-ok`\n","labels":[]}]
+JSON
+cat > "$S87_TMP/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "issue list"*) cat "$STUB_DIR/issues.json" ;;
+  "project item-list"*) printf '{"items":[{"id":"PVTI_87","content":{"number":87,"type":"Issue"},"status":"Ready"}]}' ;;
+  "project field-list"*) printf '[{"id":"PVTF_1","name":"Status","options":[{"id":"PVTO_ready","name":"Ready"},{"id":"PVTO_review","name":"In review"}]}]' ;;
+  "project view"*) printf '{"id":"PVT_proj1"}' ;;
+  "pr list"*) printf '[]' ;;
+  *) exit 0 ;;
+esac
+STUB
+chmod +x "$S87_TMP/bin/gh"
+
+# Test 1: 3 identical generic denials
+cat > "$S87_TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+printf 'Permission to use Bash has been denied by user settings.\n'
+printf 'Permission to use Bash has been denied by user settings.\n'
+printf 'Permission to use Bash has been denied by user settings.\n'
+printf '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.1,"session_id":"s1","result":"done"}\n'
+STUB
+chmod +x "$S87_TMP/bin/claude"
+
+S87_SD="$S87_TMP/state"
+S87_SKILL="$S87_TMP/skill"; mkdir -p "$S87_SKILL/phases"; : > "$S87_SKILL/phases/express.md"
+S87_REPOP="$S87_TMP/repo"; mkdir -p "$S87_REPOP"
+
+S87_OUT="$({ STUB_DIR="$S87_TMP" PATH="$S87_TMP/bin:$PATH" \
+  bash "$DRIVER" --repo stub/repo --board stub/1 --issue 87 \
+    --skill-dir "$S87_SKILL" --repo-path "$S87_REPOP" \
+    --state-dir "$S87_SD" 2>&1 || true; })"
+
+if echo "$S87_OUT" | grep -q "DENIALS (3)"; then
+  ok "#87 C1 3 identical generic denials report DENIALS (3)"
+else
+  bad "#87 C1 3 identical generic denials report DENIALS (3)" "DENIALS (3)" "$S87_OUT"
+fi
+
+S87_RUNDIR="$(ls -td "$S87_SD/runs/87-"* 2>/dev/null | head -1 || true)"
+if [ -f "$S87_RUNDIR/denials.txt" ] && [ "$(grep -c . "$S87_RUNDIR/denials.txt")" -eq 3 ]; then
+  ok "#87 C1 denials.txt contains 3 entries"
+else
+  bad "#87 C1 denials.txt contains 3 entries" "3 lines in denials.txt" "$(cat "$S87_RUNDIR/denials.txt" 2>/dev/null || echo missing)"
+fi
+
+# Test 2: zero denials -> no DENIALS line, no denials.txt
+cat > "$S87_TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+printf '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.1,"session_id":"s1","result":"done"}\n'
+STUB
+chmod +x "$S87_TMP/bin/claude"
+
+S87_OUT_ZERO="$({ STUB_DIR="$S87_TMP" PATH="$S87_TMP/bin:$PATH" \
+  bash "$DRIVER" --repo stub/repo --board stub/1 --issue 87 \
+    --skill-dir "$S87_SKILL" --repo-path "$S87_REPOP" \
+    --state-dir "$S87_SD" 2>&1 || true; })"
+
+S87_RUNDIR_ZERO="$(ls -td "$S87_SD/runs/87-"* 2>/dev/null | head -1 || true)"
+if ! echo "$S87_OUT_ZERO" | grep -q "DENIALS" && [ ! -f "$S87_RUNDIR_ZERO/denials.txt" ]; then
+  ok "#87 G1 zero denials produce no DENIALS and no denials.txt"
+else
+  bad "#87 G1 zero denials produce no DENIALS and no denials.txt" "no DENIALS / no denials.txt" "$S87_OUT_ZERO"
+fi
+
+# Test 3: path-rule phrasing ("denied by your permission settings") is detected
+cat > "$S87_TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+printf 'Some action denied by your permission settings.\n'
+printf '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.1,"session_id":"s1","result":"done"}\n'
+STUB
+chmod +x "$S87_TMP/bin/claude"
+
+S87_OUT_PATH="$({ STUB_DIR="$S87_TMP" PATH="$S87_TMP/bin:$PATH" \
+  bash "$DRIVER" --repo stub/repo --board stub/1 --issue 87 \
+    --skill-dir "$S87_SKILL" --repo-path "$S87_REPOP" \
+    --state-dir "$S87_SD" 2>&1 || true; })"
+
+if echo "$S87_OUT_PATH" | grep -q "DENIALS (1)"; then
+  ok "#87 G2 path-rule phrasing is detected"
+else
+  bad "#87 G2 path-rule phrasing is detected" "DENIALS (1)" "$S87_OUT_PATH"
+fi
+
+rm -rf "$S87_TMP"
+
 # --- syntax ----------------------------------------------------------------
 
 echo "syntax"
