@@ -684,14 +684,18 @@ AGENT_RUNNER_PY="$(cd "$(dirname "$0")" && pwd)/agent_runner.py"
 
 GATE_JSON=""
 GATE_BLOCK=""
-classify_pr_body() { # $1 = PR body, $2 = head sha. Prints "outcome<TAB>reason".
+classify_pr_body() { # $1 = PR body, $2 = head sha, $3 = ci checks json. Prints "outcome<TAB>reason".
   # Clear both FIRST. The callers now read these globals rather than this
   # function's stdout, so a failed classify must not leave the PREVIOUS issue's
   # verdict standing in them -- under --max-issues 2 that would record issue A's
   # outcome against issue B, which is the same class of defect as #32 itself.
   GATE_JSON=""
   GATE_BLOCK=""
-  GATE_JSON="$("$PYTHON_BIN" "$GATE_PY" classify --head-sha "${2:-}" <<<"$1")"
+  local extra_args=()
+  if [ -n "${3:-}" ]; then
+    extra_args=(--ci-checks "$3")
+  fi
+  GATE_JSON="$("$PYTHON_BIN" "$GATE_PY" classify --head-sha "${2:-}" ${extra_args[@]+"${extra_args[@]}"} <<<"$1")"
   GATE_BLOCK="$(printf '%s' "$GATE_JSON" | jq -r '.gate')"
   # Warnings are the parser's "a null must never render as a positive" channel;
   # surface them here rather than letting them die inside the JSON.
@@ -964,6 +968,16 @@ run_issue() { # $1 = issue number
       prurl="$(printf '%s' "$prline" | cut -f2)"
       _body="$(gh pr view "$prnum" --repo "$REPO" --json body -q .body 2>/dev/null || true)"
       GATE_HEAD_SHA="$(gh pr view "$prnum" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || true)"
+      _checks_out=""
+      _checks_rc=0
+      _checks_out="$(gh pr checks "$prnum" --repo "$REPO" --json name,bucket 2>&1)" || _checks_rc=$?
+      if [ "$_checks_rc" -eq 0 ]; then
+        _ci_checks="$_checks_out"
+      elif case "$_checks_out" in *"no checks reported"*|*"no required checks reported"*) true ;; *) false ;; esac; then
+        _ci_checks="[]"
+      else
+        _ci_checks=""
+      fi
       # Read the JSON, not the stdout line. Two reasons, both learned on #657:
       #
       #   1. Parsing stdout means anything else written there corrupts the value.
@@ -981,7 +995,7 @@ run_issue() { # $1 = issue number
       # classifier crash was invisible to `set -e` and left outcome empty; as a
       # plain command it would abort the driver instead, which on the recovery
       # path means dying without recording anything -- #32's own shape.
-      classify_pr_body "$_body" "$GATE_HEAD_SHA" >/dev/null || true
+      classify_pr_body "$_body" "$GATE_HEAD_SHA" "$_ci_checks" >/dev/null || true
       outcome="$(printf '%s' "$GATE_JSON" | jq -r '.outcome')"
       reason="$(printf '%s' "$GATE_JSON" | jq -r '.reason')"
       printf '%s\n' "$GATE_BLOCK" > "$rundir/gate.yaml"
@@ -1148,6 +1162,16 @@ if [ -n "$CLASSIFY_ONLY" ]; then
     prurl="$(printf '%s' "$prline" | cut -f2)"
     _body="$(gh pr view "$prnum" --repo "$REPO" --json body -q .body 2>/dev/null || true)"
     GATE_HEAD_SHA="$(gh pr view "$prnum" --repo "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || true)"
+    _checks_out=""
+    _checks_rc=0
+    _checks_out="$(gh pr checks "$prnum" --repo "$REPO" --json name,bucket 2>&1)" || _checks_rc=$?
+    if [ "$_checks_rc" -eq 0 ]; then
+      _ci_checks="$_checks_out"
+    elif case "$_checks_out" in *"no checks reported"*|*"no required checks reported"*) true ;; *) false ;; esac; then
+      _ci_checks="[]"
+    else
+      _ci_checks=""
+    fi
     # Same read as the run path above, for the same reasons -- and this is the
     # call site that MATTERS most: --classify-only is the documented recovery path
     # for an unrecorded outcome, and on #657 it reproduced the same corruption it
@@ -1155,7 +1179,7 @@ if [ -n "$CLASSIFY_ONLY" ]; then
     # class 1's "fixed the cost field, never generalised". See issue #32.
     # `|| true` for the same reason as the run path: never abort where the whole
     # point of this code path is to get an outcome recorded.
-    classify_pr_body "$_body" "$GATE_HEAD_SHA" >/dev/null || true
+    classify_pr_body "$_body" "$GATE_HEAD_SHA" "$_ci_checks" >/dev/null || true
     outcome="$(printf '%s' "$GATE_JSON" | jq -r '.outcome')"
     reason="$(printf '%s' "$GATE_JSON" | jq -r '.reason')"
     [ "$rundir" != "(none)" ] && printf '%s\n' "$GATE_BLOCK" > "$rundir/gate.yaml"

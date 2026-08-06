@@ -18,10 +18,30 @@ sys.path.insert(0, str(Path(__file__).parent))
 import gate  # noqa: E402
 
 
-def body_with(ci_row, verdict="eligible-for-auto-merge", reason=None):
+def body_with(
+    ci_row,
+    verdict="eligible-for-auto-merge",
+    reason=None,
+    checks="C1 pass",
+    tamper="clean",
+    project_gates="make check green",
+    threads="0 unresolved",
+    risk_paths="none",
+):
     """Build a PR body shaped like pr-body-template.md emits."""
-    lines = ["## Merge gate", "", gate.GATE_MARKER, "```yaml",
-             "tier: auto-ok", f"verdict: {verdict}"]
+    lines = [
+        "## Merge gate",
+        "",
+        gate.GATE_MARKER,
+        "```yaml",
+        "tier: auto-ok",
+        f"checks: {checks}",
+        f"tamper: {tamper}",
+        f"project-gates: {project_gates}",
+        f"threads: {threads}",
+        f"risk-paths: {risk_paths}",
+        f"verdict: {verdict}",
+    ]
     if ci_row is not None:
         lines.append(f"ci: {ci_row}")
     if reason is not None:
@@ -316,4 +336,129 @@ def test_corpus_bodies_snapshot_verdicts():
     ]
     for body, expected in corpus:
         assert gate.tier_of(body) == expected
+
+
+# --- issue #30: live CI grading for pending/unparseable verdicts -----------
+
+def test_evaluate_ci_checks_distinguishes_four_states():
+    """#30 C2: evaluate_ci_checks distinguishes pass, no-checks, pending, fail."""
+    # 1. pass
+    state, status, details = gate.evaluate_ci_checks([
+        {"name": "c1", "bucket": "pass"},
+        {"name": "c2", "bucket": "pass"},
+    ])
+    assert state == "pass"
+    assert status == "2/2 pass"
+    assert details["total"] == 2
+
+    # 2. no checks configured
+    state, status, details = gate.evaluate_ci_checks([])
+    assert state == "no-checks"
+    assert status == "no checks configured"
+    assert details["total"] == 0
+
+    # 3. pending
+    state, status, details = gate.evaluate_ci_checks([
+        {"name": "c1", "bucket": "pass"},
+        {"name": "c2", "bucket": "pending"},
+    ])
+    assert state == "pending"
+    assert "pending: c2" in status
+    assert details["pending"] == 1
+
+    # 4. fail
+    state, status, details = gate.evaluate_ci_checks([
+        {"name": "c1", "bucket": "fail"},
+    ])
+    assert state == "fail"
+    assert "FAILING: c1" in status
+    assert details["fail"] == 1
+
+
+def test_classify_pending_verdict_with_live_ci_passed():
+    """#30 C1: unparseable sha + live CI pass -> no warning, outcome gate-eligible."""
+    body = body_with("not yet graded", verdict="pending")
+    g = gate.extract_gate(body)
+    ci_checks = [{"name": "c1", "bucket": "pass"}, {"name": "c2", "bucket": "pass"}]
+    r = gate.classify(g, head_sha="abc123456789", ci_checks=ci_checks)
+
+    assert r["outcome"] == "gate-eligible"
+    assert r["warnings"] == []
+    assert "2/2 pass @ abc1234" in r["reason"]
+    assert "abc1234" in r["reason"]
+
+
+def test_classify_pending_verdict_three_outcomes_for_three_ci_states():
+    """#30 C2: three live CI states -> three outcomes for pending verdict."""
+    body = body_with("not yet graded", verdict="pending")
+    g = gate.extract_gate(body)
+    head_sha = "abc123456789"
+
+    # 1. CI passed -> gate-eligible
+    r_pass = gate.classify(g, head_sha=head_sha, ci_checks=[{"name": "c1", "bucket": "pass"}])
+    assert r_pass["outcome"] == "gate-eligible"
+    assert "no checks configured" not in r_pass["reason"]
+
+    # 2. No checks configured -> gate-eligible with "no checks configured" in reason
+    r_nochecks = gate.classify(g, head_sha=head_sha, ci_checks=[])
+    assert r_nochecks["outcome"] == "gate-eligible"
+    assert "no checks configured" in r_nochecks["reason"]
+
+    # 3. Checks pending -> incomplete
+    r_pending = gate.classify(g, head_sha=head_sha, ci_checks=[{"name": "c1", "bucket": "pending"}])
+    assert r_pending["outcome"] == "incomplete"
+    assert "checks pending" in r_pending["reason"]
+
+
+def test_classify_pending_verdict_live_ci_failing():
+    """#30 C2: live CI failing -> gate-human."""
+    body = body_with("not yet graded", verdict="pending")
+    g = gate.extract_gate(body)
+    r = gate.classify(g, head_sha="abc123456789", ci_checks=[{"name": "c1", "bucket": "fail"}])
+    assert r["outcome"] == "gate-human"
+    assert "FAILING: c1" in r["reason"]
+
+
+def test_evaluate_ci_checks_handles_invalid_json_and_non_dicts():
+    """Copilot feedback: invalid JSON/types should return error state, not false positive."""
+    # Invalid JSON string -> error
+    state, msg, _ = gate.evaluate_ci_checks("{invalid json")
+    assert state == "error"
+    assert "invalid" in msg
+
+    # Non-list input -> error
+    state, msg, _ = gate.evaluate_ci_checks({"not": "a list"})
+    assert state == "error"
+
+    # List with non-dict elements -> filters valid items, total is valid items only
+    state, status, details = gate.evaluate_ci_checks([
+        "invalid element",
+        {"name": "c1", "bucket": "pass"},
+    ])
+    assert state == "pass"
+    assert details["total"] == 1
+    assert status == "1/1 pass"
+
+
+def test_classify_live_ci_pass_verifies_all_gate_rows():
+    """Copilot feedback: live CI pass must still verify project-gates, threads, tamper, etc."""
+    # 1. Failing project-gates -> gate-human
+    body_red_gates = body_with("not yet graded", verdict="pending", project_gates="red: test failed")
+    r1 = gate.classify(gate.extract_gate(body_red_gates), head_sha="abc123456789", ci_checks=[{"name": "c1", "bucket": "pass"}])
+    assert r1["outcome"] == "gate-human"
+    assert "project-gates row" in r1["reason"]
+
+    # 2. Failing threads -> gate-human
+    body_unresolved = body_with("not yet graded", verdict="pending", threads="2 unresolved")
+    r2 = gate.classify(gate.extract_gate(body_unresolved), head_sha="abc123456789", ci_checks=[{"name": "c1", "bucket": "pass"}])
+    assert r2["outcome"] == "gate-human"
+    assert "threads row" in r2["reason"]
+
+    # 3. Failing risk-paths -> gate-human
+    body_risk = body_with("not yet graded", verdict="pending", risk_paths="driver/gate.py")
+    r3 = gate.classify(gate.extract_gate(body_risk), head_sha="abc123456789", ci_checks=[{"name": "c1", "bucket": "pass"}])
+    assert r3["outcome"] == "gate-human"
+    assert "risk-paths row" in r3["reason"]
+
+
 

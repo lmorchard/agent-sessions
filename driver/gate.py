@@ -118,7 +118,120 @@ def ci_sha(ci_row: str) -> str:
     return m.group(0) if m else ""
 
 
-def classify(gate: str, head_sha: str = "", marker: str = GATE_MARKER) -> dict:
+def evaluate_ci_checks(ci_checks: list[dict] | str) -> tuple[str, str, dict]:
+    """Evaluate live CI checks JSON or list of dicts.
+
+    Returns (ci_state, ci_row_str, details) where ci_state is:
+    - "pass": all checks passed (total > 0)
+    - "no-checks": total == 0
+    - "pending": at least one check is pending and no failures
+    - "fail": at least one check failed
+    - "error": invalid JSON or non-list data
+    """
+    if isinstance(ci_checks, str):
+        try:
+            items = json.loads(ci_checks) if ci_checks.strip() else []
+        except Exception:
+            return "error", "invalid live CI JSON", {"total": 0, "pass": 0, "pending": 0, "fail": 0}
+    elif isinstance(ci_checks, list):
+        items = ci_checks
+    else:
+        return "error", "invalid live CI input type", {"total": 0, "pass": 0, "pending": 0, "fail": 0}
+
+    if not isinstance(items, list):
+        return "error", "invalid live CI list", {"total": 0, "pass": 0, "pending": 0, "fail": 0}
+
+    valid_items = [item for item in items if isinstance(item, dict)]
+    if len(valid_items) == 0:
+        return "no-checks", "no checks configured", {"total": 0, "pass": 0, "pending": 0, "fail": 0}
+
+    total = len(valid_items)
+    pass_count = 0
+    pending_names: list[str] = []
+    failing_names: list[str] = []
+
+    for item in valid_items:
+        name = str(item.get("name") or "unknown")
+        bucket = str(item.get("bucket") or item.get("state") or "").lower()
+        if bucket in ("pass", "skipping", "success"):
+            pass_count += 1
+        elif bucket in ("pending", "in_progress", "queued", "requested", "waiting"):
+            pending_names.append(name)
+        else:
+            failing_names.append(name)
+
+    if failing_names:
+        status = f"{pass_count}/{total} pass -- FAILING: {', '.join(failing_names)}"
+        return "fail", status, {"total": total, "pass": pass_count, "pending": len(pending_names), "fail": len(failing_names)}
+
+    if pending_names:
+        status = f"{pass_count}/{total} pass -- pending: {', '.join(pending_names)}"
+        return "pending", status, {"total": total, "pass": pass_count, "pending": len(pending_names), "fail": 0}
+
+    status = f"{total}/{total} pass"
+    return "pass", status, {"total": total, "pass": pass_count, "pending": 0, "fail": 0}
+
+
+def verify_gate_rows(fields: dict[str, str]) -> tuple[bool, list[str]]:
+    """Verify non-CI gate block rows according to pr-body-template.md.
+
+    Returns (all_ok, list_of_failed_reasons).
+    """
+    failed: list[str] = []
+
+    tier = fields.get("tier", "")
+    if not tier:
+        failed.append("missing tier field")
+    elif "needs-review" in tier or "unparsed" in tier or "conflict" in tier:
+        failed.append(f"tier: {tier}")
+
+    checks = fields.get("checks", "")
+    if not checks:
+        failed.append("missing checks field")
+    elif "fail" in checks or "pending" in checks:
+        failed.append(f"checks row: {checks}")
+
+    guards = fields.get("guards", "none")
+    if "REGRESSED" in guards:
+        failed.append(f"guards row: {guards}")
+
+    tamper = fields.get("tamper", "")
+    if not tamper:
+        failed.append("missing tamper field")
+    elif tamper.startswith("DIRTY") or "DIRTY" in tamper:
+        failed.append(f"tamper row: {tamper}")
+    elif not (tamper.startswith("clean") or tamper.startswith("amended")):
+        failed.append(f"tamper row: {tamper}")
+
+    project_gates = fields.get("project-gates", "")
+    if not project_gates:
+        failed.append("missing project-gates field")
+    elif project_gates.startswith("red") or "red:" in project_gates or "fail" in project_gates:
+        failed.append(f"project-gates row: {project_gates}")
+    elif "green" not in project_gates and "pass" not in project_gates:
+        failed.append(f"project-gates row: {project_gates}")
+
+    threads = fields.get("threads", "")
+    if not threads:
+        failed.append("missing threads field")
+    elif not threads.startswith("0 unresolved"):
+        failed.append(f"threads row: {threads}")
+
+    risk_paths = fields.get("risk-paths", "")
+    if not risk_paths:
+        failed.append("missing risk-paths field")
+    elif risk_paths != "none":
+        failed.append(f"risk-paths row: {risk_paths}")
+
+    return len(failed) == 0, failed
+
+
+def classify(
+    gate: str,
+    head_sha: str = "",
+    ci_checks: list[dict] | str | None = None,
+    marker: str = GATE_MARKER,
+) -> dict:
     """Classify a gate block into an outcome + reason.
 
     Returns a dict with `outcome`, `reason`, `has_gate`, `fields`, `ci_sha`,
@@ -155,13 +268,6 @@ def classify(gate: str, head_sha: str = "", marker: str = GATE_MARKER) -> dict:
         ci_row = gate_field(gate, "ci")
         sha = ci_sha(ci_row)
         result["ci_sha"] = sha
-        if not sha and ci_row.strip() and ci_row != "no checks configured":
-            # A null must never render as a positive: an unparseable sha also
-            # yields "current", so say so rather than reading it as verified.
-            result["warnings"].append(
-                f"ci row carries no parseable sha ('{ci_row}') -- staleness "
-                "UNCHECKED, not verified current. pr-body-template.md requires it."
-            )
         if sha and not head_sha.startswith(sha):
             result["ci_stale"] = True
             result["outcome"] = "ci-stale"
@@ -171,6 +277,42 @@ def classify(gate: str, head_sha: str = "", marker: str = GATE_MARKER) -> dict:
                 "no longer ships"
             )
             return result
+
+        if ci_checks is not None and (not sha or verdict == "pending"):
+            ci_state, live_ci_row, _ = evaluate_ci_checks(ci_checks)
+            if ci_state != "error":
+                sha_suffix = f" @ {head_sha[:7]}" if head_sha and ci_state != "no-checks" else ""
+                formatted_ci_row = f"{live_ci_row}{sha_suffix}" if ci_state != "no-checks" else live_ci_row
+                result["ci_sha"] = head_sha[:7] if head_sha else ""
+
+                if ci_state == "pending":
+                    result["outcome"] = "incomplete"
+                    result["reason"] = f"verdict still pending -- live CI checks pending ({formatted_ci_row})"
+                    return result
+                elif ci_state == "fail":
+                    result["outcome"] = "gate-human"
+                    result["reason"] = f"live CI checks failed on head {head_sha[:8]} ({formatted_ci_row})"
+                    return result
+                elif ci_state in ("pass", "no-checks"):
+                    all_ok, failed_reasons = verify_gate_rows(result["fields"])
+                    if all_ok:
+                        result["outcome"] = "gate-eligible"
+                        result["reason"] = f"all gate rows satisfied (live CI: {formatted_ci_row})"
+                    else:
+                        result["outcome"] = "gate-human"
+                        result["reason"] = f"live CI passed ({formatted_ci_row}) but gate has failing rows: {'; '.join(failed_reasons)}"
+                    return result
+                    result["outcome"] = "gate-eligible"
+                    result["reason"] = f"all gate rows satisfied (live CI: {formatted_ci_row})"
+                return result
+
+        if not sha and ci_row.strip() and ci_row != "no checks configured":
+            # A null must never render as a positive: an unparseable sha also
+            # yields "current", so say so rather than reading it as verified.
+            result["warnings"].append(
+                f"ci row carries no parseable sha ('{ci_row}') -- staleness "
+                "UNCHECKED, not verified current. pr-body-template.md requires it."
+            )
 
     if verdict == "eligible-for-auto-merge":
         result["outcome"] = "gate-eligible"
@@ -260,6 +402,7 @@ def _main(argv: list[str] | None = None) -> int:
 
     c = sub.add_parser("classify", help="PR body on stdin -> classification JSON")
     c.add_argument("--head-sha", default="")
+    c.add_argument("--ci-checks", default=None)
     c.add_argument("--marker", default=GATE_MARKER)
 
     t = sub.add_parser("tier", help="issue body on stdin -> tier JSON")
@@ -281,7 +424,12 @@ def _main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "classify":
         gate = extract_gate(sys.stdin.read(), marker=args.marker)
-        out = classify(gate, head_sha=args.head_sha, marker=args.marker)
+        out = classify(
+            gate,
+            head_sha=args.head_sha,
+            ci_checks=args.ci_checks,
+            marker=args.marker,
+        )
     elif args.cmd == "tier":
         out = {"tier": tier_of(sys.stdin.read(), marker=args.marker)}
     elif args.cmd == "tier-batch":
