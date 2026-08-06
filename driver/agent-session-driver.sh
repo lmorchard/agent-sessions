@@ -286,6 +286,7 @@ done
 # portable to a GHA runner, as the header claims. `uv` is a test-time tool only.
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 command -v "$PYTHON_BIN" >/dev/null || die "required command not found: $PYTHON_BIN"
+GH_QUERY_PY="$(cd "$(dirname "$0")" && pwd)/gh_query.py"
 
 # Every path must be absolute before we go any further. The invoke stage runs in
 # a subshell that cd's to --repo-path, so a relative path resolved at startup
@@ -509,51 +510,6 @@ park_reason() { # $1 = issue number -> the latest recorded reason for it
 # nothing -- exactly as an empty list does. A fallback would not repair
 # selection, and would leave the defect in place behind a change that looks
 # like a fix.
-fetch_open_prs() {
-  gh pr list --repo "$REPO" --state open --limit 200 \
-     --json number,title,body,headRefName,url,closingIssuesReferences
-}
-
-# TWO matchers, deliberately, because the two callers want opposite errors.
-#
-#   pr_blocking_issue  -- the SELECTION gate. Wants PRECISION. A false match here
-#                         removes real work from the queue and says nothing about
-#                         it: the driver idles and prints a skip reason that reads
-#                         as true. Nothing downstream ever catches it.
-#   pr_for_issue       -- post-run DISCOVERY. Wants RECALL. It runs against a PR
-#                         the driver may have just opened badly, and a false MISS
-#                         reports `parked: no PR opened` about a PR that exists.
-#
-# They used to be one function, matching a bare `#N` anywhere in body, title or
-# branch. That is a proxy for the closing link, and it fired on PR #21 of this
-# repo -- a docs-only triage sweep tabulating six issue numbers, closing none of
-# them -- hiding #11 and #13 while `closingIssuesReferences` on it was empty.
-# Self-amplifying, too: the more the project documents its own triage, the more
-# of its own backlog it hides. See issue #23.
-#
-# Do NOT unify these back together. Do NOT rename pr_for_issue: the guards in
-# driver/test-driver.sh extract it out of this file BY NAME.
-
-pr_blocking_issue() { # $1 = issue number, $2 = open-prs json -- STRICT, selection only
-  # `// []` is load-bearing rather than defensive: a PR served without the key at
-  # all (any caller or stub that did not request the field) yields null, and
-  # `null[]` is a jq ERROR, not an empty match -- which would take the whole
-  # selection stage down instead of matching nothing.
-  printf '%s' "$2" | jq -r --arg n "$1" '
-    .[] | select(
-      [ (.closingIssuesReferences // [])[] | .number | tostring ] | index($n)
-    ) | "\(.number)\t\(.url)"' | head -1
-}
-
-pr_for_issue() { # $1 = issue number, $2 = open-prs json -- LOOSE, discovery only
-  printf '%s' "$2" | jq -r --arg n "$1" '
-    .[] | select(
-        ((.body  // "") | test("(^|[^0-9])#" + $n + "([^0-9]|$)"))
-     or ((.title // "") | test("(^|[^0-9])#" + $n + "([^0-9]|$)"))
-     or ((.headRefName // "") | test("(^|[^0-9])" + $n + "([^0-9]|$)"))
-    ) | "\(.number)\t\(.url)"' | head -1
-}
-
 board_status() { # $1 = issue number; echoes column name or empty
   [ -n "$BOARD" ] || return 0
   printf '%s' "$BOARD_JSON" | jq -r --arg n "$1" \
@@ -635,7 +591,7 @@ select_issues() {
   #
   # `die` exits 2, and select_issues is called plainly (not inside `$( )`), so
   # this ends the process before the run loop rather than a subshell.
-  prs="$(fetch_open_prs)" || die "open-PR query failed -- cannot tell which issues already have open PRs, so selection would be a guess. Refusing to select. (gh's own error is above.)"
+  prs="$("$PYTHON_BIN" "$GH_QUERY_PY" fetch-open-prs --repo "$REPO")" || die "open-PR query failed -- cannot tell which issues already have open PRs, so selection would be a guess. Refusing to select. (gh's own error is above.)"
   parked="$(printf '%s' "$issues_json" | parked_numbers || true)"
 
   if [ -z "$candidates" ]; then
@@ -648,12 +604,12 @@ select_issues() {
   while IFS="$(printf '\t')" read -r n tier title; do
     [ -n "$n" ] || continue
     col="$(board_status "$n")"
-    prline="$(pr_blocking_issue "$n" "$prs")"
+    prline="$(printf '%s' "$prs" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-blocking-issue "$n")"
     # Only asked when nothing BLOCKS, and only to report the near-match rather
     # than discard it silently. A null rendering as a positive is findings.md
     # class 2; silently dropping the near-match is the same shape in reverse.
     mention=""
-    [ -z "$prline" ] && mention="$(pr_for_issue "$n" "$prs")"
+    [ -z "$prline" ] && mention="$(printf '%s' "$prs" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-for-issue "$n")"
     reason=""
 
     if   [ "$tier" = "needs-review" ]; then reason="tier: needs-review"
@@ -970,10 +926,10 @@ run_issue() { # $1 = issue number
     # substitution discards the inner exit status, which is how the failure went
     # unnoticed here in the first place. See issue #39.
     local prs_json pr_query_failed=0
-    prs_json="$(fetch_open_prs)" || pr_query_failed=1
+    prs_json="$("$PYTHON_BIN" "$GH_QUERY_PY" fetch-open-prs --repo "$REPO")" || pr_query_failed=1
     prline=""
     if [ "$pr_query_failed" -eq 0 ]; then
-      prline="$(pr_for_issue "$n" "$prs_json")"
+      prline="$(printf '%s' "$prs_json" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-for-issue "$n")"
     fi
     if [ -z "$prline" ]; then
       outcome="parked"
@@ -1150,10 +1106,10 @@ if [ -n "$CLASSIFY_ONLY" ]; then
   # unrecorded outcome, so a wrong reason here is a wrong reason in exactly the
   # place someone is looking to find out what happened. Issue #39.
   _prs_json=""; _pr_query_failed=0
-  _prs_json="$(fetch_open_prs)" || _pr_query_failed=1
+  _prs_json="$("$PYTHON_BIN" "$GH_QUERY_PY" fetch-open-prs --repo "$REPO")" || _pr_query_failed=1
   prline=""
   if [ "$_pr_query_failed" -eq 0 ]; then
-    prline="$(pr_for_issue "$n" "$_prs_json")"
+    prline="$(printf '%s' "$_prs_json" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-for-issue "$n")"
   fi
   if [ -z "$prline" ]; then
     outcome="parked"
