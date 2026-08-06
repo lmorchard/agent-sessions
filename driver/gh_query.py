@@ -12,8 +12,8 @@ import subprocess
 import sys
 
 
-def fetch_open_prs(repo: str) -> list[dict]:
-    """Fetch open PRs from GitHub for the given repo."""
+def fetch_prs(repo: str, state: str = "open") -> list[dict]:
+    """Fetch PRs from GitHub for the given repo."""
     cmd = [
         "gh",
         "pr",
@@ -21,7 +21,7 @@ def fetch_open_prs(repo: str) -> list[dict]:
         "--repo",
         repo,
         "--state",
-        "open",
+        state,
         "--limit",
         "200",
         "--json",
@@ -34,6 +34,11 @@ def fetch_open_prs(repo: str) -> list[dict]:
         return json.loads(result.stdout)
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"gh command failed: {e.stderr}") from e
+
+
+def fetch_open_prs(repo: str) -> list[dict]:
+    """Fetch open PRs from GitHub for the given repo."""
+    return fetch_prs(repo, state="open")
 
 
 def pr_blocking_issue(issue_number: str, open_prs: list[dict]) -> str | None:
@@ -71,8 +76,9 @@ def _main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    f = sub.add_parser("fetch-open-prs", help="Fetch open PRs for a repo")
+    f = sub.add_parser("fetch-open-prs", help="Fetch PRs for a repo")
     f.add_argument("--repo", required=True)
+    f.add_argument("--state", default="open", help="PR state (open, closed, merged, all)")
 
     pb = sub.add_parser("pr-blocking-issue", help="Strict match for selection")
     pb.add_argument("issue")
@@ -84,7 +90,7 @@ def _main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "fetch-open-prs":
         try:
-            prs = fetch_open_prs(args.repo)
+            prs = fetch_prs(args.repo, state=args.state)
             json.dump(prs, sys.stdout)
             sys.stdout.write("\n")
         except Exception as e:

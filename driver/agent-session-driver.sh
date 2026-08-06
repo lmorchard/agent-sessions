@@ -1113,7 +1113,7 @@ if [ -n "$CLASSIFY_ONLY" ]; then
   # unrecorded outcome, so a wrong reason here is a wrong reason in exactly the
   # place someone is looking to find out what happened. Issue #39.
   _prs_json=""; _pr_query_failed=0
-  _prs_json="$("$PYTHON_BIN" "$GH_QUERY_PY" fetch-open-prs --repo "$REPO")" || _pr_query_failed=1
+  _prs_json="$("$PYTHON_BIN" "$GH_QUERY_PY" fetch-open-prs --repo "$REPO" --state all)" || _pr_query_failed=1
   prline=""
   if [ "$_pr_query_failed" -eq 0 ]; then
     prline="$(printf '%s' "$_prs_json" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-for-issue "$n")"
@@ -1158,7 +1158,9 @@ if [ -n "$CLASSIFY_ONLY" ]; then
       recovered:true}' \
     >> "$RUNS_LOG"
 
-  apply_park_state "$n" "$outcome" "$ts" "$reason"
+  if [ -n "$prline" ]; then
+    apply_park_state "$n" "$outcome" "$ts" "$reason"
+  fi
 
   rm -f "$STATE_DIR/inflight.json"
   say ""
