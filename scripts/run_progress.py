@@ -50,6 +50,7 @@ STREAM_NAME = "stream.jsonl"
 #: `last` is one line in a digest that is often read from a log; an assistant text
 #: block can be many paragraphs, so it is collapsed and cut to this width.
 LAST_TEXT_WIDTH = 100
+MAX_TEXT_BLOCKS = 20
 
 
 @dataclass
@@ -111,6 +112,13 @@ def read_records(path: Path | str) -> tuple[list[dict], int]:
         else:
             skipped += 1
     return records, skipped
+
+
+def _add_text_block(snap: Progress, text: str) -> None:
+    snap.text_blocks.append(text)
+    if len(snap.text_blocks) > MAX_TEXT_BLOCKS:
+        snap.text_blocks.pop(0)
+    snap.last_text = text
 
 
 def _blocks(record: dict) -> list:
@@ -178,8 +186,40 @@ def read_progress(run_dir: Path | str) -> Progress:
                     # useful answer to "what is it doing?" is the last thing it
                     # actually said.
                     if isinstance(text, str):
-                        snap.text_blocks.append(text)
-                        snap.last_text = text
+                        _add_text_block(snap, text)
+
+        elif kind == "step_start":
+            snap.turns += 1
+
+        elif kind in ("tool_use", "tool_call"):
+            part = record.get("part")
+            name = None
+            if isinstance(part, dict):
+                name = part.get("tool") or part.get("name")
+            if not name:
+                name = record.get("name") or record.get("tool")
+            if isinstance(name, str):
+                snap.tools[name] += 1
+
+        elif kind == "text":
+            part = record.get("part")
+            text = None
+            if isinstance(part, dict):
+                text = part.get("text")
+            if not text:
+                text = record.get("text")
+            if isinstance(text, str):
+                _add_text_block(snap, text)
+
+        elif kind == "step_finish":
+            part = record.get("part")
+            if isinstance(part, dict):
+                cost = _as_number(part.get("cost"))
+                if cost is not None:
+                    snap.cost_usd = (snap.cost_usd or 0.0) + cost
+                reason = part.get("reason")
+                if reason == "stop":
+                    snap.is_error = False
 
         elif kind == "result":
             # Last result wins. A resumed run emits more than one, and the

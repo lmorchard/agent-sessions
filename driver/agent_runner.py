@@ -1,0 +1,284 @@
+#!/usr/bin/env python3
+"""Agent execution runner and stream parser for claude and opencode backends.
+
+Provides unified execution, timeout management, output stream capture,
+and result/cost/session parsing for agent-session driver.
+Stdlib only, importable and testable with pytest.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+def run_agent(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description="Run agent backend")
+    p.add_argument("--backend", choices=["claude", "opencode"], default="claude")
+    p.add_argument("--repo-path", required=True)
+    p.add_argument("--skill-dir", required=True)
+    p.add_argument("--prompt-file", required=True)
+    p.add_argument("--raw-output", required=True)
+    p.add_argument("--stderr-output", required=True)
+    p.add_argument("--max-budget", type=float, default=10.0)
+    p.add_argument("--timeout", type=int, default=5400)
+    p.add_argument("--model", default="")
+    p.add_argument("--allowed-tools", default="")
+    p.add_argument("--disallowed-tools", default="")
+    p.add_argument("--settings", default="")
+
+    args = p.parse_args(argv)
+
+    repo_path = Path(args.repo_path).resolve()
+    skill_dir = Path(args.skill_dir).resolve()
+    prompt_file = Path(args.prompt_file).resolve()
+    raw_output = Path(args.raw_output).resolve()
+    stderr_output = Path(args.stderr_output).resolve()
+
+    if not prompt_file.is_file():
+        stderr_output.write_text(f"error: prompt file not found: {prompt_file}\n")
+        return 2
+
+    prompt_text = prompt_file.read_text(encoding="utf-8")
+
+    if args.backend == "claude":
+        cmd = [
+            "claude",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--permission-mode",
+            "dontAsk",
+            "--allowedTools",
+            args.allowed_tools,
+            "--disallowedTools",
+            args.disallowed_tools,
+            "--settings",
+            args.settings,
+            "--max-budget-usd",
+            str(args.max_budget),
+            "--add-dir",
+            str(skill_dir),
+        ]
+        if args.model:
+            cmd.extend(["--model", args.model])
+        stdin_data = prompt_text.encode("utf-8")
+    elif args.backend == "opencode":
+        cmd = [
+            "opencode",
+            "run",
+            prompt_text,
+            "--format",
+            "json",
+            "--auto",
+            "--dir",
+            str(repo_path),
+        ]
+        if args.model:
+            cmd.extend(["-m", args.model])
+        stdin_data = None
+    else:
+        stderr_output.write_text(f"error: unknown backend: {args.backend}\n")
+        return 2
+
+    raw_output.parent.mkdir(parents=True, exist_ok=True)
+    stderr_output.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with open(raw_output, "wb") as out_f, open(stderr_output, "wb") as err_f:
+            res = subprocess.run(
+                cmd,
+                input=stdin_data,
+                stdout=out_f,
+                stderr=err_f,
+                cwd=str(repo_path),
+                timeout=args.timeout,
+            )
+            return res.returncode
+    except subprocess.TimeoutExpired:
+        with open(stderr_output, "ab") as err_f:
+            err_f.write(f"error: timed out after {args.timeout}s\n".encode("utf-8"))
+        return 124
+    except Exception as e:
+        with open(stderr_output, "ab") as err_f:
+            err_f.write(f"error: execution failed: {e}\n".encode("utf-8"))
+        return 1
+
+
+def parse_result_stream(backend: str, raw_path: Path) -> dict:
+    """Parse raw output stream and return normalized result dict:
+    {
+      "final": str,
+      "total_cost_usd": float,
+      "session_id": str,
+      "cost_known": bool
+    }
+    """
+    if not raw_path.exists() or raw_path.stat().st_size == 0:
+        return {"final": "", "total_cost_usd": 0.0, "session_id": "", "cost_known": False}
+
+    lines = raw_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    events = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    if backend == "claude":
+        results = [e for e in events if isinstance(e, dict) and e.get("type") == "result"]
+        if not results:
+            return {"final": "", "total_cost_usd": 0.0, "session_id": "", "cost_known": False}
+
+        # Pick max by total_cost_usd
+        best = max(results, key=lambda r: r.get("total_cost_usd", 0.0) or 0.0)
+        final = best.get("result", "") or ""
+        cost = float(best.get("total_cost_usd", 0.0) or 0.0)
+        session = str(best.get("session_id", "") or "")
+        cost_known = "total_cost_usd" in best
+        return {
+            "final": final,
+            "total_cost_usd": cost,
+            "session_id": session,
+            "cost_known": cost_known,
+        }
+
+    elif backend == "opencode":
+        # Opencode events: step_finish has cost, sessionID. Text events have text.
+        session_id = ""
+        total_cost = 0.0
+        cost_known = False
+        text_parts = []
+
+        for e in events:
+            if not isinstance(e, dict):
+                continue
+            sid = e.get("sessionID")
+            if sid:
+                session_id = str(sid)
+            
+            etype = e.get("type")
+            if etype == "text":
+                part = e.get("part")
+                if isinstance(part, dict) and "text" in part:
+                    text_parts.append(str(part["text"]))
+            elif etype == "step_finish":
+                part = e.get("part")
+                if isinstance(part, dict):
+                    c = part.get("cost")
+                    if c is not None:
+                        try:
+                            total_cost = float(c)
+                            cost_known = True
+                        except (TypeError, ValueError):
+                            pass
+
+        final = "".join(text_parts)
+        return {
+            "final": final,
+            "total_cost_usd": total_cost,
+            "session_id": session_id,
+            "cost_known": cost_known,
+        }
+
+    return {"final": "", "total_cost_usd": 0.0, "session_id": "", "cost_known": False}
+
+
+def stream_has_events(raw_path: Path) -> bool:
+    if not raw_path.exists() or raw_path.stat().st_size == 0:
+        return False
+    try:
+        lines = raw_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        count = 0
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                json.loads(line)
+                count += 1
+            except (json.JSONDecodeError, ValueError):
+                continue
+        return count > 0
+    except Exception:
+        return False
+
+
+def has_success_result(backend: str, raw_path: Path) -> bool:
+    if not raw_path.exists() or raw_path.stat().st_size == 0:
+        return False
+    try:
+        lines = raw_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                e = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if not isinstance(e, dict):
+                continue
+            if backend == "claude":
+                if (
+                    e.get("type") == "result"
+                    and e.get("subtype") == "success"
+                    and e.get("is_error") is not True
+                ):
+                    return True
+            elif backend == "opencode":
+                if e.get("type") == "step_finish":
+                    part = e.get("part")
+                    if isinstance(part, dict) and part.get("reason") == "stop":
+                        return True
+        return False
+    except Exception:
+        return False
+
+
+def _main(argv: list[str] | None = None) -> int:
+    if len(sys.argv) < 2:
+        print("usage: agent_runner.py <run|parse|has-events|has-success> ...", file=sys.stderr)
+        return 2
+
+    cmd = sys.argv[1]
+    if cmd == "run":
+        return run_agent(sys.argv[2:])
+    elif cmd == "parse":
+        p = argparse.ArgumentParser()
+        p.add_argument("--backend", choices=["claude", "opencode"], default="claude")
+        p.add_argument("--raw-output", required=True)
+        p.add_argument("--output-json", required=True)
+        args = p.parse_args(sys.argv[2:])
+        res = parse_result_stream(args.backend, Path(args.raw_output))
+        Path(args.output_json).write_text(json.dumps(res, indent=2))
+        return 0
+    elif cmd == "has-events":
+        p = argparse.ArgumentParser()
+        p.add_argument("--raw-output", required=True)
+        args = p.parse_args(sys.argv[2:])
+        if stream_has_events(Path(args.raw_output)):
+            return 0
+        return 1
+    elif cmd == "has-success":
+        p = argparse.ArgumentParser()
+        p.add_argument("--backend", choices=["claude", "opencode"], default="claude")
+        p.add_argument("--raw-output", required=True)
+        args = p.parse_args(sys.argv[2:])
+        if has_success_result(args.backend, Path(args.raw_output)):
+            return 0
+        return 1
+    else:
+        print(f"unknown command: {cmd}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(_main())
