@@ -98,9 +98,10 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
    `gh api repos/{owner}/{repo}/pulls/{number}/comments --jq 'length'` — step 9 needs that number
    to tell a new comment from an existing one.
 
-9. **Poll for new comments.** `gh api repos/{owner}/{repo}/pulls/{number}/comments --jq
-   'length'` every 30s for up to 10 minutes; stop early once the count exceeds the pre-request
-   baseline. Report a timeout if none arrive.
+9. **Check for new comments once (or a bounded single-digit number of times).** `gh api repos/{owner}/{repo}/pulls/{number}/comments --jq
+   'length'`. Stop early once the count exceeds the pre-request baseline. 
+   
+   **Never use `make check` or project gates as a timer or delay mechanism** between checks. If no comments arrive, either proceed or stop waiting and let `--classify-only` pick the review up later; re-running local verification in a loop as a timer wastes budget and risks unintended tree mutations.
 
 10. **Assess each comment:**
     - **Fix:** real bugs, valid edge cases, missing error handling, doc/code mismatches, test gaps
