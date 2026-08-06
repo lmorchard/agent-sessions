@@ -898,7 +898,7 @@ run_issue() { # $1 = issue number
   local outcome reason prline prnum prurl gate
   if [ "$rc" -eq 124 ]; then
     outcome="failed"; reason="timed out after ${RUN_TIMEOUT}s"
-  elif [ "$rc" -ne 0 ] && [ -z "$session" ] && [ "${cost:-0}" = "0" ] \
+  elif [ "$rc" -ne 0 ] && [ -z "$session" ] && { [ "${cost:-0}" = "0" ] || [ "${cost:-0}" = "0.0" ]; } \
        && ! stream_has_events "$raw"; then
     # No readable events, no session id and no spend means the invocation never
     # reached the model, so this is the DRIVER being broken, not the run failing.

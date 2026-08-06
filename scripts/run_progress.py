@@ -181,6 +181,40 @@ def read_progress(run_dir: Path | str) -> Progress:
                         snap.text_blocks.append(text)
                         snap.last_text = text
 
+        elif kind == "step_start":
+            snap.turns += 1
+
+        elif kind in ("tool_use", "tool_call"):
+            part = record.get("part")
+            name = None
+            if isinstance(part, dict):
+                name = part.get("tool") or part.get("name")
+            if not name:
+                name = record.get("name") or record.get("tool")
+            if isinstance(name, str):
+                snap.tools[name] += 1
+
+        elif kind == "text":
+            part = record.get("part")
+            text = None
+            if isinstance(part, dict):
+                text = part.get("text")
+            if not text:
+                text = record.get("text")
+            if isinstance(text, str):
+                snap.text_blocks.append(text)
+                snap.last_text = text
+
+        elif kind == "step_finish":
+            part = record.get("part")
+            if isinstance(part, dict):
+                cost = _as_number(part.get("cost"))
+                if cost is not None:
+                    snap.cost_usd = (snap.cost_usd or 0.0) + cost
+                reason = part.get("reason")
+                if reason == "stop":
+                    snap.is_error = False
+
         elif kind == "result":
             # Last result wins. A resumed run emits more than one, and the
             # criterion asks for the *latest* cost.
