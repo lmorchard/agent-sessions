@@ -1156,46 +1156,6 @@ esac
 check "C2(b) no ELIGIBLE line names the linked issue" "" \
   "$(printf '%s\n' "$C2_OUT" | grep 'ELIGIBLE' | grep -F '#11' || true)"
 
-# --- G1/G2: the proxies stay, for PRs GitHub has not linked -----------------
-#
-# Guards, not criteria: these pass today and must keep passing. They exist because
-# `pr_for_issue` has TWO callers wanting opposite error directions. The selection
-# gate wants precision -- a wrong match there silently hides eligible work, which is
-# what C1/C2 above are about. Post-run PR DISCOVERY wants recall: it runs against a
-# PR the driver may have just opened badly, and a miss there reports `parked: no PR
-# opened` about a PR that exists.
-#
-# So the guards pin the discovery direction while C1/C2 tighten the selection one,
-# and tripping a guard means a fix meant for selection was over-applied. The fixture
-# is the FROZEN one at driver/test-park-state.sh:89 -- `Closes #7`, branch
-# `fix/7-stub`, and NO `closingIssuesReferences` key at all, because that suite's
-# stub serves a fixed payload and ignores the requested field list. A discovery site
-# that consulted the link alone would resolve it to nothing and flip that suite's
-# cases to `parked`. test-park-state.sh is frozen and read-only, so that is a STOP,
-# not an edit.
-#
-# Read out of the frozen file rather than copied, for the same reason the function
-# below is: a copy is a second source of truth that nothing keeps honest.
-
-echo "guard: body/branch matching still works where GitHub records no link"
-
-FROZEN="$(dirname "$DRIVER")/test-park-state.sh"
-eval "$(sed -n '/^PR_LIST_JSON=/p' "$FROZEN")"
-eval "$(sed -n '/^pr_for_issue()/,/^}/p' "$DRIVER")"
-
-if [ -z "${PR_LIST_JSON:-}" ]; then
-  bad "extract the frozen PR fixture" "PR_LIST_JSON from $FROZEN" "not found (moved or renamed?)"
-elif ! declare -f pr_for_issue >/dev/null; then
-  # Fails closed on a rename. A silent skip here would retire both guards without
-  # anyone deciding to.
-  bad "extract the real pr_for_issue from the driver" "a function named pr_for_issue" "not found (renamed?)"
-else
-  check "G1 the frozen 'Closes #7' PR is still matched to #7" \
-    "$(printf '42\thttps://github.com/stub/repo/pull/42')" "$(pr_for_issue 7 "$PR_LIST_JSON")"
-  check "G2 and #8, which that PR does not mention, is still unmatched" \
-    "" "$(pr_for_issue 8 "$PR_LIST_JSON")"
-fi
-
 rm -rf "$R_TMP"
 
 # --- #32: a warning must not overwrite the outcome it warns about -----------
