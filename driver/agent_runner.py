@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -201,9 +199,13 @@ def stream_has_events(raw_path: Path) -> bool:
         count = 0
         for line in lines:
             line = line.strip()
-            if line:
+            if not line:
+                continue
+            try:
                 json.loads(line)
                 count += 1
+            except (json.JSONDecodeError, ValueError):
+                continue
         return count > 0
     except Exception:
         return False
@@ -218,7 +220,10 @@ def has_success_result(backend: str, raw_path: Path) -> bool:
             line = line.strip()
             if not line:
                 continue
-            e = json.loads(line)
+            try:
+                e = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
             if not isinstance(e, dict):
                 continue
             if backend == "claude":

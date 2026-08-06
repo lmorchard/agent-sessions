@@ -175,8 +175,8 @@ loop:
 # writes to the state dir, and nothing about the run changes because it is watched.
 # Not in `check`: it is an interactive loop with no end condition. See issue #42.
 #
-# REPO= picks whose runs are watched, INTERVAL= how often. It follows the newest
-# run under that repo's state dir, so it can be started before the run is.
+# INTERVAL= picks how often to poll. Auto-detects the newest run across state dirs;
+# use watch-self or pass --repo <owner/name> to target a specific repository.
 watch:
 	@python3 scripts/run_progress.py --watch --interval $(INTERVAL)
 

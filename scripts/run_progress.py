@@ -50,6 +50,7 @@ STREAM_NAME = "stream.jsonl"
 #: `last` is one line in a digest that is often read from a log; an assistant text
 #: block can be many paragraphs, so it is collapsed and cut to this width.
 LAST_TEXT_WIDTH = 100
+MAX_TEXT_BLOCKS = 20
 
 
 @dataclass
@@ -111,6 +112,13 @@ def read_records(path: Path | str) -> tuple[list[dict], int]:
         else:
             skipped += 1
     return records, skipped
+
+
+def _add_text_block(snap: Progress, text: str) -> None:
+    snap.text_blocks.append(text)
+    if len(snap.text_blocks) > MAX_TEXT_BLOCKS:
+        snap.text_blocks.pop(0)
+    snap.last_text = text
 
 
 def _blocks(record: dict) -> list:
@@ -178,8 +186,7 @@ def read_progress(run_dir: Path | str) -> Progress:
                     # useful answer to "what is it doing?" is the last thing it
                     # actually said.
                     if isinstance(text, str):
-                        snap.text_blocks.append(text)
-                        snap.last_text = text
+                        _add_text_block(snap, text)
 
         elif kind == "step_start":
             snap.turns += 1
@@ -202,8 +209,7 @@ def read_progress(run_dir: Path | str) -> Progress:
             if not text:
                 text = record.get("text")
             if isinstance(text, str):
-                snap.text_blocks.append(text)
-                snap.last_text = text
+                _add_text_block(snap, text)
 
         elif kind == "step_finish":
             part = record.get("part")

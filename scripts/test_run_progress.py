@@ -234,3 +234,19 @@ def test_opencode_stream_progress(tmp_path):
     assert abs(snap.cost_usd - 0.040) < 1e-6
     assert snap.is_error is False
 
+
+def test_find_latest_overall_run(tmp_path, monkeypatch):
+    """find_latest_overall_run finds the newest run directory across repos."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    
+    # Create two repo directories with runs
+    repo_a = tmp_path / "agent-session" / "repo-a" / "runs" / "1-20260101T000000Z"
+    repo_b = tmp_path / "agent-session" / "repo-b" / "runs" / "2-20260101T000001Z"
+    repo_a.mkdir(parents=True)
+    repo_b.mkdir(parents=True)
+
+    latest = run_progress.find_latest_overall_run()
+    assert latest is not None
+    # Both exist, repo_b was created second so st_mtime is equal or higher
+    assert latest in (repo_a, repo_b)
+

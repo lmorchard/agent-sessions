@@ -113,7 +113,7 @@ agent-session-driver.sh --repo <owner/name> --skill-dir <path> --repo-path <path
    --board <owner/number>  optional; advisory board-control reporting
    --backend <name>        agent backend: claude or opencode (default: claude)
    --model <name>          optional; passed to agent backend
-  --dry-run               selection only; no claude invocation
+  --dry-run               selection only; no agent invocation
   --allow-nested-skill-dir
                           proceed when --skill-dir resolves inside --repo-path.
                           The run cannot write skill files either way (see
@@ -872,10 +872,10 @@ run_issue() { # $1 = issue number
     --output-json "$rundir/parsed.json"
 
   local final cost session cost_known=0
-  final="$("$PYTHON_BIN" -c "import json; print(json.load(open('$rundir/parsed.json'))['final'])")"
-  cost="$("$PYTHON_BIN" -c "import json; print(json.load(open('$rundir/parsed.json'))['total_cost_usd'])")"
-  session="$("$PYTHON_BIN" -c "import json; print(json.load(open('$rundir/parsed.json'))['session_id'])")"
-  "$PYTHON_BIN" -c "import json; exit(0 if json.load(open('$rundir/parsed.json'))['cost_known'] else 1)" && cost_known=1
+  final="$("$PYTHON_BIN" -c "import json, sys; print(json.load(open(sys.argv[1]))['final'])" "$rundir/parsed.json")"
+  cost="$("$PYTHON_BIN" -c "import json, sys; print(json.load(open(sys.argv[1]))['total_cost_usd'])" "$rundir/parsed.json")"
+  session="$("$PYTHON_BIN" -c "import json, sys; print(json.load(open(sys.argv[1]))['session_id'])" "$rundir/parsed.json")"
+  "$PYTHON_BIN" -c "import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))['cost_known'] else 1)" "$rundir/parsed.json" && cost_known=1
   printf '%s' "$final" > "$rundir/final.txt"
 
   # Denials are greppable, in three measured phrasings: the rule-specific
@@ -1110,9 +1110,12 @@ if [ -n "$CLASSIFY_ONLY" ]; then
   cost=0; session=""; rc=0; ts="$(date -u +%Y%m%dT%H%M%SZ)"
   if [ -n "$rundir" ] && [ -f "$rundir/stream.jsonl" ]; then
     say "  run dir  $rundir"
-    result="$(pick_result "$rundir/stream.jsonl")"
-    cost="$(printf '%s' "$result"    | jq -r '.total_cost_usd // 0' 2>/dev/null || echo 0)"
-    session="$(printf '%s' "$result" | jq -r '.session_id // ""' 2>/dev/null || true)"
+    "$PYTHON_BIN" "$AGENT_RUNNER_PY" parse \
+      --backend "${BACKEND:-claude}" \
+      --raw-output "$rundir/stream.jsonl" \
+      --output-json "$rundir/parsed.json"
+    cost="$("$PYTHON_BIN" -c "import json, sys; print(json.load(open(sys.argv[1]))['total_cost_usd'])" "$rundir/parsed.json" 2>/dev/null || echo 0)"
+    session="$("$PYTHON_BIN" -c "import json, sys; print(json.load(open(sys.argv[1]))['session_id'])" "$rundir/parsed.json" 2>/dev/null || true)"
     ts="$(basename "$rundir" | sed "s/^$n-//")"
     say "  recovered from stream: cost \$$cost  session ${session:-none}"
   else

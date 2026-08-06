@@ -6,8 +6,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent))
 import agent_runner  # noqa: E402
 
@@ -67,3 +65,10 @@ def test_has_success_result_opencode(tmp_path: Path):
     raw = tmp_path / "opencode.jsonl"
     raw.write_text(json.dumps({"type": "step_finish", "part": {"reason": "stop"}}) + "\n", encoding="utf-8")
     assert agent_runner.has_success_result("opencode", raw) is True
+
+
+def test_partial_trailing_line_handling(tmp_path: Path):
+    raw = tmp_path / "stream.jsonl"
+    raw.write_text('{"type": "init"}\n{"type": "result", "subtype": "success", "is_error": false}\n{"partial": "trun', encoding="utf-8")
+    assert agent_runner.stream_has_events(raw) is True
+    assert agent_runner.has_success_result("claude", raw) is True
