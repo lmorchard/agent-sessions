@@ -146,9 +146,9 @@ dry-run:
 	@bash $(DRIVER) --repo $(REPO) --board $(BOARD) --dry-run
 
 # BUDGET is per issue, not per invocation. $12 is measured too low: real runs have
-# cost $4.41-$11.87, #710 exhausted $12 mid-review-cycle, and the two runs in move 5
-# came in at $11.76 and $11.20. $25 leaves headroom for the re-verification tax.
-BUDGET ?= 25
+# cost $4.41-$11.87, #710 exhausted $12 mid-review-cycle, and #52 hit $23.63.
+# $35 leaves headroom for the re-verification tax and thorough review rounds.
+BUDGET ?= 35
 ISSUES ?= 1
 INTERVAL ?= 10
 
