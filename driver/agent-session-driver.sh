@@ -71,6 +71,7 @@ ALLOW_NESTED=0
 RETRY=""
 CLASSIFY_ONLY=""
 MODEL=""
+BACKEND=""
 
 # `dontAsk` denies non-allowlisted mutating commands but auto-allows commands it
 # classifies read-only -- measured, see spec.md "Permissions". The allowlist is
@@ -109,8 +110,9 @@ agent-session-driver.sh --repo <owner/name> --skill-dir <path> --repo-path <path
                           so concurrent runs against different repos do not
                           collide. The resolved path is logged at startup.
                           Park state is NOT here: it is a label on the issue.
-  --board <owner/number>  optional; advisory board-column reporting
-  --model <name>          optional; passed to claude
+   --board <owner/number>  optional; advisory board-control reporting
+   --backend <name>        agent backend: claude or opencode (default: claude)
+   --model <name>          optional; passed to agent backend
   --dry-run               selection only; no claude invocation
   --allow-nested-skill-dir
                           proceed when --skill-dir resolves inside --repo-path.
@@ -137,6 +139,7 @@ while [ $# -gt 0 ]; do
     --timeout)        RUN_TIMEOUT="${2:?}"; shift 2 ;;
     --state-dir)      STATE_DIR="${2:?}"; shift 2 ;;
     --board)          BOARD="${2:?}"; shift 2 ;;
+    --backend)        BACKEND="${2:?}"; shift 2 ;;
     --model)          MODEL="${2:?}"; shift 2 ;;
     --retry)          RETRY="${2:?}"; shift 2 ;;
     --classify-only)  CLASSIFY_ONLY="${2:?}"; shift 2 ;;
@@ -677,6 +680,7 @@ EOF
 #
 # Rule: bash for orchestration, Python for parsing and classification.
 GATE_PY="$(cd "$(dirname "$0")" && pwd)/gate.py"
+AGENT_RUNNER_PY="$(cd "$(dirname "$0")" && pwd)/agent_runner.py"
 
 GATE_JSON=""
 GATE_BLOCK=""
@@ -727,8 +731,8 @@ pick_result() { # $1 = stream.jsonl path
 # oracle entirely. So: if the stream carries a successful result at all, the run
 # reached an end state and the gate gets to speak, whatever the exit code says.
 has_success_result() { # $1 = stream.jsonl path
-  jq -se 'any(.[]; .type=="result" and .subtype=="success" and (.is_error != true))' \
-     "$1" >/dev/null 2>&1
+  local runner="${AGENT_RUNNER_PY:-$(cd "$(dirname "$0")" && pwd)/agent_runner.py}"
+  "$PYTHON_BIN" "$runner" has-success --backend "${BACKEND:-claude}" --raw-output "$1"
 }
 
 # The driver-fault branch needs POSITIVE evidence that the invocation never reached
@@ -748,8 +752,9 @@ has_success_result() { # $1 = stream.jsonl path
 # Claiming an empty stream about a truncated one would be this issue's own defect
 # in miniature: an assertion the driver is not in a position to make.
 stream_has_events() { # $1 = stream.jsonl path
+  local runner="${AGENT_RUNNER_PY:-$(cd "$(dirname "$0")" && pwd)/agent_runner.py}"
   [ -s "$1" ] || return 1
-  jq -se 'length > 0' "$1" >/dev/null 2>&1
+  "$PYTHON_BIN" "$runner" has-events --raw-output "$1"
 }
 
 # --- stage: invoke ---------------------------------------------------------
@@ -808,32 +813,44 @@ run_issue() { # $1 = issue number
   # consumed as another value for whichever variadic option came last, and the
   # run dies with "Input must be provided either through stdin or as a prompt
   # argument". Measured, not theorised.
-  local -a cmd
-  cmd=(claude -p
-       --output-format stream-json --verbose
-       --permission-mode dontAsk
-       --allowedTools "$ALLOWED_TOOLS"
-       --disallowedTools "$DENIED_TOOLS"
-       --settings "$HOOK_SETTINGS_FILE"
-
-       --max-budget-usd "$MAX_BUDGET"
-       --add-dir "$SKILL_DIR")
-  [ -n "$MODEL" ] && cmd+=(--model "$MODEL")
-
   local main_before
   main_before="$(git -C "$REPO_PATH" rev-parse main 2>/dev/null || echo unknown)"
 
   # Run in the background and hold the pid, so the EXIT trap can kill the child.
   # Without this the child outlives its driver: a VSCode crash took the driver
-  # down and `claude -p` was reparented to init (PPID 1), still spending and
+  # down and the agent runner was reparented to init (PPID 1), still spending and
   # still mutating the repo with nothing supervising it. Observed, not theorised.
   set +e
   if [ -n "$TIMEOUT_CMD" ]; then
-    ( cd "$REPO_PATH" && exec "$TIMEOUT_CMD" "$RUN_TIMEOUT" "${cmd[@]}" < "$rundir/prompt.txt" ) \
-      > "$raw" 2>"$rundir/stderr.txt" &
+    ( cd "$REPO_PATH" && exec "$TIMEOUT_CMD" "$RUN_TIMEOUT" "$PYTHON_BIN" "$AGENT_RUNNER_PY" run \
+        --backend "${BACKEND:-claude}" \
+        --repo-path "$REPO_PATH" \
+        --skill-dir "$SKILL_DIR" \
+        --prompt-file "$rundir/prompt.txt" \
+        --raw-output "$raw" \
+        --stderr-output "$rundir/stderr.txt" \
+        --max-budget "$MAX_BUDGET" \
+        --timeout "$RUN_TIMEOUT" \
+        ${MODEL:+--model "$MODEL"} \
+        --allowed-tools "$ALLOWED_TOOLS" \
+        --disallowed-tools "$DENIED_TOOLS" \
+        --settings "$HOOK_SETTINGS_FILE" ) \
+      &
   else
     say "  NOTE: no timeout/gtimeout found; running unbounded (budget still caps cost)"
-    ( cd "$REPO_PATH" && exec "${cmd[@]}" < "$rundir/prompt.txt" ) > "$raw" 2>"$rundir/stderr.txt" &
+    ( cd "$REPO_PATH" && exec "$PYTHON_BIN" "$AGENT_RUNNER_PY" run \
+        --backend "${BACKEND:-claude}" \
+        --repo-path "$REPO_PATH" \
+        --skill-dir "$SKILL_DIR" \
+        --prompt-file "$rundir/prompt.txt" \
+        --raw-output "$raw" \
+        --stderr-output "$rundir/stderr.txt" \
+        --max-budget "$MAX_BUDGET" \
+        --timeout "$RUN_TIMEOUT" \
+        ${MODEL:+--model "$MODEL"} \
+        --allowed-tools "$ALLOWED_TOOLS" \
+        --disallowed-tools "$DENIED_TOOLS" \
+        --settings "$HOOK_SETTINGS_FILE" ) &
   fi
   CHILD_PID=$!
   printf '%s\n' "$CHILD_PID" > "$rundir/child.pid"
@@ -849,20 +866,17 @@ run_issue() { # $1 = issue number
   fi
 
   # The result message carries the final text, cost and session id.
-  local result final cost session
-  result="$(pick_result "$raw")"
-  final="$(printf '%s' "$result"  | jq -r '.result // ""' 2>/dev/null || true)"
-  cost="$(printf '%s' "$result"   | jq -r '.total_cost_usd // 0' 2>/dev/null || echo 0)"
-  session="$(printf '%s' "$result"| jq -r '.session_id // ""' 2>/dev/null || true)"
-  printf '%s' "$final" > "$rundir/final.txt"
+  "$PYTHON_BIN" "$AGENT_RUNNER_PY" parse \
+    --backend "${BACKEND:-claude}" \
+    --raw-output "$raw" \
+    --output-json "$rundir/parsed.json"
 
-  # `cost` reads 0 both when the run genuinely spent nothing and when pick_result
-  # found no record to read. Only the second is an unknown, and only the second may
-  # be described as one: saying "undetermined" about a cost that WAS read is this
-  # bug inverted -- a false claim in the other direction, on a row that has the real
-  # number sitting next to it. Guard G4 asserts it does not happen.
-  local cost_known=0
-  printf '%s' "$result" | jq -e 'has("total_cost_usd")' >/dev/null 2>&1 && cost_known=1
+  local final cost session cost_known=0
+  final="$("$PYTHON_BIN" -c "import json; print(json.load(open('$rundir/parsed.json'))['final'])")"
+  cost="$("$PYTHON_BIN" -c "import json; print(json.load(open('$rundir/parsed.json'))['total_cost_usd'])")"
+  session="$("$PYTHON_BIN" -c "import json; print(json.load(open('$rundir/parsed.json'))['session_id'])")"
+  "$PYTHON_BIN" -c "import json; exit(0 if json.load(open('$rundir/parsed.json'))['cost_known'] else 1)" && cost_known=1
+  printf '%s' "$final" > "$rundir/final.txt"
 
   # Denials are greppable, in three measured phrasings: the rule-specific
   # "with command <cmd> has been denied", the generic don't-ask-mode form, and the
