@@ -178,7 +178,7 @@ loop:
 # REPO= picks whose runs are watched, INTERVAL= how often. It follows the newest
 # run under that repo's state dir, so it can be started before the run is.
 watch:
-	@python3 scripts/run_progress.py --repo $(REPO) --watch --interval $(INTERVAL)
+	@python3 scripts/run_progress.py --watch --interval $(INTERVAL)
 
 watch-self:
 	@python3 scripts/run_progress.py --repo lmorchard/agent-sessions --watch --interval $(INTERVAL)
