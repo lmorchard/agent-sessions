@@ -1700,6 +1700,103 @@ _x27_c3 "#27 C3 --classify-only 4 against repo A resolves repo A's run dir" \
 
 rm -rf "$X27_TMP"
 
+# --- issue #74: parking outcome restores board column and records board_column ---
+
+echo "issue #74: parking outcome restores pre-run column"
+
+S74_TMP="$(mktemp -d)"
+mkdir -p "$S74_TMP/bin"
+
+cat > "$S74_TMP/issues.json" <<'JSON'
+[{"number":42,"title":"issue 74 test","body":"<!-- agent-session:spec -->\n\n## Tier: `auto-ok`\n","labels":[]}]
+JSON
+
+cat > "$S74_TMP/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+echo "$@" >> "$STUB_DIR/gh_calls.log"
+case "$*" in
+  "issue list"*) cat "$STUB_DIR/issues.json" ;;
+  "project item-list"*) printf '{"items":[{"id":"PVTI_42","content":{"number":42,"type":"Issue"},"status":"Ready"}]}' ;;
+  "project field-list"*) printf '[{"id":"PVTF_1","name":"Status","options":[{"id":"PVTO_ready","name":"Ready"},{"id":"PVTO_prog","name":"In progress"}]}]' ;;
+  "project view"*) printf '{"id":"PVT_proj1"}' ;;
+  "pr list"*|*_pr_for_issue*|*_pr_blocking*) printf '[]' ;;
+  *) exit 0 ;;
+esac
+STUB
+chmod +x "$S74_TMP/bin/gh"
+
+cat > "$S74_TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+exit 1
+STUB
+chmod +x "$S74_TMP/bin/claude"
+
+S74_SD="$S74_TMP/state"
+S74_SKILL="$S74_TMP/skill"; mkdir -p "$S74_SKILL/phases"; : > "$S74_SKILL/phases/express.md"
+S74_REPOP="$S74_TMP/repo"; mkdir -p "$S74_REPOP"
+STUB_DIR="$S74_TMP" PATH="$S74_TMP/bin:$PATH" \
+  bash "$DRIVER" --repo stub/repo --board stub/1 --issue 42 \
+    --skill-dir "$S74_SKILL" --repo-path "$S74_REPOP" \
+    --state-dir "$S74_SD" >/dev/null 2>&1 || true
+
+# C1: project item-edit called to restore column to Ready
+if awk 'index($0,"project item-edit") && index($0,"PVTO_ready") {f=1} END{exit !f}' "$S74_TMP/gh_calls.log" 2>/dev/null; then
+  ok "#74 C1 parking outcome restores pre-run column via item-edit"
+else
+  bad "#74 C1 parking outcome restores pre-run column via item-edit" "project item-edit call with PVTO_ready" "$(cat "$S74_TMP/gh_calls.log" 2>/dev/null || echo MISSING)"
+fi
+
+# C2: runs.jsonl carries board_column: Ready
+S74_ROW="$(tail -1 "$S74_SD/runs.jsonl" 2>/dev/null || true)"
+case "$S74_ROW" in
+  *'"board_column":"Ready"'*) ok "#74 C2 runs.jsonl carries board_column" ;;
+  *)                          bad "#74 C2 runs.jsonl carries board_column" '"board_column":"Ready"' "$S74_ROW" ;;
+esac
+
+rm -rf "$S74_TMP"
+
+# G2: terminal outcomes (gate-eligible) do not restore column
+S74_G2_TMP="$(mktemp -d)"
+mkdir -p "$S74_G2_TMP/bin"
+cat > "$S74_G2_TMP/issues.json" <<'JSON'
+[{"number":43,"title":"issue 74 g2 test","body":"<!-- agent-session:spec -->\n\n## Tier: `auto-ok`\n","labels":[]}]
+JSON
+cat > "$S74_G2_TMP/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+echo "$@" >> "$STUB_DIR/gh_calls.log"
+case "$*" in
+  "issue list"*) cat "$STUB_DIR/issues.json" ;;
+  "project item-list"*) printf '{"items":[{"id":"PVTI_43","content":{"number":43,"type":"Issue"},"status":"In review"}]}' ;;
+  "project field-list"*) printf '[{"id":"PVTF_1","name":"Status","options":[{"id":"PVTO_ready","name":"Ready"},{"id":"PVTO_review","name":"In review"}]}]' ;;
+  "project view"*) printf '{"id":"PVT_proj1"}' ;;
+  "pr list"*) printf '[{"number":100,"title":"pr","body":"Closes #43\n\n<!-- agent-session:gate -->\n```yaml\ntier: auto-ok\nchecks: pass\nguards: none\ntamper: verified\nci: 1/1 pass\nverdict: eligible-for-auto-merge\n```\n","headRefName":"fix","url":"https://github.com/stub/repo/pull/100","closingIssuesReferences":[{"number":43}]}]' ;;
+  "pr view"*|*_headRefOid*) printf 'sha123' ;;
+  "pr checks"*) printf '[]' ;;
+  *) exit 0 ;;
+esac
+STUB
+chmod +x "$S74_G2_TMP/bin/gh"
+cat > "$S74_G2_TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+printf '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.1,"session_id":"s1","result":"done"}\n'
+STUB
+chmod +x "$S74_G2_TMP/bin/claude"
+
+S74_G2_SD="$S74_G2_TMP/state"
+S74_G2_SKILL="$S74_G2_TMP/skill"; mkdir -p "$S74_G2_SKILL/phases"; : > "$S74_G2_SKILL/phases/express.md"
+S74_G2_REPOP="$S74_G2_TMP/repo"; mkdir -p "$S74_G2_REPOP"
+STUB_DIR="$S74_G2_TMP" PATH="$S74_G2_TMP/bin:$PATH" \
+  bash "$DRIVER" --repo stub/repo --board stub/1 --issue 43 \
+    --skill-dir "$S74_G2_SKILL" --repo-path "$S74_G2_REPOP" \
+    --state-dir "$S74_G2_SD" >/dev/null 2>&1 || true
+
+if awk 'index($0,"project item-edit") && index($0,"PVTO_ready") {f=1} END{exit f}' "$S74_G2_TMP/gh_calls.log" 2>/dev/null; then
+  ok "#74 G2 terminal outcome (gate-eligible) does not restore column to Ready"
+else
+  bad "#74 G2 terminal outcome (gate-eligible) does not restore column to Ready" "no item-edit to Ready" "$(cat "$S74_G2_TMP/gh_calls.log" 2>/dev/null || echo NONE)"
+fi
+rm -rf "$S74_G2_TMP"
+
 # --- syntax ----------------------------------------------------------------
 
 echo "syntax"

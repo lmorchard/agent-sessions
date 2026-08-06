@@ -590,6 +590,8 @@ select_issues() {
   fi
   [ "$total" -eq 500 ] && say "WARNING: hit the 500 limit; the queue read may be truncated"
 
+  rm -f "$STATE_DIR/columns.tsv"
+  touch "$STATE_DIR/columns.tsv"
   load_board
   local prs parked
   # REFUSE, do not degrade -- see the comment on fetch_open_prs. Every skip
@@ -612,6 +614,7 @@ select_issues() {
   while IFS="$(printf '\t')" read -r n tier title; do
     [ -n "$n" ] || continue
     col="$(board_status "$n")"
+    printf '%s\t%s\n' "$n" "${col:-}" >> "$STATE_DIR/columns.tsv"
     prline="$(printf '%s' "$prs" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-blocking-issue "$n")"
     # Only asked when nothing BLOCKS, and only to report the near-match rather
     # than discard it silently. A null rendering as a positive is findings.md
@@ -787,6 +790,13 @@ EOF
 
 run_issue() { # $1 = issue number
   local n="$1" url ts rundir raw prompt rc=0
+  local pre_run_col=""
+  if [ -f "$STATE_DIR/columns.tsv" ]; then
+    pre_run_col="$(awk -F '\t' -v n="$n" '$1 == n {print $2; exit}' "$STATE_DIR/columns.tsv")"
+  fi
+  if [ -z "$pre_run_col" ] && [ -n "$BOARD" ]; then
+    pre_run_col="$(board_status "$n")"
+  fi
   url="https://github.com/$REPO/issues/$n"
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   rundir="$STATE_DIR/runs/$n-$ts"
@@ -1024,11 +1034,39 @@ run_issue() { # $1 = issue number
     --arg outcome "$outcome" --arg reason "$reason" \
     --arg pr "${prurl:-}" --arg session "$session" \
     --arg rundir "$rundir" --argjson rc "$rc" --argjson cost "${cost:-0}" \
+    --arg board_column "${pre_run_col:-}" \
     '{issue:($issue|tonumber), repo:$repo, started:$ts, exit:$rc, cost_usd:$cost,
-      session_id:$session, outcome:$outcome, reason:$reason, pr:$pr, run_dir:$rundir}' \
+      session_id:$session, outcome:$outcome, reason:$reason, pr:$pr, run_dir:$rundir, board_column:$board_column}' \
     >> "$RUNS_LOG"
 
   apply_park_state "$n" "$outcome" "$ts" "$reason"
+
+  case "$outcome" in
+    parked|failed|incomplete|no-gate|budget-exhausted|driver-fault)
+      if [ -n "$BOARD" ] && [ -n "${pre_run_col:-}" ] && [ "$pre_run_col" != "no-status" ]; then
+        local owner num
+        owner="${BOARD%%/*}"; num="${BOARD##*/}"
+        local item_id project_id field_id option_id
+        item_id="$(printf '%s' "$BOARD_JSON" | jq -r --arg n "$n" '.items[]? | select(.content.number == ($n|tonumber)) | .id // empty' 2>/dev/null || true)"
+        if [ -n "$item_id" ]; then
+          project_id="$(gh project view "$num" --owner "$owner" --format json --jq '.id' 2>/dev/null || true)"
+          local fields_json
+          fields_json="$(gh project field-list "$num" --owner "$owner" --format json 2>/dev/null || echo '[]')"
+          field_id="$(printf '%s' "$fields_json" | jq -r '.[]? | select(.name == "Status") | .id // empty' 2>/dev/null || true)"
+          option_id="$(printf '%s' "$fields_json" | jq -r --arg col "$pre_run_col" '.[]? | select(.name == "Status") | .options[]? | select(.name == $col) | .id // empty' 2>/dev/null || true)"
+          if [ -n "$project_id" ] && [ -n "$field_id" ] && [ -n "$option_id" ]; then
+            gh project item-edit \
+              --project-id "$project_id" \
+              --id "$item_id" \
+              --field-id "$field_id" \
+              --single-select-option-id "$option_id" >/dev/null 2>&1 \
+              && say "  board: restored #$n column to $pre_run_col" \
+              || say "  WARNING: could not restore #$n column to $pre_run_col"
+          fi
+        fi
+      fi
+      ;;
+  esac
 
   # The outcome is recorded, so the in-flight marker has done its job.
   rm -f "$STATE_DIR/inflight.json"
@@ -1213,6 +1251,11 @@ if [ -n "$ISSUE" ]; then
   say "== select (single issue: #$ISSUE) =="
   ELIGIBLE="$ISSUE"
   say "  eligibility check bypassed by --issue"
+  load_board
+  rm -f "$STATE_DIR/columns.tsv"
+  touch "$STATE_DIR/columns.tsv"
+  col="$(board_status "$ISSUE")"
+  printf '%s\t%s\n' "$ISSUE" "${col:-}" >> "$STATE_DIR/columns.tsv"
 else
   select_issues
 fi
