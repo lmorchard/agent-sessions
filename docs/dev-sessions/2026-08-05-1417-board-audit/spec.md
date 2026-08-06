@@ -33,8 +33,8 @@ The repository provides `scripts/board_audit.py`, a read-only command that accep
 ```
 
 It reads the project's field definitions, project items, all issues in the requested repository,
-and open pull requests. It audits only issue items belonging to that repository; it ignores draft
-items and items from other repositories.
+and open pull requests. It audits only issue items belonging to that repository; it ignores
+`DraftIssue` and `PullRequest` project items, and issue items from other repositories.
 
 The command prints one `FAIL` or `WARN` line per finding, followed by a dynamic summary of scanned
 issue items, failures, and warnings. It exits 1 for an operational failure or strict contradiction.

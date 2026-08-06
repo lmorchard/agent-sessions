@@ -170,6 +170,38 @@ def test_parse_board_items_keeps_target_issues_and_ignores_drafts_and_other_repo
     ]
 
 
+def test_parse_board_items_ignores_pull_requests_while_auditing_target_issues():
+    records = [
+        {
+            "title": "Add board labels",
+            "status": "In review",
+            "content": {
+                "type": "PullRequest",
+                "number": 42,
+                "repository": "acme/widgets",
+                "title": "Add board labels",
+                "state": "OPEN",
+                "url": "https://github.com/acme/widgets/pull/42",
+            },
+        },
+        {
+            "title": "Target issue",
+            "status": "Ready",
+            "content": {"type": "Issue", "number": 17, "repository": "acme/widgets"},
+        },
+    ]
+
+    items = board_audit.parse_board_items(records, "acme/widgets")
+    result = board_audit.audit(items, {17: board_audit.Issue(17, "Target issue", "OPEN")}, set())
+
+    assert result == board_audit.AuditResult(1, ())
+
+
+def test_parse_board_items_rejects_unknown_content_types():
+    with pytest.raises(board_audit.AuditError, match="unsupported content type 'Discussion'"):
+        board_audit.parse_board_items([{"content": {"type": "Discussion"}}], "acme/widgets")
+
+
 @pytest.mark.parametrize(
     "record, context",
     [
@@ -486,6 +518,38 @@ def test_cli_allows_an_empty_target_repository_item_set(tmp_path, monkeypatch):
     assert [json.loads(line) for line in log_path.read_text().splitlines()] == expected_gh_calls()
 
 
+def test_cli_ignores_pull_request_project_items_and_audits_issue_items(tmp_path, monkeypatch):
+    responses = default_gh_responses(status="Ready")
+    responses["item"] = {
+        "items": [
+            {
+                "title": "Add board labels",
+                "status": "In review",
+                "content": {
+                    "type": "PullRequest",
+                    "number": 42,
+                    "repository": "acme/widgets",
+                    "title": "Add board labels",
+                    "state": "OPEN",
+                    "url": "https://github.com/acme/widgets/pull/42",
+                },
+            },
+            {
+                "title": "Issue title",
+                "status": "Ready",
+                "content": {"type": "Issue", "number": 17, "repository": "acme/widgets"},
+            },
+        ],
+        "totalCount": 2,
+    }
+    configure_gh_stub(tmp_path, monkeypatch, responses)
+
+    completed = run_cli()
+
+    assert completed.returncode == 0
+    assert completed.stdout == "board-audit: scanned 1 issue item(s); 0 failure(s); 0 warning(s)\n"
+
+
 @pytest.mark.parametrize(
     "arguments",
     [
@@ -508,7 +572,7 @@ def test_cli_rejects_invalid_project_and_repository_arguments(arguments):
 
 def test_make_board_audit_binds_this_repository():
     completed = subprocess.run(
-        ["make", "-n", "board-audit"],
+        ["make", "--no-print-directory", "-n", "board-audit"],
         cwd=Path(__file__).resolve().parent.parent,
         capture_output=True,
         text=True,

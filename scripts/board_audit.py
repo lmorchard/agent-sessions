@@ -134,7 +134,7 @@ def parse_board_items(records: list[dict[str, object]], repo: str) -> list[Board
         context = f"item-list record {index}"
         content = require_dict(record.get("content"), f"{context} content")
         content_type = require_str(content.get("type"), f"{context} content type")
-        if content_type == "DraftIssue":
+        if content_type in {"DraftIssue", "PullRequest"}:
             continue
         if content_type != "Issue":
             raise AuditError(f"{context} has unsupported content type {content_type!r}")

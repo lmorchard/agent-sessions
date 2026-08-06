@@ -537,3 +537,20 @@ rule from ever seeing live data.
   **Completed for a cold reader.**
 - [x] Commit the completed plan/notes artifact update with an accurate message after verification. —
   **Completed in the session-artifact commit.**
+
+### Final-review fix — PullRequest project items
+
+- [x] Add pure parsing coverage with a complete `PullRequest` project item and a target-repository
+  `Issue` item; prove the issue alone is audited, and retain a control that an unknown content type
+  fails closed. — **Added in `scripts/test_board_audit.py`.**
+- [x] Add shipped-CLI stub coverage with the same complete pull-request card plus a target issue;
+  require success and a one-issue scanned summary. — **Added in `scripts/test_board_audit.py`.**
+- [x] Run the focused regressions before production code. — **RED: the pure parser raised
+  `AuditError` for unsupported `PullRequest`, and the CLI returned the corresponding operational
+  failure.**
+- [x] Change only the parser's explicit out-of-scope allowlist: `DraftIssue` and `PullRequest` are
+  skipped; unknown content types still raise. — **Implemented in `scripts/board_audit.py`.**
+- [x] Rerun focused and complete board-audit tests. — **GREEN: both focused regressions and the full
+  board-audit test file passed.**
+- [x] Run the offline aggregate checks and the separate live read-only audit. — **`make check`
+  passed; `make board-audit` exited 0 with no strict failures and warnings recorded in `notes.md`.**

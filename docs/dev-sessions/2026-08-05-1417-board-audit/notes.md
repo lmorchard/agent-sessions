@@ -168,3 +168,59 @@ The first check on resume is `git status --short`: it should be clean after the 
 commit. Before opening or updating a PR, compare `git diff --check origin/main...HEAD` and
 `git diff --stat origin/main...HEAD`, then rerun `make check`. Run `make board-audit` separately
 when a fresh live-board observation is needed; its warnings are observations, not authorized fixes.
+
+## Final-review fix — 2026-08-05
+
+The final reviewer found that `parse_board_items` treated every non-`Issue` item other than
+`DraftIssue` as unsupported. GitHub Projects permits `ProjectV2ItemContent` to be a `DraftIssue`,
+`Issue`, or `PullRequest`, so a valid pull-request card broke an audit specified to inspect issue
+items only.
+
+`fix: ignore project pull request items` changes the explicit out-of-scope set to `DraftIssue` and
+`PullRequest`; malformed content and unknown types still fail closed. The test-first fix adds a
+pure mixed-card regression, an unknown-type control, and a shipped CLI-stub regression containing
+a complete pull-request card. The focused suite was RED with `AuditError` for `PullRequest`, then
+GREEN after the parser change; the full board-audit test file and `make check` also passed.
+
+The separate read-only live `make board-audit` exited 0 with no strict failures. Its current
+warnings were title drift for #88, title drift for #3, and #12 in `In review` without an open
+pull request that closes it. This final fix made no external writes.
+
+## Final handoff verification — 2026-08-05
+
+The scoped re-review approved the pull-request-card fix with no new findings. A fresh controller
+run of `make check` passed: the Python suite reported **188 passed**; the Bash driver fixture suite
+reported **113 passed, 0 failed**; the park-state suite reported **48 passed, 0 failed**; and the
+remaining aggregate checks completed. `git status --short` and `git diff --check
+origin/main...HEAD` were clean before this notes update.
+
+The first authenticated live audit then caught new board drift: closed issue #65 remained in
+`Backlog`. After Les explicitly approved that single metadata change, its project Status was moved
+to `Done`. A direct read confirmed the new value, and the subsequent read-only audit exited 0:
+19 issue items scanned, no strict failures, and the same contextual warnings for #3, #12, and #88.
+
+This brings the session's project Status edits to nine: the eight listed above plus #65 → `Done`.
+No other external state was changed.
+
+## Post-PR rebase — 2026-08-05
+
+PR #100 initially reported a merge conflict after `main` advanced to include several other merged
+branches. The only textual conflict was in `Makefile`: current `main` had added `watch-self` to
+`.PHONY`, while this branch added `board-audit` at the same line. The resolution retains both
+targets; no production Python or test code conflicted.
+
+After rebasing onto current `origin/main`, `make check` exited 0: the Python suite reported **199
+passed**; the Bash driver fixture suite reported **111 passed, 0 failed**; the park-state suite
+reported **48 passed, 0 failed**; and all aggregate checks completed. `git diff --check
+origin/main...HEAD` exited 0. The separate authenticated `make board-audit` also exited 0 with 19
+issue items scanned, no strict failures, and the same contextual warnings for #3, #12, and #88.
+
+The first post-rebase GitHub Actions run then exposed a platform-specific test-harness defect.
+`test_make_board_audit_binds_this_repository` ran `make -n board-audit` from inside `make check`;
+GNU Make on the Linux runner wrapped the dry-run command with nested `Entering directory` and
+`Leaving directory` lines, while the local Make did not. The production target was correct, but
+the test compared all stdout tokens exactly and failed on the wrapper text.
+
+The CI log supplied the RED case. The focused fix invokes Make with `--no-print-directory`, keeping
+the exact command assertion while suppressing platform-dependent nesting chatter. The focused test
+passed, followed by a fresh successful `make check` with the same post-rebase suite results above.
