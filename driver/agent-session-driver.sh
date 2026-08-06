@@ -287,6 +287,10 @@ done
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 command -v "$PYTHON_BIN" >/dev/null || die "required command not found: $PYTHON_BIN"
 GH_QUERY_PY="$(cd "$(dirname "$0")" && pwd)/gh_query.py"
+HOOK_SCRIPT="$(cd "$(dirname "$0")" && pwd)/merge-block-hook.sh"
+HOOK_SETTINGS_FILE="$(cd "$(dirname "$0")" && pwd)/settings.json"
+jq --arg script "$HOOK_SCRIPT" '.hooks.PreToolUse[0].command = $script' "$HOOK_SETTINGS_FILE" > "$HOOK_SETTINGS_FILE.tmp" && mv "$HOOK_SETTINGS_FILE.tmp" "$HOOK_SETTINGS_FILE"
+
 
 # Every path must be absolute before we go any further. The invoke stage runs in
 # a subshell that cd's to --repo-path, so a relative path resolved at startup
@@ -809,6 +813,8 @@ run_issue() { # $1 = issue number
        --permission-mode dontAsk
        --allowedTools "$ALLOWED_TOOLS"
        --disallowedTools "$DENIED_TOOLS"
+       --settings "$HOOK_SETTINGS_FILE"
+
        --max-budget-usd "$MAX_BUDGET"
        --add-dir "$SKILL_DIR")
   [ -n "$MODEL" ] && cmd+=(--model "$MODEL")
@@ -863,7 +869,7 @@ run_issue() { # $1 = issue number
   # rules produce. A PreToolUse hook would add a fourth -- if that lands, teach
   # this pattern its wording, or the count silently undercounts.
   local denials
-  denials="$(grep -oE '(Permission to use [^"]*has been denied[^"]*|[^"]*denied by your permission settings[^"]*)' \
+  denials="$(grep -oE '(Permission to use [^"]*has been denied[^"]*|[^"]*denied by your permission settings[^"]*|The PreToolUse hook rejected[^"]*)' \
              "$raw" 2>/dev/null | sort -u || true)"
   if [ -n "$denials" ]; then
     printf '%s\n' "$denials" > "$rundir/denials.txt"

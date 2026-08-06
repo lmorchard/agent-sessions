@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "tool_name": "Bash",
+        "command": "HOOK_SCRIPT_PLACEHOLDER"
+      }
+    ]
+  }
+}
