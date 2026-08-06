@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "tool_name": "Bash",
+        "command": "/Users/lorchard/devel/agent-sessions/driver/merge-block-hook.sh"
+      }
+    ]
+  }
+}
