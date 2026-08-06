@@ -102,6 +102,7 @@ def test_reports_turns_tools_last_text_and_cost(tmp_path):
     assert snap.started is True
     assert snap.turns == 3
     assert dict(snap.tools) == {"Bash": 2, "Read": 1}
+    assert snap.text_blocks == ["first assistant turn", LAST_TEXT]
     assert snap.last_text == LAST_TEXT
     assert snap.cost_usd == 1.5
     # A clean stream has nothing unparseable in it; C2 is where this goes up.

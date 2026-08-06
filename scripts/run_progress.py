@@ -63,6 +63,8 @@ class Progress:
     turns: int = 0
     #: tool_use block names, tallied across every assistant record.
     tools: Counter = field(default_factory=Counter)
+    #: Recent text blocks encountered.
+    text_blocks: list[str] = field(default_factory=list)
     #: The most recent `text` block, which is not always the last record's text.
     last_text: str | None = None
     cost_usd: float | None = None
@@ -176,6 +178,7 @@ def read_progress(run_dir: Path | str) -> Progress:
                     # useful answer to "what is it doing?" is the last thing it
                     # actually said.
                     if isinstance(text, str):
+                        snap.text_blocks.append(text)
                         snap.last_text = text
 
         elif kind == "result":
@@ -222,6 +225,43 @@ def find_latest_run(state_dir: Path | str) -> Path | None:
     if not children:
         return None
     return max(children, key=lambda child: child.stat().st_mtime)
+
+
+def find_latest_overall_run() -> Path | None:
+    """The most recently modified run directory across all repo state dirs under agent-session,
+    plus the local project's `.driver-state/runs` if present.
+    """
+    candidates = []
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    root = Path(base) / "agent-session"
+    try:
+        if root.exists():
+            for repo_dir in root.iterdir():
+                if repo_dir.is_dir():
+                    runs_dir = repo_dir / "runs"
+                    if runs_dir.is_dir():
+                        for run_dir in runs_dir.iterdir():
+                            if run_dir.is_dir():
+                                candidates.append(run_dir)
+    except OSError:
+        pass
+
+    # Also check local .driver-state/runs
+    local_runs = Path(".driver-state/runs")
+    try:
+        if local_runs.exists():
+            for run_dir in local_runs.iterdir():
+                if run_dir.is_dir():
+                    candidates.append(run_dir)
+    except OSError:
+        pass
+
+    if not candidates:
+        return None
+    try:
+        return max(candidates, key=lambda child: child.stat().st_mtime)
+    except OSError:
+        return None
 
 
 # --- rendering -------------------------------------------------------------
@@ -298,8 +338,10 @@ def format_progress(snap: Progress) -> str:
             for name, count in sorted(snap.tools.items(), key=lambda kv: (-kv[1], kv[0]))
         )
         lines.append(f"  tools  {tally}")
-    if snap.last_text:
-        lines.append(f"  last   {_one_line(snap.last_text)}")
+    if snap.text_blocks:
+        lines.append("  last:")
+        for t in snap.text_blocks[-8:]:
+            lines.append(f"    - {_one_line(t)}")
     if snap.skipped:
         noun = "line" if snap.skipped == 1 else "lines"
         lines.append(f"  note   {snap.skipped} unparseable {noun} (a live stream is truncated mid-record)")
@@ -310,7 +352,7 @@ def format_progress(snap: Progress) -> str:
 
 
 def _resolve_run_dir(args) -> Path | None:
-    """Explicit RUNDIR, then --state-dir's newest run, then --repo's."""
+    """Explicit RUNDIR, then --state-dir's newest run, then --repo's, then the newest overall run."""
     if args.rundir:
         candidate = Path(args.rundir)
         return candidate if candidate.is_dir() else None
@@ -318,7 +360,7 @@ def _resolve_run_dir(args) -> Path | None:
         return find_latest_run(Path(args.state_dir))
     if args.repo:
         return find_latest_run(default_state_dir(args.repo))
-    return None
+    return find_latest_overall_run()
 
 
 def main(argv: list[str] | None = None) -> int:
