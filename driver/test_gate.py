@@ -461,6 +461,80 @@ def test_classify_live_ci_pass_verifies_all_gate_rows():
     assert "risk-paths row" in r3["reason"]
 
 
+def test_infer_provenance_states():
+    """#83: test infer_provenance returns correct states for different row formats."""
+    # Real / passed states
+    fields_real = {
+        "tier": "auto-ok",
+        "checks": "C1 pass · C2 pass",
+        "guards": "G1 pass",
+        "tamper": "clean",
+        "project-gates": "make check green",
+        "ci": "2/2 pass @ abc1234",
+        "threads": "0 unresolved",
+        "risk-paths": "none"
+    }
+    p_real = gate.infer_provenance(fields_real)
+    assert p_real["tier"] == "real"
+    assert p_real["checks"] == "real"
+    assert p_real["guards"] == "real"
+    assert p_real["tamper"] == "real"
+    assert p_real["project-gates"] == "real"
+    assert p_real["ci"] == "real"
+    assert p_real["threads"] == "real"
+    assert p_real["risk-paths"] == "real"
+
+    # Substituted states
+    fields_sub = {
+        "tier": "auto-ok",
+        "checks": "C1 pass -- via substitute",
+        "guards": "none",
+        "tamper": "clean-by-substitute -- basis",
+        "project-gates": "make check green",
+        "ci": "no checks configured",
+        "threads": "0 unresolved -- via substitute",
+        "risk-paths": "none"
+    }
+    p_sub = gate.infer_provenance(fields_sub)
+    assert p_sub["checks"] == "substituted"
+    assert p_sub["guards"] == "not-applicable"
+    assert p_sub["tamper"] == "substituted"
+    assert p_sub["ci"] == "not-applicable"
+    assert p_sub["threads"] == "substituted"
+
+    # Failed states
+    fields_fail = {
+        "tier": "needs-review",
+        "checks": "C1 fail",
+        "guards": "G1 REGRESSED",
+        "tamper": "DIRTY",
+        "project-gates": "red: test failed",
+        "ci": "1/2 pass @ abc1234 -- FAILING: test",
+        "threads": "2 unresolved",
+        "risk-paths": "driver/gate.py"
+    }
+    p_fail = gate.infer_provenance(fields_fail)
+    assert p_fail["tier"] == "failed"
+    assert p_fail["checks"] == "failed"
+    assert p_fail["guards"] == "failed"
+    assert p_fail["tamper"] == "failed"
+    assert p_fail["project-gates"] == "failed"
+    assert p_fail["ci"] == "failed"
+    assert p_fail["threads"] == "failed"
+    assert p_fail["risk-paths"] == "failed"
+
+
+def test_classify_includes_provenance():
+    """#83: classify returns a dictionary with parsed provenance data."""
+    body = body_with("2/2 pass @ e8f0338", threads="0 unresolved -- via substitute")
+    g = gate.extract_gate(body)
+    r = gate.classify(g, head_sha="e8f03389abcdef")
+    assert "provenance" in r
+    assert r["provenance"]["threads"] == "substituted"
+    assert r["provenance"]["ci"] == "real"
+    assert r["provenance"]["guards"] == "not-applicable"
+
+
 def test_classify_substitute_downgrades_to_gate_human():
     """#73: gate row satisfied by substitute downgrades to gate-human."""
     # Case 1: verdict is eligible-for-auto-merge, but threads row is satisfied via substitute
