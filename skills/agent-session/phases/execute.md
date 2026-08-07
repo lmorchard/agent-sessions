@@ -38,7 +38,31 @@ fix-up.
 
 **TDD Inner Loop (Fail-Implement-Pass):** For each micro-task, enforce strict fail-implement-pass TDD inner loop discipline. Before writing implementation code, run the failing check and observe failure. Then implement, run the check again to confirm pass, and tick the micro-task checkbox.
 
-**Parallel Swarm & Tiered Model Routing:** For independent micro-tasks defined in parallel groups, dispatch parallel `implementer` subagents concurrently. When `LOW_TIER_MODEL` is configured in the environment, configure or instruct the implementer subagents to use the low-tier model for atomic implementation micro-tasks while reserving the high-tier model for intake, planning, and verification. Gather results deterministically without an LLM Commander.
+**Parallel Swarm & Tiered Model Routing:** For independent micro-tasks defined in parallel groups, dispatch parallel `implementer` subagents concurrently as background CLI subprocesses via `agent_runner.py` with `--tier low` to enforce low-tier model execution (e.g. Claude 3.5 Haiku) while reserving the high-tier model for intake, planning, and verification:
+```bash
+python3 driver/agent_runner.py run \
+  --tier low \
+  --high-tier-model "${HIGH_TIER_MODEL:-}" \
+  --low-tier-model "${LOW_TIER_MODEL:-}" \
+  --repo-path "$PWD" \
+  --skill-dir "$SKILL_DIR" \
+  --prompt-file "prompts/task_1.txt" \
+  --raw-output "runs/task_1_stream.jsonl" \
+  --stderr-output "runs/task_1_stderr.txt" &
+
+python3 driver/agent_runner.py run \
+  --tier low \
+  --high-tier-model "${HIGH_TIER_MODEL:-}" \
+  --low-tier-model "${LOW_TIER_MODEL:-}" \
+  --repo-path "$PWD" \
+  --skill-dir "$SKILL_DIR" \
+  --prompt-file "prompts/task_2.txt" \
+  --raw-output "runs/task_2_stream.jsonl" \
+  --stderr-output "runs/task_2_stderr.txt" &
+
+wait
+```
+Gather results deterministically without an LLM Commander. Ensure parallel groups contain strictly independent files or functions to avoid git merge conflicts.
 
 1. **Load and review.** Read `plan.md`, `checks.md`, and `spec.md`. Confirm the freeze commit
    exists (`checks.md`'s `Frozen at` sha resolves) — if it doesn't, Phase 0 never happened;
