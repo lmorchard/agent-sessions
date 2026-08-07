@@ -4,7 +4,7 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help check board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly
+.PHONY: help check board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly
 
 help:
 	@echo "check            run every check -- the targets listed below, in one go"
@@ -16,6 +16,7 @@ help:
 	@echo "skill-readonly   assert the hosted run cannot write to the skill directory"
 	@echo "docs-check       detect doc rot: dead links, split tables, stale counts"
 	@echo "assertion-lint   detect presence-grep assertions -- a spelling check, not a test"
+	@echo "guard-lint       detect pinned test count guards in issue bodies"
 	@echo "commit-lint      detect a commit message that QUOTES a closing keyword"
 	@echo "dry-run          selection only against $(REPO); no claude invocation"
 	@echo "run              one real unattended run (nothing merges)"
@@ -141,6 +142,9 @@ assertion-lint:
 # exhortation reasoning as docs-check and assertion-lint above. See issue #47.
 commit-lint:
 	@python3 scripts/commit_lint.py
+
+guard-lint:
+	@gh issue list --json body | python3 scripts/guard_lint.py
 
 dry-run:
 	@bash $(DRIVER) --repo $(REPO) --board $(BOARD) --dry-run
