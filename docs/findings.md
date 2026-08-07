@@ -726,7 +726,7 @@ the entries most likely to be silently re-broken.**
 | **`--allowedTools`, `--disallowedTools` and `--add-dir` are variadic**, so a trailing positional prompt is swallowed and the run dies with *"Input must be provided either through stdin or as a prompt argument."* **Pass the prompt on stdin.** Generalisable: *a flag list that works is not evidence the flag list is right, when one of the flags is variadic.* | live |
 | **Absolute paths in permission rules take a `//` prefix.** `Edit(/abs/path/**)` does **NOT** block; `Edit(//abs/path/**)` does. | file contents on disk as the oracle, move 4a |
 | **A nonzero exit does not mean the run failed.** A stream can carry `subtype=success` with a complete gate verdict *and* a trailing `error_during_execution`, exiting 1. Do not "simplify" the driver's `has_success_result` guard away. | move 5 (#656) |
-| **Permission denials are triggered by shell *syntax*, not command names.** All 16 denials in move 3 involved an output redirect (`>`, `>>`, `2>&1`) or control flow (`for`, `while`, a leading variable assignment); none involved an un-allowlisted command. A compound with pipes and `&&`/`;` and no redirect passes. **The allowlist cannot be fixed by adding names.** | move 3, 16 denials |
+| **Permission denials are triggered by shell *syntax*, not command names.** All 16 denials in move 3 involved an output redirect (`>`, `>>`, `2>&1`) or control flow (`for`, `while`, a leading variable assignment); none involved an un-allowlisted command. A compound with pipes and `&&`/`;` and no redirect passes. **The allowlist cannot be fixed by adding names alone — but names do matter:** one denial in the decafclaw #752 run was `rm -f /tmp/probe.py && ...`, and `rm` is absent from the driver allowlist, so un-allowlisted command names are also denied. | move 3, decafclaw #752 |
 | **The hosted run is not hermetic.** A `SessionStart` hook fires and injects this machine's global context. That is the price of not using `--bare`, and it bounds what a local run proves about a GHA run. | move 3 |
 | **The denial detector greps the permission layer's phrasing only.** A `PreToolUse` hook block would go uncounted — if that hook lands, teach the detector about it. | move 3 |
 
@@ -976,12 +976,20 @@ about mutation-testing a guard that protects a dangerous state.
   and a trivial canary sailed through it. `log show` returns nothing on this host, so it cannot
   arbitrate. **The workaround does not depend on the cause: drive long runs from a terminal, not from
   a harness background task.** A foreground call cannot substitute — the harness caps those at 10
-  minutes and these runs take 30–60. **Narrowed 2026-08-03: a `nohup`-detached launch from inside a
-  harness session survived twice**, on runs of ~50 and ~53 minutes, both to a clean `gate-eligible`
-  exit. So the distinction is not terminal-vs-harness but **detached-vs-harness-tracked**, which is a
-  cheaper workaround than it looked: `nohup make run-self … &` with output to a log file, then poll the
-  log and the run's `stream.jsonl`. Two survivals do not refute a nondeterministic kill, so this
+  minutes and these runs take 30–60. **Narrowed (updated 2026-08-04): a `nohup`-detached launch from inside a
+  harness session has now survived three times** (~50, ~53, and **57.5 minutes** on the decafclaw #752 run
+  `752-20260804T005611Z`), all to a clean `gate-eligible` exit. **The cost:** a detached process trades
+  away completion notifications, so the operator has no wake-up when the run ends without arming a waiter
+  (`while kill -0 <pid> 2>/dev/null; do sleep 30; done; echo exited; tail -40 <log>`). The waiter itself
+  can also get killed, but the harness announces a killed background task, converting unobservable
+  silence into an observable event. Two survivals do not refute a nondeterministic kill, so this
   narrows the workaround without closing the cause.
+- **"The ceremony outweighs the implementation" — measured, and the driver is not the cause.** A single-line
+  functional change matched against 535 lines of session artifact raises a reasonable concern, but artifact volume
+  pre-dates `agent-session` by five months. Splitting decafclaw's 190 session directories on presence of `checks.md`
+  via `python3 scripts/session_artifact_stats.py` shows medians are nearly identical (513 lines without vs 534 lines with),
+  while the driver's mean and max are lower. What changed is throughput (rate up ~50×), not proportion; reducing ceremony
+  is a decision about decafclaw's session-docs convention, not the driver skill.
 - **A driver that dies between invoking and classifying leaves no record.** Observed: a run
   completed (98 turns, 19 min, **$9.44**) and opened a PR, then the process was killed before
   classifying — real money spent, a PR open, and an empty `runs.jsonl`. Everything the driver
