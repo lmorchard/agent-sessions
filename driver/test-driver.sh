@@ -1837,11 +1837,10 @@ S87_OUT="$({ STUB_DIR="$S87_TMP" PATH="$S87_TMP/bin:$PATH" \
     --skill-dir "$S87_SKILL" --repo-path "$S87_REPOP" \
     --state-dir "$S87_SD" 2>&1 || true; })"
 
-if echo "$S87_OUT" | grep -q "DENIALS (3)"; then
-  ok "#87 C1 3 identical generic denials report DENIALS (3)"
-else
-  bad "#87 C1 3 identical generic denials report DENIALS (3)" "DENIALS (3)" "$S87_OUT"
-fi
+case "$S87_OUT" in
+  *"DENIALS (3)"*) ok "#87 C1 3 identical generic denials report DENIALS (3)" ;;
+  *)               bad "#87 C1 3 identical generic denials report DENIALS (3)" "DENIALS (3)" "$S87_OUT" ;;
+esac
 
 S87_RUNDIR="$(ls -td "$S87_SD/runs/87-"* 2>/dev/null | head -1 || true)"
 if [ -f "$S87_RUNDIR/denials.txt" ] && [ "$(grep -c . "$S87_RUNDIR/denials.txt")" -eq 3 ]; then
@@ -1865,11 +1864,16 @@ S87_OUT_ZERO="$({ STUB_DIR="$S87_TMP" PATH="$S87_TMP/bin:$PATH" \
     --state-dir "$S87_SD" 2>&1 || true; })"
 
 S87_RUNDIR_ZERO="$(ls -td "$S87_SD/runs/87-"* 2>/dev/null | head -1 || true)"
-if ! echo "$S87_OUT_ZERO" | grep -q "DENIALS" && [ ! -f "$S87_RUNDIR_ZERO/denials.txt" ]; then
-  ok "#87 G1 zero denials produce no DENIALS and no denials.txt"
-else
-  bad "#87 G1 zero denials produce no DENIALS and no denials.txt" "no DENIALS / no denials.txt" "$S87_OUT_ZERO"
-fi
+case "$S87_OUT_ZERO" in
+  *DENIALS*) bad "#87 G1 zero denials produce no DENIALS and no denials.txt" "no DENIALS" "$S87_OUT_ZERO" ;;
+  *)
+    if [ ! -f "$S87_RUNDIR_ZERO/denials.txt" ]; then
+      ok "#87 G1 zero denials produce no DENIALS and no denials.txt"
+    else
+      bad "#87 G1 zero denials produce no DENIALS and no denials.txt" "no denials.txt" "found denials.txt"
+    fi
+    ;;
+esac
 
 rm -rf "$S87_SD"; mkdir -p "$S87_SD"
 
@@ -1886,11 +1890,10 @@ S87_OUT_PATH="$({ STUB_DIR="$S87_TMP" PATH="$S87_TMP/bin:$PATH" \
     --skill-dir "$S87_SKILL" --repo-path "$S87_REPOP" \
     --state-dir "$S87_SD" 2>&1 || true; })"
 
-if echo "$S87_OUT_PATH" | grep -q "DENIALS (1)"; then
-  ok "#87 G2 path-rule phrasing is detected"
-else
-  bad "#87 G2 path-rule phrasing is detected" "DENIALS (1)" "$S87_OUT_PATH"
-fi
+case "$S87_OUT_PATH" in
+  *"DENIALS (1)"*) ok "#87 G2 path-rule phrasing is detected" ;;
+  *)               bad "#87 G2 path-rule phrasing is detected" "DENIALS (1)" "$S87_OUT_PATH" ;;
+esac
 
 rm -rf "$S87_TMP"
 
