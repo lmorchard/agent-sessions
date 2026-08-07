@@ -1930,8 +1930,10 @@ cat > "$S83_BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
   "pr list"*)            cat "$STUB_DIR/pr-list.json" ;;
-  *"--json headRefOid"*) printf '%s\n' "abc123sha" ;;
-  *"--json body"*)       cat "$STUB_DIR/pr-body.txt" ;;
+  "pr view"*)            cat "$STUB_DIR/pr-body.txt" ;;
+  "issue view"*)         printf '%s' '{"body":"Closes #83"}' ;;
+  "api"*"comments"*)     printf '%s' '[]' ;;
+  "pr checks"*)          printf '%s' '[{"name":"ci","bucket":"pass"}]' ;;
   *)                     exit 0 ;;
 esac
 STUB
@@ -1963,6 +1965,105 @@ else
 fi
 
 rm -rf "$S83_TMP"
+
+# --- #69: --resumed-from support in --classify-only -------------------------
+#
+#   https://github.com/lmorchard/agent-sessions/issues/69
+#
+# C1 — the resumed session's identity and cost are what get recorded.
+# C2 — the parked record survives intact, and both are readable as a sequence.
+# C3 — total spend on the issue is derivable.
+
+echo "#69: --resumed-from support in --classify-only"
+
+S69_TMP="$(mktemp -d)"
+S69_BIN="$S69_TMP/bin"; mkdir -p "$S69_BIN"
+
+# Stub GH
+printf '%s' '[{"number":42,"title":"stub pr","body":"Closes #69","headRefName":"fix/69-stub",
+  "url":"https://github.com/stub/repo/pull/42","closingIssuesReferences":[{"number":69}]}]' \
+  > "$S69_BIN/pr-list.json"
+printf '%s\n' "Closes #69" > "$S69_BIN/pr-body.txt"
+
+cat > "$S69_BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "pr list"*)            cat "$STUB_DIR/pr-list.json" ;;
+  *"--json headRefOid"*) printf '%s\n' "abc123sha" ;;
+  *"--json body"*)       cat "$STUB_DIR/pr-body.txt" ;;
+  *)                     exit 0 ;;
+esac
+STUB
+chmod +x "$S69_BIN/gh"
+
+S69_SD="$S69_TMP/state"
+S69_RUNDIR="$S69_SD/runs/69-20260731T000000Z"
+mkdir -p "$S69_RUNDIR"
+
+# Create a parked record in runs.jsonl first (simulating the parked run)
+jq -n -c \
+  --arg issue "69" --arg repo "stub/repo" --arg ts "20260731T000000Z" \
+  --arg outcome "parked" --arg reason "parked for human review" \
+  --arg pr "https://github.com/stub/repo/pull/42" --arg session "parked-session-123" \
+  --arg rundir "$S69_RUNDIR" --argjson rc 0 --argjson cost 7.55 \
+  "{issue:(\$issue|tonumber), repo:\$repo, started:\$ts, exit:\$rc, cost_usd:\$cost,
+    session_id:\$session, outcome:\$outcome, reason:\$reason, pr:\$pr, run_dir:\$rundir,
+    recovered:true}" \
+  > "$S69_SD/runs.jsonl"
+
+# Create stream.jsonl inside S69_RUNDIR representing the parked stream
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":7.55,"session_id":"parked-session-123","result":"done"}' \
+  > "$S69_RUNDIR/stream.jsonl"
+
+# Create the resumed session result.json file
+S69_RESUMED_FILE="$S69_TMP/resumed-result.json"
+printf '%s\n' '{"session_id":"resumed-session-456","total_cost_usd":12.92,"result":"done"}' \
+  > "$S69_RESUMED_FILE"
+
+# Drive --classify-only with --resumed-from pointing at the resumed session file
+S69_OUT="$(STUB_DIR="$S69_BIN" PATH="$S69_BIN:$PATH" \
+             bash "$DRIVER" --repo stub/repo --classify-only 69 --resumed-from "$S69_RESUMED_FILE" --state-dir "$S69_SD" 2>&1)"
+
+# Check 1: did we record a second row, and does it carry resumed session id and cost?
+S69_ROW1="$(head -n 1 "$S69_SD/runs.jsonl" 2>/dev/null || true)"
+S69_ROW2="$(tail -n 1 "$S69_SD/runs.jsonl" 2>/dev/null || true)"
+
+# C1: identity and cost are resumed session's values
+S69_ROW2_SESSION="$(printf '%s' "$S69_ROW2" | jq -r '.session_id')"
+S69_ROW2_COST="$(printf '%s' "$S69_ROW2" | jq -r '.cost_usd')"
+S69_ROW2_RESUMED="$(printf '%s' "$S69_ROW2" | jq -r '.resumed')"
+
+if [ "$S69_ROW2_SESSION" = "resumed-session-456" ] && [ "$S69_ROW2_COST" = "12.92" ] && [ "$S69_ROW2_RESUMED" = "true" ]; then
+  ok "#69 C1 the resumed session's identity and cost are what get recorded"
+else
+  bad "#69 C1 the resumed session's identity and cost are what get recorded" \
+      "session=resumed-session-456, cost=12.92, resumed=true" \
+      "session=$S69_ROW2_SESSION, cost=$S69_ROW2_COST, resumed=$S69_ROW2_RESUMED"
+fi
+
+# C2: original parked record survives intact
+S69_ROW1_OUTCOME="$(printf '%s' "$S69_ROW1" | jq -r '.outcome')"
+S69_ROW1_COST="$(printf '%s' "$S69_ROW1" | jq -r '.cost_usd')"
+
+if [ "$S69_ROW1_OUTCOME" = "parked" ] && [ "$S69_ROW1_COST" = "7.55" ]; then
+  ok "#69 C2 the parked record survives intact"
+else
+  bad "#69 C2 the parked record survives intact" \
+      "outcome=parked, cost=7.55" \
+      "outcome=$S69_ROW1_OUTCOME, cost=$S69_ROW1_COST"
+fi
+
+# C3: total spend on the issue is derivable
+S69_TOTAL_SPEND="$(jq -s '[.[] | select(.issue==69)] | map(.cost_usd) | add' "$S69_SD/runs.jsonl" 2>/dev/null)"
+if [ "$S69_TOTAL_SPEND" = "20.47" ]; then
+  ok "#69 C3 total spend on the issue is derivable (7.55 + 12.92 = 20.47)"
+else
+  bad "#69 C3 total spend on the issue is derivable (7.55 + 12.92 = 20.47)" \
+      "20.47" \
+      "$S69_TOTAL_SPEND"
+fi
+
+rm -rf "$S69_TMP"
 
 # --- syntax ----------------------------------------------------------------
 

@@ -351,10 +351,22 @@ def classify(
         "warnings": [],
     }
 
+    def _check_substitute_and_return(res: dict) -> dict:
+        if res.get("outcome") == "gate-eligible":
+            sub_fields = []
+            for k, v in res.get("fields", {}).items():
+                if k not in ("verdict", "reason") and "substitute" in str(v).lower():
+                    sub_fields.append(k)
+            if sub_fields:
+                res["outcome"] = "gate-human"
+                fields_str = ", ".join(sub_fields)
+                res["reason"] = f"gate has row(s) satisfied by substitute: {fields_str}"
+        return res
+
     if not result["has_gate"]:
         result["outcome"] = "no-gate"
         result["reason"] = f"PR exists but carries no {marker} block"
-        return result
+        return _check_substitute_and_return(result)
 
     result["fields"] = gate_fields(gate)
     result["provenance"] = infer_provenance(result["fields"])
@@ -378,7 +390,7 @@ def classify(
                 f'{head_sha[:8]} -- verdict "{verdict}" rests on a commit that '
                 "no longer ships"
             )
-            return result
+            return _check_substitute_and_return(result)
 
         if ci_checks is not None and (not sha or verdict == "pending"):
             ci_state, live_ci_row, _ = evaluate_ci_checks(ci_checks)
@@ -390,11 +402,11 @@ def classify(
                 if ci_state == "pending":
                     result["outcome"] = "incomplete"
                     result["reason"] = f"verdict still pending -- live CI checks pending ({formatted_ci_row})"
-                    return result
+                    return _check_substitute_and_return(result)
                 elif ci_state == "fail":
                     result["outcome"] = "gate-human"
                     result["reason"] = f"live CI checks failed on head {head_sha[:8]} ({formatted_ci_row})"
-                    return result
+                    return _check_substitute_and_return(result)
                 elif ci_state in ("pass", "no-checks"):
                     all_ok, failed_reasons = verify_gate_rows(result["fields"])
                     if all_ok:
@@ -403,10 +415,8 @@ def classify(
                     else:
                         result["outcome"] = "gate-human"
                         result["reason"] = f"live CI passed ({formatted_ci_row}) but gate has failing rows: {'; '.join(failed_reasons)}"
-                    return result
-                    result["outcome"] = "gate-eligible"
-                    result["reason"] = f"all gate rows satisfied (live CI: {formatted_ci_row})"
-                return result
+                    return _check_substitute_and_return(result)
+                return _check_substitute_and_return(result)
 
         if not sha and ci_row.strip() and ci_row != "no checks configured":
             # A null must never render as a positive: an unparseable sha also
@@ -433,7 +443,7 @@ def classify(
     else:
         result["outcome"] = "no-gate"
         result["reason"] = f"unrecognised verdict value: {verdict}"
-    return result
+    return _check_substitute_and_return(result)
 
 
 def tier_of(body: str, marker: str = SPEC_MARKER) -> str:

@@ -535,5 +535,32 @@ def test_classify_includes_provenance():
     assert r["provenance"]["guards"] == "not-applicable"
 
 
+def test_classify_substitute_downgrades_to_gate_human():
+    """#73: gate row satisfied by substitute downgrades to gate-human."""
+    # Case 1: verdict is eligible-for-auto-merge, but threads row is satisfied via substitute
+    body_sub = body_with(
+        "2/2 pass @ abc1234",
+        verdict="eligible-for-auto-merge",
+        threads="0 unresolved -- via substitute: derived from review-comment count (0)"
+    )
+    r = gate.classify(gate.extract_gate(body_sub), head_sha="abc123456789")
+    assert r["outcome"] == "gate-human"
+    assert "satisfied by substitute: threads" in r["reason"]
+
+    # Case 2: live CI pass, verdict pending, but project-gates has "clean-by-substitute"
+    body_pending_sub = body_with(
+        "not yet graded",
+        verdict="pending",
+        project_gates="green -- via substitute"
+    )
+    r2 = gate.classify(
+        gate.extract_gate(body_pending_sub),
+        head_sha="abc123456789",
+        ci_checks=[{"name": "c1", "bucket": "pass"}]
+    )
+    assert r2["outcome"] == "gate-human"
+    assert "satisfied by substitute: project-gates" in r2["reason"]
+
+
 
 
