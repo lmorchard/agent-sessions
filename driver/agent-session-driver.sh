@@ -899,11 +899,11 @@ run_issue() { # $1 = issue number
   # this pattern its wording, or the count silently undercounts.
   local denials
   denials="$(grep -oE '(Permission to use [^"]*has been denied[^"]*|[^"]*denied by your permission settings[^"]*|The PreToolUse hook rejected[^"]*)' \
-             "$raw" 2>/dev/null | sort -u || true)"
+             "$raw" 2>/dev/null || true)"
   if [ -n "$denials" ]; then
     printf '%s\n' "$denials" > "$rundir/denials.txt"
     say "  DENIALS ($(printf '%s\n' "$denials" | grep -c .)) -- see $rundir/denials.txt"
-    printf '%s\n' "$denials" | sed 's/^/    /' >&2
+    printf '%s\n' "$denials" | sort -u | sed 's/^/    /' >&2
   fi
 
   say "  exit $rc   cost \$$cost   session ${session:-none}"
