@@ -70,6 +70,7 @@ DRY_RUN=0
 ALLOW_NESTED=0
 RETRY=""
 CLASSIFY_ONLY=""
+RESUMED_FROM=""
 MODEL=""
 BACKEND=""
 
@@ -121,9 +122,10 @@ agent-session-driver.sh --repo <owner/name> --skill-dir <path> --repo-path <path
                           must be opted into. Pointing the driver at its own repo
                           is the legitimate case the flag exists for.
   --retry <n>             ignore issue n's park label for this invocation
-  --classify-only <n>     classify + record issue n from live PR state; no
-                          claude invocation. Recovers the outcome of a run whose
-                          driver died after the run itself finished.
+   --classify-only <n>     classify + record issue n from live PR state; no
+                           claude invocation. Recovers the outcome of a run whose
+                           driver died after the run itself finished.
+   --resumed-from <path>   optional with --classify-only; path to resumed session result.json
   -h, --help              this text
 EOF
 }
@@ -143,6 +145,7 @@ while [ $# -gt 0 ]; do
     --model)          MODEL="${2:?}"; shift 2 ;;
     --retry)          RETRY="${2:?}"; shift 2 ;;
     --classify-only)  CLASSIFY_ONLY="${2:?}"; shift 2 ;;
+    --resumed-from)   RESUMED_FROM="${2:?}"; shift 2 ;;
     --dry-run)        DRY_RUN=1; shift ;;
     --allow-nested-skill-dir) ALLOW_NESTED=1; shift ;;
     -h|--help)        usage; exit 0 ;;
@@ -1175,6 +1178,18 @@ if [ -n "$CLASSIFY_ONLY" ]; then
     rundir="(none)"
   fi
 
+  if [ -n "$RESUMED_FROM" ] && [ -f "$RESUMED_FROM" ]; then
+    resumed_cost="$("$PYTHON_BIN" -c "import json, sys; print(json.load(open(sys.argv[1])).get('total_cost_usd', 0))" "$RESUMED_FROM" 2>/dev/null || echo 0)"
+    resumed_session="$("$PYTHON_BIN" -c "import json, sys; print(json.load(open(sys.argv[1])).get('session_id', ''))" "$RESUMED_FROM" 2>/dev/null || true)"
+    if [ -n "$resumed_cost" ]; then
+      cost="$resumed_cost"
+    fi
+    if [ -n "$resumed_session" ]; then
+      session="$resumed_session"
+    fi
+    say "  resumed-from $RESUMED_FROM: cost \$$cost  session ${session:-none}"
+  fi
+
   # Same degrade-distinguishably fix as the run path above, and for the reason
   # its own comment block gives a few lines down: fixing one of these two call
   # sites and not the other is findings.md class 1, "fixed the cost field, never
@@ -1227,14 +1242,24 @@ if [ -n "$CLASSIFY_ONLY" ]; then
   say "  reason   $reason"
   [ -n "$prurl" ] && say "  pr       $prurl"
 
+  _jq_args=(
+    --arg issue "$n" --arg repo "$REPO" --arg ts "$ts"
+    --arg outcome "$outcome" --arg reason "$reason"
+    --arg pr "$prurl" --arg session "$session"
+    --arg rundir "$rundir" --argjson rc "$rc" --argjson cost "${cost:-0}"
+  )
+  if [ -n "$RESUMED_FROM" ]; then
+    _jq_args+=(--arg resumed_from "$RESUMED_FROM")
+    _extra='{resumed: true, resumed_from: $resumed_from}'
+  else
+    _extra='{}'
+  fi
+
   jq -n -c \
-    --arg issue "$n" --arg repo "$REPO" --arg ts "$ts" \
-    --arg outcome "$outcome" --arg reason "$reason" \
-    --arg pr "$prurl" --arg session "$session" \
-    --arg rundir "$rundir" --argjson rc "$rc" --argjson cost "${cost:-0}" \
-    '{issue:($issue|tonumber), repo:$repo, started:$ts, exit:$rc, cost_usd:$cost,
-      session_id:$session, outcome:$outcome, reason:$reason, pr:$pr, run_dir:$rundir,
-      recovered:true}' \
+    "${_jq_args[@]}" \
+    "{issue:(\$issue|tonumber), repo:\$repo, started:\$ts, exit:\$rc, cost_usd:\$cost,
+      session_id:\$session, outcome:\$outcome, reason:\$reason, pr:\$pr, run_dir:\$rundir,
+      recovered:true} + $_extra" \
     >> "$RUNS_LOG"
 
   if [ -n "$prline" ]; then
