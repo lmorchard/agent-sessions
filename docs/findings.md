@@ -310,6 +310,7 @@ mention as though it were a claim.
 | 2 | `make docs-check` | `CLAUDE.md`'s own *example* of a stale count | flagged on its first run; fixed by writing examples with `N`, not by teaching it to skip quotes |
 | 3 | `gate.py`'s spec-marker test | an issue body *quoting* `<!-- agent-session:spec -->` — including one whose sentence said it was **not** triaged | a marker-less issue reads as specced ([#19](https://github.com/lmorchard/agent-sessions/issues/19)) |
 | 4 | **GitHub's own closing-keyword parser** | a commit body quoting a fixture whose payload contains `Closes #7` | **closed live issue #7 as COMPLETED** ([#47](https://github.com/lmorchard/agent-sessions/issues/47)) |
+| 5 | **GitHub's squash-merge behavior** | a PR body containing a backticked closing keyword (`\`Closes #N\``) | **closed the referenced issue when squash-merged**, confirmed on a scratch repository 2026-08-05 (Issue #53) — establishing that GitHub's squash default composes the commit message from the PR body, turning rendered backticks into literal characters. |
 
 **Instance 4 is the one that changes the rule.** The first three are our detectors, so "make the
 detector smarter" was always available — anchor the pattern, scope what is linted. GitHub's parser is
