@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +27,8 @@ def run_agent(argv: list[str] | None = None) -> int:
     p.add_argument("--max-budget", type=float, default=10.0)
     p.add_argument("--timeout", type=int, default=5400)
     p.add_argument("--model", default="")
+    p.add_argument("--high-tier-model", default="")
+    p.add_argument("--low-tier-model", default="")
     p.add_argument("--allowed-tools", default="")
     p.add_argument("--disallowed-tools", default="")
     p.add_argument("--settings", default="")
@@ -88,6 +91,14 @@ def run_agent(argv: list[str] | None = None) -> int:
     raw_output.parent.mkdir(parents=True, exist_ok=True)
     stderr_output.parent.mkdir(parents=True, exist_ok=True)
 
+    env = dict(os.environ)
+    if args.high_tier_model:
+        env["HIGH_TIER_MODEL"] = args.high_tier_model
+    if args.low_tier_model:
+        env["LOW_TIER_MODEL"] = args.low_tier_model
+    if args.model and not env.get("MODEL"):
+        env["MODEL"] = args.model
+
     try:
         with open(raw_output, "wb") as out_f, open(stderr_output, "wb") as err_f:
             res = subprocess.run(
@@ -97,6 +108,7 @@ def run_agent(argv: list[str] | None = None) -> int:
                 stderr=err_f,
                 cwd=str(repo_path),
                 timeout=args.timeout,
+                env=env,
             )
             return res.returncode
     except subprocess.TimeoutExpired:

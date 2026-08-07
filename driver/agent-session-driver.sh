@@ -843,7 +843,10 @@ run_issue() { # $1 = issue number
   # still mutating the repo with nothing supervising it. Observed, not theorised.
   set +e
   if [ -n "$TIMEOUT_CMD" ]; then
-    ( cd "$REPO_PATH" && exec "$TIMEOUT_CMD" "$RUN_TIMEOUT" "$PYTHON_BIN" "$AGENT_RUNNER_PY" run \
+    ( cd "$REPO_PATH" && \
+        HIGH_TIER_MODEL="${HIGH_TIER_MODEL:-}" \
+        LOW_TIER_MODEL="${LOW_TIER_MODEL:-}" \
+        exec "$TIMEOUT_CMD" "$RUN_TIMEOUT" "$PYTHON_BIN" "$AGENT_RUNNER_PY" run \
         --backend "${BACKEND:-claude}" \
         --repo-path "$REPO_PATH" \
         --skill-dir "$SKILL_DIR" \
@@ -853,13 +856,18 @@ run_issue() { # $1 = issue number
         --max-budget "$MAX_BUDGET" \
         --timeout "$RUN_TIMEOUT" \
         ${MODEL:+--model "$MODEL"} \
+        ${HIGH_TIER_MODEL:+--high-tier-model "$HIGH_TIER_MODEL"} \
+        ${LOW_TIER_MODEL:+--low-tier-model "$LOW_TIER_MODEL"} \
         --allowed-tools "$ALLOWED_TOOLS" \
         --disallowed-tools "$DENIED_TOOLS" \
         --settings "$HOOK_SETTINGS_FILE" ) \
       &
   else
     say "  NOTE: no timeout/gtimeout found; running unbounded (budget still caps cost)"
-    ( cd "$REPO_PATH" && exec "$PYTHON_BIN" "$AGENT_RUNNER_PY" run \
+    ( cd "$REPO_PATH" && \
+        HIGH_TIER_MODEL="${HIGH_TIER_MODEL:-}" \
+        LOW_TIER_MODEL="${LOW_TIER_MODEL:-}" \
+        exec "$PYTHON_BIN" "$AGENT_RUNNER_PY" run \
         --backend "${BACKEND:-claude}" \
         --repo-path "$REPO_PATH" \
         --skill-dir "$SKILL_DIR" \
@@ -869,6 +877,8 @@ run_issue() { # $1 = issue number
         --max-budget "$MAX_BUDGET" \
         --timeout "$RUN_TIMEOUT" \
         ${MODEL:+--model "$MODEL"} \
+        ${HIGH_TIER_MODEL:+--high-tier-model "$HIGH_TIER_MODEL"} \
+        ${LOW_TIER_MODEL:+--low-tier-model "$LOW_TIER_MODEL"} \
         --allowed-tools "$ALLOWED_TOOLS" \
         --disallowed-tools "$DENIED_TOOLS" \
         --settings "$HOOK_SETTINGS_FILE" ) &
