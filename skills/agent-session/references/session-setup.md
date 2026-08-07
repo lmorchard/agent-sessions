@@ -44,12 +44,8 @@ and a drifted worktree path means a run that tests the wrong branch.
 
 6. **Fetch `origin/main`** without modifying or rebasing the current checkout.
 
-7. **Set up an isolated worktree.** Prefer `superpowers:using-git-worktrees` if available —
-   it handles directory priority, gitignore verification, dependency install detection, and a
-   baseline test run. Fallback:
-   a. **Use the project's existing worktree location.** `git worktree list` — if the repo already
-      keeps them somewhere (`.claude/worktrees/`, `worktrees/`, a sibling dir), use that; only fall
-      back to `.worktrees/` with no precedent.
+7. **Set up an isolated worktree.** First, determine the worktree location: run `git worktree list` to see if the repo already keeps worktrees somewhere (such as `.claude/worktrees/`, `worktrees/`, or a sibling dir). If an existing location is found, declare this as your explicit worktree directory preference. Prefer `superpowers:using-git-worktrees` with that declared preference if available — it handles directory priority, gitignore verification, dependency install detection, and a baseline test run. Fallback:
+   a. **Use the project's existing worktree location.** Use the location found above; only fall back to `.worktrees/` with no precedent.
    b. Confirm it's ignored. If it isn't, put the `.gitignore` line on the feature branch or pick an
       already-ignored location — don't commit setup changes to the default branch.
    c. `git worktree add {location}/{branch-name} -b {branch-name} origin/main`
