@@ -57,7 +57,7 @@ line at each transition:
 
 | Step | Run | Express override |
 |---|---|---|
-| 2a. Plan + freeze | `phases/plan.md` | Phase 0 freeze is mandatory — no override |
+| 2a. Plan + freeze | `phases/plan.md` | Apply ceremony threshold: for tactical tasks (< 3 steps), skip heavy artifacts and implement directly; for large tasks, Phase 0 freeze is mandatory |
 | 2b. Plan self-review | `plan.md`'s self-review step | Replaces the human plan review: fix and continue |
 | 2c. Execute | `phases/execute.md` | Per-phase manual pauses deferred to 2f; per-criterion checks are not deferrable |
 | 2d. Independent verification | `execute.md`'s verifier + tamper diff | Never skipped, never self-reported |
