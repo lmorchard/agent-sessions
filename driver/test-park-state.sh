@@ -837,6 +837,55 @@ check "  and its cost really reached the ledger" "$KNOWN_COST" "${CK_COST:-missi
 hasnt "G4: a run whose cost IS determinable is not reported as undetermined" \
       "$COST_UNKNOWN_NEEDLE" "$CK_REASON"
 
+# --- #82: Close the flush race (recover the cost inline) ---------------------
+#
+# C1 CRITERION: GIVEN a run whose cost is undetermined at exit time because of a stream flush race,
+# WHEN the driver waits briefly and re-parses, THEN it SHALL recover the cost and session id.
+
+echo "#82: Close the flush race (recover the cost inline)"
+
+DEL_BIN="$TMPROOT/delayed-bin"; make_stubs "$DEL_BIN" "pending"
+
+# Define the delayed-cost stub
+cat > "$DEL_BIN/claude" <<'STUB'
+#!/usr/bin/env bash
+printf 'claude %s\n' "$*" >> "$ARGV_LOG"
+cat >/dev/null
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"stub delayed started"}]}}'
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"stub delayed still going"}]}}'
+
+if [ -n "$DEL_SD_ENV" ]; then
+  RUNDIR="$(ls -td "$DEL_SD_ENV/runs/"*-* 2>/dev/null | head -1 || true)"
+  if [ -n "$RUNDIR" ] && [ -d "$RUNDIR" ]; then
+    (sleep 0.2 && printf '{"type":"result","subtype":"error_during_execution","is_error":true,"total_cost_usd":10.93,"session_id":"delayed-session","result":"boom"}\n' >> "$RUNDIR/stream.jsonl") &
+  fi
+fi
+
+exit 3
+STUB
+chmod +x "$DEL_BIN/claude"
+
+DEL_LOG="$TMPROOT/delayed.log"; DEL_SD="$TMPROOT/delayed-state"
+DEL_SKILL="$TMPROOT/delayed-skill"; mkdir -p "$DEL_SKILL/phases"; : > "$DEL_SKILL/phases/express.md"
+DEL_REPOP="$TMPROOT/delayed-repo"; mkdir -p "$DEL_REPOP"
+
+export DEL_SD_ENV="$DEL_SD"
+
+DEL_OUT="$(run_driver "$DEL_BIN" "$DEL_LOG" --repo "$REPO" --issue "$ISSUE" \
+             --skill-dir "$DEL_SKILL" --repo-path "$DEL_REPOP" \
+             --state-dir "$DEL_SD" --max-budget-usd 100)"
+
+# Verify that the ledger row recorded the recovered cost and session id!
+DEL_ROW="$(jq -rc --arg n "$ISSUE" 'select(.issue == ($n|tonumber))' \
+             "$DEL_SD/runs.jsonl" 2>/dev/null | tail -1)"
+DEL_COST="$(printf '%s' "$DEL_ROW" | jq -r '.cost_usd // empty' 2>/dev/null || true)"
+DEL_SESSION="$(printf '%s' "$DEL_ROW" | jq -r '.session_id // empty' 2>/dev/null || true)"
+
+check "#82 C1: the cost really reached the ledger after delayed flush" "10.93" "$DEL_COST"
+check "  and its session id was recovered" "delayed-session" "$DEL_SESSION"
+
+unset DEL_SD_ENV
+
 # --- report ----------------------------------------------------------------
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
