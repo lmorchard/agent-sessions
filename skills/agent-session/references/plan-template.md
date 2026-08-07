@@ -44,6 +44,12 @@ No implementation in this phase.
 
 **Advances:** C1, C2 — [and, if partial: what remains for a later phase]
 
+**Micro-tasks (Atomic checkbox steps):**
+- [ ] Micro-task 1: [Atomic step description]
+- [ ] Micro-task 2: [Atomic step description]
+
+**Parallel Group:** [Define independent micro-tasks that can be executed concurrently as a parallel group]
+
 **Files:**
 - Create: `exact/path/to/file.ext`
 - Modify: `exact/path/to/existing.ext` — [what changes]

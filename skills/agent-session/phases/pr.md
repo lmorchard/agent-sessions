@@ -230,6 +230,7 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
 
     **All true → `eligible-for-auto-merge`. Any false → `human-merge-required`**, with the
     failing row as the reason. Write the verdict into the gate block and report it.
+    If the verdict is `eligible-for-auto-merge`, update and append any newly discovered architectural rules, stylistic choices, or test patterns to `docs/agent-ledger.md`.
 
     Any row satisfied by a substitute rather than by its cited mechanism is still a pass, but
     **name the substitute in the gate block** where the row would otherwise read as a clean

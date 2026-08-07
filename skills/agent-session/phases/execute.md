@@ -36,6 +36,10 @@ fix-up.
 
 0. **Check Ceremony Threshold:** If this is a small, tactical task (bug fix, < 3 steps), **skip `execute`'s heavy phased structure entirely**. Just implement the fix and jump to `pr`. Only proceed with the steps below for large, architectural, or multi-session tasks that have a `plan.md`.
 
+**TDD Inner Loop (Fail-Implement-Pass):** For each micro-task, enforce strict fail-implement-pass TDD inner loop discipline. Before writing implementation code, run the failing check and observe failure. Then implement, run the check again to confirm pass, and tick the micro-task checkbox.
+
+**Parallel Swarm Orchestration:** For independent micro-tasks defined in parallel groups, dispatch parallel implementer subagents concurrently and gather their results deterministically via deterministic orchestration without an LLM Commander.
+
 1. **Load and review.** Read `plan.md`, `checks.md`, and `spec.md`. Confirm the freeze commit
    exists (`checks.md`'s `Frozen at` sha resolves) — if it doesn't, Phase 0 never happened;
    go back to `plan`. Check existing checkboxes and resume from the first unchecked phase.

@@ -72,6 +72,8 @@ RETRY=""
 CLASSIFY_ONLY=""
 RESUMED_FROM=""
 MODEL=""
+HIGH_TIER_MODEL=""
+LOW_TIER_MODEL=""
 BACKEND=""
 
 # `dontAsk` denies non-allowlisted mutating commands but auto-allows commands it
@@ -143,6 +145,8 @@ while [ $# -gt 0 ]; do
     --board)          BOARD="${2:?}"; shift 2 ;;
     --backend)        BACKEND="${2:?}"; shift 2 ;;
     --model)          MODEL="${2:?}"; shift 2 ;;
+    --high-tier-model) HIGH_TIER_MODEL="${2:?}"; shift 2 ;;
+    --low-tier-model) LOW_TIER_MODEL="${2:?}"; shift 2 ;;
     --retry)          RETRY="${2:?}"; shift 2 ;;
     --classify-only)  CLASSIFY_ONLY="${2:?}"; shift 2 ;;
     --resumed-from)   RESUMED_FROM="${2:?}"; shift 2 ;;
