@@ -893,6 +893,21 @@ run_issue() { # $1 = issue number
   cost="$("$PYTHON_BIN" -c "import json, sys; print(json.load(open(sys.argv[1]))['total_cost_usd'])" "$rundir/parsed.json")"
   session="$("$PYTHON_BIN" -c "import json, sys; print(json.load(open(sys.argv[1]))['session_id'])" "$rundir/parsed.json")"
   "$PYTHON_BIN" -c "import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))['cost_known'] else 1)" "$rundir/parsed.json" && cost_known=1
+
+  # If cost is undetermined on a nonzero exit, wait briefly for any pending flush and try again (Issue #82)
+  if [ "$cost_known" -eq 0 ] && [ "$rc" -ne 0 ]; then
+    say "  cost undetermined on exit $rc; waiting 1s for stream flush..."
+    sleep 1
+    "$PYTHON_BIN" "$AGENT_RUNNER_PY" parse \
+      --backend "${BACKEND:-claude}" \
+      --raw-output "$raw" \
+      --output-json "$rundir/parsed.json"
+    final="$("$PYTHON_BIN" -c "import json, sys; print(json.load(open(sys.argv[1]))['final'])" "$rundir/parsed.json" 2>/dev/null || echo "$final")"
+    cost="$("$PYTHON_BIN" -c "import json, sys; print(json.load(open(sys.argv[1]))['total_cost_usd'])" "$rundir/parsed.json" 2>/dev/null || echo "$cost")"
+    session="$("$PYTHON_BIN" -c "import json, sys; print(json.load(open(sys.argv[1]))['session_id'])" "$rundir/parsed.json" 2>/dev/null || echo "$session")"
+    "$PYTHON_BIN" -c "import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))['cost_known'] else 1)" "$rundir/parsed.json" 2>/dev/null && cost_known=1
+  fi
+
   printf '%s' "$final" > "$rundir/final.txt"
 
   # Denials are greppable, in three measured phrasings: the rule-specific
