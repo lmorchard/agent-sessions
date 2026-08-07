@@ -226,6 +226,106 @@ def verify_gate_rows(fields: dict[str, str]) -> tuple[bool, list[str]]:
     return len(failed) == 0, failed
 
 
+def infer_provenance(fields: dict[str, str]) -> dict[str, str]:
+    prov = {}
+    
+    # 1. tier
+    tier = fields.get("tier", "")
+    if not tier:
+        prov["tier"] = "failed"
+    elif "needs-review" in tier or "unparsed" in tier or "conflict" in tier:
+        prov["tier"] = "failed"
+    else:
+        prov["tier"] = "real"
+
+    # 2. checks
+    checks = fields.get("checks", "")
+    if not checks:
+        prov["checks"] = "failed"
+    elif "fail" in checks or "pending" in checks:
+        prov["checks"] = "failed"
+    elif "substitute" in checks.lower():
+        prov["checks"] = "substituted"
+    else:
+        prov["checks"] = "real"
+
+    # 3. guards
+    guards = fields.get("guards", "none")
+    if "REGRESSED" in guards:
+        prov["guards"] = "failed"
+    elif guards == "none":
+        prov["guards"] = "not-applicable"
+    elif "substitute" in guards.lower():
+        prov["guards"] = "substituted"
+    else:
+        prov["guards"] = "real"
+
+    # 4. tamper
+    tamper = fields.get("tamper", "")
+    if not tamper:
+        prov["tamper"] = "failed"
+    elif tamper.startswith("DIRTY") or "DIRTY" in tamper:
+        prov["tamper"] = "failed"
+    elif not (tamper.startswith("clean") or tamper.startswith("amended")):
+        prov["tamper"] = "failed"
+    elif "substitute" in tamper.lower():
+        prov["tamper"] = "substituted"
+    else:
+        prov["tamper"] = "real"
+
+    # 5. project-gates
+    project_gates = fields.get("project-gates", "")
+    if not project_gates:
+        prov["project-gates"] = "failed"
+    elif project_gates.startswith("red") or "red:" in project_gates or "fail" in project_gates:
+        prov["project-gates"] = "failed"
+    elif "green" not in project_gates and "pass" not in project_gates:
+        prov["project-gates"] = "failed"
+    elif "substitute" in project_gates.lower():
+        prov["project-gates"] = "substituted"
+    else:
+        prov["project-gates"] = "real"
+
+    # 6. ci
+    ci = fields.get("ci", "")
+    if not ci:
+        prov["ci"] = "not-applicable"
+    elif "fail" in ci.lower() or "failing" in ci.upper():
+        prov["ci"] = "failed"
+    elif "pending" in ci.lower():
+        prov["ci"] = "failed"
+    elif ci == "no checks configured" or "no checks" in ci.lower():
+        prov["ci"] = "not-applicable"
+    elif "substitute" in ci.lower():
+        prov["ci"] = "substituted"
+    else:
+        prov["ci"] = "real"
+
+    # 7. threads
+    threads = fields.get("threads", "")
+    if not threads:
+        prov["threads"] = "failed"
+    elif not threads.startswith("0 unresolved"):
+        prov["threads"] = "failed"
+    elif "substitute" in threads.lower():
+        prov["threads"] = "substituted"
+    else:
+        prov["threads"] = "real"
+
+    # 8. risk-paths
+    risk_paths = fields.get("risk-paths", "")
+    if not risk_paths:
+        prov["risk-paths"] = "failed"
+    elif risk_paths != "none":
+        prov["risk-paths"] = "failed"
+    elif "substitute" in risk_paths.lower():
+        prov["risk-paths"] = "substituted"
+    else:
+        prov["risk-paths"] = "real"
+
+    return prov
+
+
 def classify(
     gate: str,
     head_sha: str = "",
@@ -243,6 +343,7 @@ def classify(
         # gate.yaml) does not have to parse the body a second time.
         "gate": gate or "",
         "fields": {},
+        "provenance": {},
         "outcome": "",
         "reason": "",
         "ci_sha": "",
@@ -256,6 +357,7 @@ def classify(
         return result
 
     result["fields"] = gate_fields(gate)
+    result["provenance"] = infer_provenance(result["fields"])
     verdict = gate_field(gate, "verdict")
     reason = gate_field(gate, "reason")
 

@@ -1032,14 +1032,22 @@ run_issue() { # $1 = issue number
   [ -n "${prurl:-}" ] && say "  pr       $prurl"
 
   # --- record ---
+  local provenance
+  provenance="{}"
+  if [ -n "${GATE_JSON:-}" ]; then
+    provenance="$(printf '%s' "$GATE_JSON" | jq -c '.provenance // {}' 2>/dev/null || echo '{}')"
+  fi
+  [ -n "${provenance:-}" ] || provenance='{}'
+
   jq -n -c \
     --arg issue "$n" --arg repo "$REPO" --arg ts "$ts" \
     --arg outcome "$outcome" --arg reason "$reason" \
     --arg pr "${prurl:-}" --arg session "$session" \
     --arg rundir "$rundir" --argjson rc "$rc" --argjson cost "${cost:-0}" \
     --arg board_column "${pre_run_col:-}" \
+    --argjson provenance "$provenance" \
     '{issue:($issue|tonumber), repo:$repo, started:$ts, exit:$rc, cost_usd:$cost,
-      session_id:$session, outcome:$outcome, reason:$reason, pr:$pr, run_dir:$rundir, board_column:$board_column}' \
+      session_id:$session, outcome:$outcome, reason:$reason, pr:$pr, run_dir:$rundir, board_column:$board_column, provenance:$provenance}' \
     >> "$RUNS_LOG"
 
   apply_park_state "$n" "$outcome" "$ts" "$reason"
@@ -1242,11 +1250,18 @@ if [ -n "$CLASSIFY_ONLY" ]; then
   say "  reason   $reason"
   [ -n "$prurl" ] && say "  pr       $prurl"
 
+  provenance="{}"
+  if [ -n "${GATE_JSON:-}" ]; then
+    provenance="$(printf '%s' "$GATE_JSON" | jq -c '.provenance // {}' 2>/dev/null || echo '{}')"
+  fi
+  [ -n "${provenance:-}" ] || provenance='{}'
+
   _jq_args=(
     --arg issue "$n" --arg repo "$REPO" --arg ts "$ts"
     --arg outcome "$outcome" --arg reason "$reason"
     --arg pr "$prurl" --arg session "$session"
     --arg rundir "$rundir" --argjson rc "$rc" --argjson cost "${cost:-0}"
+    --argjson provenance "$provenance"
   )
   if [ -n "$RESUMED_FROM" ]; then
     _jq_args+=(--arg resumed_from "$RESUMED_FROM")
@@ -1258,8 +1273,8 @@ if [ -n "$CLASSIFY_ONLY" ]; then
   jq -n -c \
     "${_jq_args[@]}" \
     "{issue:(\$issue|tonumber), repo:\$repo, started:\$ts, exit:\$rc, cost_usd:\$cost,
-      session_id:\$session, outcome:\$outcome, reason:\$reason, pr:\$pr, run_dir:\$rundir,
-      recovered:true} + $_extra" \
+       session_id:\$session, outcome:\$outcome, reason:\$reason, pr:\$pr, run_dir:\$rundir,
+       recovered:true, provenance:\$provenance} + $_extra" \
     >> "$RUNS_LOG"
 
   if [ -n "$prline" ]; then

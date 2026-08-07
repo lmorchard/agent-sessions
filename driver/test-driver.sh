@@ -1897,6 +1897,73 @@ esac
 
 rm -rf "$S87_TMP"
 
+# --- #83: Record gate row provenance in runs.jsonl ---
+echo "#83: record gate row provenance in runs.jsonl"
+
+S83_TMP="$(mktemp -d)"
+S83_BIN="$S83_TMP/bin"; mkdir -p "$S83_BIN"
+
+# Stub GH
+printf '%s' '[{"number":42,"title":"stub pr","body":"Closes #83","headRefName":"fix/83-stub",
+  "url":"https://github.com/stub/repo/pull/42","closingIssuesReferences":[{"number":83}]}]' \
+  > "$S83_BIN/pr-list.json"
+
+# Write a PR body with a gate block having some substitutions (e.g. threads via substitute)
+cat > "$S83_BIN/pr-body.txt" <<'EOF'
+## Merge gate
+
+<!-- agent-session:gate -->
+```yaml
+tier: auto-ok
+checks: C1 pass
+guards: none
+tamper: clean
+project-gates: make check green
+threads: 0 unresolved -- via substitute
+risk-paths: none
+ci: 2/2 pass @ abc1234
+verdict: eligible-for-auto-merge
+```
+EOF
+
+cat > "$S83_BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "pr list"*)            cat "$STUB_DIR/pr-list.json" ;;
+  *"--json headRefOid"*) printf '%s\n' "abc123sha" ;;
+  *"--json body"*)       cat "$STUB_DIR/pr-body.txt" ;;
+  *)                     exit 0 ;;
+esac
+STUB
+chmod +x "$S83_BIN/gh"
+
+S83_SD="$S83_TMP/state"
+
+# Run --classify-only to classify the PR and append a row to runs.jsonl
+S83_OUT="$(STUB_DIR="$S83_BIN" PATH="$S83_BIN:$PATH" \
+             bash "$DRIVER" --repo stub/repo --classify-only 83 --state-dir "$S83_SD" 2>&1)"
+
+S83_ROW="$(tail -1 "$S83_SD/runs.jsonl" 2>/dev/null || true)"
+
+if [ -n "$S83_ROW" ]; then
+  # Parse the recorded provenance
+  S83_PROV_THREADS="$(printf '%s' "$S83_ROW" | jq -r '.provenance.threads')"
+  S83_PROV_CI="$(printf '%s' "$S83_ROW" | jq -r '.provenance.ci')"
+  S83_PROV_GUARDS="$(printf '%s' "$S83_ROW" | jq -r '.provenance.guards')"
+  
+  if [ "$S83_PROV_THREADS" = "substituted" ] && [ "$S83_PROV_CI" = "real" ] && [ "$S83_PROV_GUARDS" = "not-applicable" ]; then
+    ok "#83 C1: recorded gate row provenance in runs.jsonl is correct"
+  else
+    bad "#83 C1: recorded gate row provenance in runs.jsonl is correct" \
+        "threads=substituted, ci=real, guards=not-applicable" \
+        "threads=$S83_PROV_THREADS, ci=$S83_PROV_CI, guards=$S83_PROV_GUARDS"
+  fi
+else
+  bad "#83 C1: recorded gate row provenance in runs.jsonl" "json row" "empty"
+fi
+
+rm -rf "$S83_TMP"
+
 # --- syntax ----------------------------------------------------------------
 
 echo "syntax"
