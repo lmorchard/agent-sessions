@@ -80,7 +80,7 @@ BACKEND=""
 # classifies read-only -- measured, see spec.md "Permissions". The allowlist is
 # wide because `express` legitimately builds, writes code, dispatches subagents
 # and opens a PR. What it buys is a floor, not a sandbox.
-ALLOWED_TOOLS='Read,Write,Edit,Glob,Grep,Task,TodoWrite,BashOutput,KillShell,NotebookEdit,Bash(git:*),Bash(gh:*),Bash(make:*),Bash(uv:*),Bash(uvx:*),Bash(python:*),Bash(python3:*),Bash(pytest:*),Bash(ruff:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(mkdir:*),Bash(cp:*),Bash(mv:*),Bash(touch:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(rg:*),Bash(jq:*),Bash(sed:*),Bash(awk:*),Bash(wc:*),Bash(head:*),Bash(tail:*),Bash(sort:*),Bash(uniq:*),Bash(cut:*),Bash(find:*),Bash(diff:*),Bash(echo:*),Bash(printf:*),Bash(pwd:*),Bash(cd:*),Bash(test:*),Bash(true:*),Bash(date:*),Bash(basename:*),Bash(dirname:*),Bash(realpath:*)'
+ALLOWED_TOOLS='Read,Write,Edit,Glob,Grep,Task,TodoWrite,BashOutput,KillShell,NotebookEdit,Bash(*)'
 
 # Deny rules take precedence over allow rules and match multi-word command
 # prefixes -- measured. This is the mechanism behind "nothing merges"; the
