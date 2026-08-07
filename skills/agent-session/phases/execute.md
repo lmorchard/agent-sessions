@@ -38,7 +38,7 @@ fix-up.
 
 **TDD Inner Loop (Fail-Implement-Pass):** For each micro-task, enforce strict fail-implement-pass TDD inner loop discipline. Before writing implementation code, run the failing check and observe failure. Then implement, run the check again to confirm pass, and tick the micro-task checkbox.
 
-**Parallel Swarm Orchestration:** For independent micro-tasks defined in parallel groups, dispatch parallel implementer subagents concurrently and gather their results deterministically via deterministic orchestration without an LLM Commander.
+**Parallel Swarm & Tiered Model Routing:** For independent micro-tasks defined in parallel groups, dispatch parallel `implementer` subagents concurrently. When `LOW_TIER_MODEL` is configured in the environment, configure or instruct the implementer subagents to use the low-tier model for atomic implementation micro-tasks while reserving the high-tier model for intake, planning, and verification. Gather results deterministically without an LLM Commander.
 
 1. **Load and review.** Read `plan.md`, `checks.md`, and `spec.md`. Confirm the freeze commit
    exists (`checks.md`'s `Frozen at` sha resolves) — if it doesn't, Phase 0 never happened;
