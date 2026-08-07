@@ -6,25 +6,94 @@ import pytest
 from validate_tdd import validate_stream
 
 
-def test_validate_tdd_basic(tmp_path: Path) -> None:
+def test_validate_tdd_success(tmp_path: Path) -> None:
     stream = tmp_path / "stream.jsonl"
     event1 = {
         "type": "message",
         "message": {
             "role": "assistant",
             "content": [
-                {"type": "tool_use", "name": "Bash", "input": {"command": "pytest"}}
+                {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "pytest"}}
             ],
         },
     }
     event2 = {
         "type": "message",
         "message": {
-            "role": "assistant",
+            "role": "user",
             "content": [
-                {"type": "tool_use", "name": "Edit", "input": {"file_path": "foo.py"}}
+                {"type": "tool_result", "tool_use_id": "t1", "is_error": True, "content": "1 failed"}
             ],
         },
     }
-    stream.write_text(json.dumps(event1) + "\n" + json.dumps(event2) + "\n", encoding="utf-8")
+    event3 = {
+        "type": "message",
+        "message": {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "t2", "name": "Edit", "input": {"file_path": "foo.py"}}
+            ],
+        },
+    }
+    stream.write_text(
+        json.dumps(event1) + "\n" + json.dumps(event2) + "\n" + json.dumps(event3) + "\n",
+        encoding="utf-8",
+    )
     assert validate_stream(stream) is True
+
+
+def test_validate_tdd_fails_no_failing_check(tmp_path: Path) -> None:
+    stream = tmp_path / "stream.jsonl"
+    event1 = {
+        "type": "message",
+        "message": {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "t1", "name": "Edit", "input": {"file_path": "foo.py"}}
+            ],
+        },
+    }
+    stream.write_text(json.dumps(event1) + "\n", encoding="utf-8")
+    assert validate_stream(stream) is False
+
+
+def test_validate_tdd_fails_bash_passed(tmp_path: Path) -> None:
+    stream = tmp_path / "stream.jsonl"
+    event1 = {
+        "type": "message",
+        "message": {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "pytest"}}
+            ],
+        },
+    }
+    event2 = {
+        "type": "message",
+        "message": {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "is_error": False, "content": "1 passed"}
+            ],
+        },
+    }
+    event3 = {
+        "type": "message",
+        "message": {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "t2", "name": "Edit", "input": {"file_path": "foo.py"}}
+            ],
+        },
+    }
+    stream.write_text(
+        json.dumps(event1) + "\n" + json.dumps(event2) + "\n" + json.dumps(event3) + "\n",
+        encoding="utf-8",
+    )
+    assert validate_stream(stream) is False
+
+
+def test_validate_tdd_nonexistent_stream(tmp_path: Path) -> None:
+    stream = tmp_path / "nonexistent.jsonl"
+    assert validate_stream(stream) is True
+
