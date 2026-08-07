@@ -42,7 +42,7 @@ and a drifted worktree path means a run that tests the wrong branch.
 5. **Branch.** Derive the branch name from the issue (e.g. `fix/129-empty-state`). Strip
    prefixes like `feature/`, `fix/`, `chore/` when deriving the session `{slug}`.
 
-6. **Fetch and rebase from `origin/main`** before creating the branch the worktree tracks.
+6. **Fetch `origin/main`** without modifying or rebasing the current checkout.
 
 7. **Set up an isolated worktree.** Prefer `superpowers:using-git-worktrees` if available —
    it handles directory priority, gitignore verification, dependency install detection, and a
@@ -52,7 +52,7 @@ and a drifted worktree path means a run that tests the wrong branch.
       back to `.worktrees/` with no precedent.
    b. Confirm it's ignored. If it isn't, put the `.gitignore` line on the feature branch or pick an
       already-ignored location — don't commit setup changes to the default branch.
-   c. `git worktree add {location}/{branch-name} -b {branch-name}`
+   c. `git worktree add {location}/{branch-name} -b {branch-name} origin/main`
    d. `cd` into the worktree.
    e. Run project setup auto-detected from project files (venv / `npm install` / `go mod
       download` / `cargo build`).
