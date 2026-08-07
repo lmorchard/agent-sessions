@@ -72,3 +72,52 @@ def test_partial_trailing_line_handling(tmp_path: Path):
     raw.write_text('{"type": "init"}\n{"type": "result", "subtype": "success", "is_error": false}\n{"partial": "trun', encoding="utf-8")
     assert agent_runner.stream_has_events(raw) is True
     assert agent_runner.has_success_result("claude", raw) is True
+
+
+def test_run_agent_model_tiers(tmp_path: Path, monkeypatch):
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("Hello", encoding="utf-8")
+    raw = tmp_path / "stream.jsonl"
+    stderr = tmp_path / "stderr.txt"
+
+    captured_cmds = []
+
+    class MockResult:
+        returncode = 0
+
+    def mock_run(cmd, *args, **kwargs):
+        captured_cmds.append(cmd)
+        return MockResult()
+
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    # Test high tier model default
+    agent_runner.run_agent([
+        "--backend", "claude",
+        "--repo-path", str(tmp_path),
+        "--skill-dir", str(tmp_path),
+        "--prompt-file", str(prompt),
+        "--raw-output", str(raw),
+        "--stderr-output", str(stderr),
+        "--high-tier-model", "claude-3-5-sonnet",
+        "--low-tier-model", "claude-3-5-haiku",
+        "--tier", "high"
+    ])
+    assert "--model" in captured_cmds[-1]
+    assert captured_cmds[-1][captured_cmds[-1].index("--model") + 1] == "claude-3-5-sonnet"
+
+    # Test low tier model
+    agent_runner.run_agent([
+        "--backend", "claude",
+        "--repo-path", str(tmp_path),
+        "--skill-dir", str(tmp_path),
+        "--prompt-file", str(prompt),
+        "--raw-output", str(raw),
+        "--stderr-output", str(stderr),
+        "--high-tier-model", "claude-3-5-sonnet",
+        "--low-tier-model", "claude-3-5-haiku",
+        "--tier", "low"
+    ])
+    assert "--model" in captured_cmds[-1]
+    assert captured_cmds[-1][captured_cmds[-1].index("--model") + 1] == "claude-3-5-haiku"
+

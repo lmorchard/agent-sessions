@@ -29,6 +29,7 @@ def run_agent(argv: list[str] | None = None) -> int:
     p.add_argument("--model", default="")
     p.add_argument("--high-tier-model", default="")
     p.add_argument("--low-tier-model", default="")
+    p.add_argument("--tier", choices=["high", "low"], default="high")
     p.add_argument("--allowed-tools", default="")
     p.add_argument("--disallowed-tools", default="")
     p.add_argument("--settings", default="")
@@ -46,6 +47,19 @@ def run_agent(argv: list[str] | None = None) -> int:
         return 2
 
     prompt_text = prompt_file.read_text(encoding="utf-8")
+
+    target_model = args.model
+    if not target_model:
+        if args.tier == "low" and args.low_tier_model:
+            target_model = args.low_tier_model
+        elif args.tier == "high" and args.high_tier_model:
+            target_model = args.high_tier_model
+        elif args.high_tier_model:
+            target_model = args.high_tier_model
+        elif args.low_tier_model:
+            target_model = args.low_tier_model
+        else:
+            target_model = os.environ.get("MODEL", "")
 
     if args.backend == "claude":
         cmd = [
@@ -67,8 +81,8 @@ def run_agent(argv: list[str] | None = None) -> int:
             "--add-dir",
             str(skill_dir),
         ]
-        if args.model:
-            cmd.extend(["--model", args.model])
+        if target_model:
+            cmd.extend(["--model", target_model])
         stdin_data = prompt_text.encode("utf-8")
     elif args.backend == "opencode":
         cmd = [
@@ -81,8 +95,8 @@ def run_agent(argv: list[str] | None = None) -> int:
             "--dir",
             str(repo_path),
         ]
-        if args.model:
-            cmd.extend(["-m", args.model])
+        if target_model:
+            cmd.extend(["-m", target_model])
         stdin_data = None
     else:
         stderr_output.write_text(f"error: unknown backend: {args.backend}\n")
