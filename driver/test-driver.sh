@@ -1850,6 +1850,8 @@ else
   bad "#87 C1 denials.txt contains 3 entries" "3 lines in denials.txt" "$(cat "$S87_RUNDIR/denials.txt" 2>/dev/null || echo missing)"
 fi
 
+rm -rf "$S87_SD"; mkdir -p "$S87_SD"
+
 # Test 2: zero denials -> no DENIALS line, no denials.txt
 cat > "$S87_TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
@@ -1868,6 +1870,8 @@ if ! echo "$S87_OUT_ZERO" | grep -q "DENIALS" && [ ! -f "$S87_RUNDIR_ZERO/denial
 else
   bad "#87 G1 zero denials produce no DENIALS and no denials.txt" "no DENIALS / no denials.txt" "$S87_OUT_ZERO"
 fi
+
+rm -rf "$S87_SD"; mkdir -p "$S87_SD"
 
 # Test 3: path-rule phrasing ("denied by your permission settings") is detected
 cat > "$S87_TMP/bin/claude" <<'STUB'
