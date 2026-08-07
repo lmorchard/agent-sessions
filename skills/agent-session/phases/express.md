@@ -20,6 +20,8 @@ and trusts it — so its first job is to confirm that assumption instead of pape
 - The PR URL and the **gate verdict** + reason — the primary consumable output
 - What was fixed, skipped, deferred, or amended along the way
 
+**Context & Tool Permissions:** Perform setup, planning, file edits, commits, and PR actions directly in the primary writable agent context. Do not delegate file writing or git operations to subagent `Task` calls, as subagent tasks operate in read-only contexts.
+
 ## Phase 0: Preconditions
 
 Fetch the issue. Three checks, in order — each is a stop, not a warning:

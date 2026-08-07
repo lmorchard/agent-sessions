@@ -67,9 +67,10 @@ The deterministic runner (`scripts/run_swarm.py`) concurrently dispatches parall
      anticipate, **surface the mismatch** rather than silently improvising.
    - **Run each check the phase advances, by name, and read its output.** Use the exact command
      from `checks.md` — `pytest tests/test_export.py::test_large_export_is_streamed`, not `make
-     test`. Then run the **guards** from `checks.md` and `make lint` / `make test` / `make check`
-     for regressions. A guard that flips pass→fail is a regression you just caused; fix it before
-     moving on, and never by weakening the guard.
+     test`. Then run the **guards** from `checks.md` and `make lint` / `make typecheck` / `make check`
+     for regressions. Run project linters (`ruff check`, `eslint`, `npm run lint`) and typecheckers
+     (`pyright`, `tsc`) locally before committing to prevent CI lint/type failures. A guard or linter that
+     flips pass→fail is a regression you just caused; fix it before moving on, and never by weakening the guard.
    - Tick `- [ ]` → `- [x]` only after reading the actual output of that specific command.
      Never from an impression that it should pass.
    - **A failing frozen check means the implementation is wrong.** Fix the code. Do not edit,
