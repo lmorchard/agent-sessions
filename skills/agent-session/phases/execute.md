@@ -39,44 +39,20 @@ fix-up.
 **TDD Inner Loop (Fail-Implement-Pass):** For each micro-task, enforce strict fail-implement-pass TDD inner loop discipline. Before writing implementation code, run the failing check and observe failure. Then implement, run the check again to confirm pass, and tick the micro-task checkbox.
 
 **Parallel Swarm & Tiered Model Routing:** For independent micro-tasks defined in parallel groups:
-1. **Generate Prompt Files:** Prior to dispatch, create a dedicated prompt file for each subagent (e.g. `runs/task_1_prompt.txt`). Each prompt must specify:
+1. **Prepare Prompt Files:** Prior to dispatch, write a dedicated prompt file for each subagent (e.g. `runs/task_1_prompt.txt`, `runs/task_2_prompt.txt`). Each prompt specifies:
    - Target file(s) and micro-task description.
    - The exact check/test command to run first to observe failure (TDD inner loop).
    - Frozen check file rules (read-only).
-   - Explicit instructions to report pass/fail against its check.
 
-2. **Dispatch & Track PIDs:** Dispatch parallel `implementer` subagents as background CLI subprocesses via `agent_runner.py` using `--tier low` to enforce low-tier model execution (e.g. Claude 3.5 Haiku) while reserving the high-tier model for intake, planning, and verification. Track PIDs and verify exit statuses deterministically:
+2. **Execute Deterministic Swarm Orchestration:** Invoke `scripts/run_swarm.py` with the task prompt files:
 ```bash
-pids=()
-
-python3 driver/agent_runner.py run \
-  --tier low \
-  --high-tier-model "${HIGH_TIER_MODEL:-}" \
-  --low-tier-model "${LOW_TIER_MODEL:-}" \
-  --repo-path "$PWD" \
-  --skill-dir "$SKILL_DIR" \
-  --prompt-file "runs/task_1_prompt.txt" \
-  --raw-output "runs/task_1_stream.jsonl" \
-  --stderr-output "runs/task_1_stderr.txt" &
-pids+=($!)
-
-python3 driver/agent_runner.py run \
-  --tier low \
-  --high-tier-model "${HIGH_TIER_MODEL:-}" \
-  --low-tier-model "${LOW_TIER_MODEL:-}" \
-  --repo-path "$PWD" \
-  --skill-dir "$SKILL_DIR" \
-  --prompt-file "runs/task_2_prompt.txt" \
-  --raw-output "runs/task_2_stream.jsonl" \
-  --stderr-output "runs/task_2_stderr.txt" &
-pids+=($!)
-
-for pid in "${pids[@]}"; do
-  wait "$pid" || { echo "Subagent process $pid failed"; exit 1; }
-done
+python3 scripts/run_swarm.py runs/task_1_prompt.txt runs/task_2_prompt.txt
 ```
-
-3. **Gather Results Deterministically:** Parse `runs/task_<id>_stream.jsonl` outputs, verify TDD compliance with `python3 scripts/validate_tdd.py runs/task_<id>_stream.jsonl`, and re-run check commands to verify each subagent's result without an LLM Commander. Ensure parallel groups contain strictly independent files or functions to avoid git merge conflicts.
+Or specify a JSON tasks manifest file (`runs/swarm_tasks.json`) if custom task checks or stream outputs are configured:
+```bash
+python3 scripts/run_swarm.py --tasks-file runs/swarm_tasks.json
+```
+The deterministic runner (`scripts/run_swarm.py`) concurrently dispatches parallel `implementer` subagents via `agent_runner.py --tier low` (enforcing low-tier model execution like Claude 3.5 Haiku while reserving the high-tier model for intake, planning, and verification), monitors process PIDs, checks exit codes, validates TDD stream compliance (`scripts/validate_tdd.py`), and reports aggregated pass/fail results without an LLM Commander. Ensure parallel groups contain strictly independent files or functions to avoid git merge conflicts.
 
 1. **Load and review.** Read `plan.md`, `checks.md`, and `spec.md`. Confirm the freeze commit
    exists (`checks.md`'s `Frozen at` sha resolves) — if it doesn't, Phase 0 never happened;
