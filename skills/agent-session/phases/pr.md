@@ -167,6 +167,10 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
     report `threads: no review yet` and set `verdict: pending` — a review that hasn't arrived is not
     a failure and not a pass; it is not yet derivable.
 
+    **Rules on resolving review threads (audited autonomy):**
+    - **For `auto-ok` tier issues:** You may address feedback, reply to comments, push fixes, and resolve your own threads. As long as CI and all project-gates are completely green, the gate trusts the self-resolution.
+    - **For `needs-review` tier issues:** Do NOT resolve review threads yourself (unless a separate "Auditor" subagent is explicitly configured to audit and resolve). Instead, leave them unresolved for the human reviewer to verify and resolve (Human-in-the-loop review). If you resolved any yourself on a `needs-review` issue, they count as unresolved for gate purposes.
+
     **The CI row is a claim about a commit, so derive it LAST — after the final push — and record
     the sha it describes.** Anything that pushes afterwards invalidates it: a force-push to amend
     session docs starts a new check run, and the row you already wrote now describes a commit that
