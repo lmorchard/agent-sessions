@@ -21,7 +21,7 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
 
 ## Process
 
-0. **Ceremony Threshold:** If this is a small/tactical task, there won't be a `checks.md` or a freeze commit. Skip steps related to the tamper diff and frozen manifest. Do the self-review, run tests (`make check`), push, and open the PR. Write a simplified gate block that relies on local tests and CI. Only proceed with the full tamper-diff and frozen-check rules if those artifacts exist.
+0. **Ceremony Threshold:** If this is a small/tactical task, there won't be a `checks.md` or a freeze commit. Skip steps related to the tamper diff and frozen manifest. Do the self-review, run tests (`make check`), push, and open the PR. Write a gate block formatted as a ```yaml code block following `references/pr-body-template.md` with all required fields (`tier`, `checks`, `guards`, `tamper`, `freeze`, `project-gates`, `ci`, `threads`, `risk-paths`, `verdict`, `reason`). Use `freeze: <commit-sha>` (or `freeze: none` if no freeze commit exists) and `tamper: clean`. Only proceed with the full tamper-diff and frozen-check rules if those artifacts exist.
 
 1. **Rebase onto `origin/main` first.** `git fetch origin && git rebase origin/main`. Sessions
    run long and main advances; pre-rebase, `git diff origin/main..HEAD` can show dozens of

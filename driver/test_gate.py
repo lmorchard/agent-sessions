@@ -72,6 +72,14 @@ def test_extract_gate_stops_at_closing_fence():
     assert "trailing prose" not in gate.extract_gate(body_with("2/2 pass"))
 
 
+def test_extract_gate_handles_unfenced_block():
+    unfenced = "## Merge gate\n\n<!-- agent-session:gate -->\nverdict: eligible-for-auto-merge\nreason: All tests passed\n\n## References\n"
+    got = gate.extract_gate(unfenced)
+    assert "verdict: eligible-for-auto-merge" in got
+    assert "reason: All tests passed" in got
+    assert "## References" not in got
+
+
 def test_gate_field_missing_is_empty_string():
     assert gate.gate_field(gate.extract_gate(body_with("2/2 pass")), "nope") == ""
 
