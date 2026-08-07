@@ -355,8 +355,7 @@ nearly destroyed that independence.
 **Tamper rules must be invariants over what a check *asserts*, never whitelists of allowed line
 forms.** A rule that fires on inert changes (comments, appends) produces false positives, and
 **false positives train the operator to wave the mechanism through.** This is also why
-`checks.md` can be inside its own baseline: no CRITERION/CHECK/guard line may differ, appends are
-inert.
+`checks.md` can be inside its own baseline: per `skills/agent-session/references/frozen-checks.md`, no CRITERION line, CHECK command, or guard command may differ, appends are inert.
 
 **At freeze, lock anything red whose green condition is an exit status.** Earned on #62, 2026-08-03,
 and the sharpest single move either run made. The check-reviewer found a *third* red test outside the
