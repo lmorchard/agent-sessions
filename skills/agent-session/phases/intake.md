@@ -27,18 +27,11 @@ exception, and needs no rule here: `acceptance-criteria.md`'s trigger 1 already 
 1. **Read the source thoroughly** (prompt or issue body).
 
 2. **Codebase research substep** (skip only for changes so localized context is obvious).
-   Dispatch a documentarian subagent (`Explore`/`general-purpose`) framed per
-   `references/documentarian-prompt.md` (describe what exists, cite `file:line`, answer only
-   what's asked). Ask 3–5 *neutral* questions about how the relevant area works today —
-   **including, for each thing the requirement will need to check, whether that oracle
-   exists today** (the metric / test / harness / way to reproduce the scenario). This
-   grounds step 4's criteria in reality and its tier in what's actually checkable, and keeps
-   the token-heavy reading in the subagent's context, not here.
+   **Dispatch 3–5 parallel, read-only documentarian subagents** (`Explore`/`general-purpose` in parallel) framed per `references/documentarian-prompt.md` (describe what exists, cite `file:line`, answer only what's asked). Ask 3–5 *neutral* questions about how the relevant area works today — **including, for each thing the requirement will need to check, whether that oracle exists today** (the metric / test / harness / way to reproduce the scenario). This grounds step 4's criteria in reality and its tier in what's actually checkable, and keeps the token-heavy reading in the subagents' contexts, not here.
 
-3. **Interview — clarify / probe / finish, one question at a time.** Ground every question
-   in the research. **Propose your best answer with its trade-off; ask to confirm or
-   adjust** — never open-ended when you have a recommendation. Multiple-choice preferred.
-   Keep proportional to complexity (2–4 questions for small issues).
+   **Synthesize the findings:** Before starting the interview, parse and merge the results from the parallel subagents. Propose a "Discovery Report" mapping out found oracles/files, and proactively propose 3–5 concrete, runnable checks directly to the user to reduce their cognitive load.
+
+3. **Interview — clarify / probe / finish, one question at a time.** Ground every question in the synthesized research and the proposed checks. **Propose your best answer with its trade-off; ask to confirm or adjust** — never open-ended when you have a recommendation. Multiple-choice preferred. Keep proportional to complexity (2–4 questions for small issues).
 
 4. **Reduce each requirement to a verifiable criterion** per `acceptance-criteria.md`. This
    is the load-bearing step and the interview's real job: for each thing the user wants,
