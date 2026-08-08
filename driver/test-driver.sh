@@ -839,7 +839,7 @@ echo "issue query: the park filter's field must be requested, not assumed"
 Q_TMP="$(mktemp -d)"
 mkdir -p "$Q_TMP/bin"
 cat > "$Q_TMP/issues.json" <<'JSON'
-[{"number":7,"title":"labeled","body":"## Tier: `auto-ok`\n","labels":[{"name":"agent-session:spec"},{"name":"driver-parked"}]}]
+[{"number":7,"title":"labeled","body":"## Tier: `auto-ok`\n","labels":[{"name":"agent-session:spec"},{"name":"agent-session:needs-human"}]}]
 JSON
 cat > "$Q_TMP/bin/gh" <<'STUB'
 #!/usr/bin/env bash

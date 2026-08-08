@@ -39,8 +39,8 @@ gh label create "agent-session:spec" \
   --description "Issue is fully specified and ready for execution" \
   2>/dev/null || echo "    (Label already exists)"
 
-echo "--> Creating 'driver-parked' label..."
-gh label create "driver-parked" \
+echo "--> Creating 'agent-session:needs-human' label..."
+gh label create "agent-session:needs-human" \
   --repo "$REPO" \
   --color FBCA04 \
   --description "The agent-session driver parked this issue for human ratification" \

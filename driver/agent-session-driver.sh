@@ -39,7 +39,7 @@ fi
 # everything. A label is durable, scoped to the target repo -- parked.jsonl records
 # no repo at all -- and visible on the issue, where a human decides whether to
 # --retry. See issue #5, decision D2.
-PARK_LABEL='driver-parked'
+PARK_LABEL='agent-session:needs-human'
 
 # --- defaults --------------------------------------------------------------
 

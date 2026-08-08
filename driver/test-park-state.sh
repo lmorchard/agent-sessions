@@ -26,7 +26,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DRIVER="$HERE/agent-session-driver.sh"
-PARK_LABEL="driver-parked"
+PARK_LABEL="agent-session:needs-human"
 REPO="stub/repo"
 ISSUE=7
 
@@ -43,7 +43,7 @@ has()  { # $1 = label, $2 = needle, $3 = haystack
 # number independently over the whole concatenated argv log, and `$PARK_LABEL` also
 # appears in the `gh label create` line -- so "with the park label" was satisfiable by
 # the create call, and `gh issue edit 7 --add-label wrong-label` plus
-# `gh label create driver-parked` would have passed all three. Adjacent evidence, in
+# `gh label create agent-session:needs-human` would have passed all three. Adjacent evidence, in
 # the check meant to catch it. Order-tolerant on purpose: pinning flag order would
 # make the check brittle, and a brittle check trains the operator to wave it through.
 has_call() { # $1 = label, $2 = log file, $3 = needle A, $4 = needle B
