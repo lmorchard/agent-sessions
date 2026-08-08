@@ -76,6 +76,7 @@ exception, and needs no rule here: `acceptance-criteria.md`'s trigger 1 already 
    doing) and get confirmation before filing.
 
 10. **File or update the issue.**
+   - **Ensure the label exists:** run `gh label create "agent-session:spec" --color 0E8A16` (ignore the error if it already exists).
    - *New:* `gh issue create` with body = spec; title from
      the Goal (<70 chars); apply the `agent-session:spec` label (`--add-label`); add to the board's Ready
      column if configured.

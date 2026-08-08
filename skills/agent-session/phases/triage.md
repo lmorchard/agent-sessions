@@ -65,8 +65,9 @@ criteria), and you do the part that does (ratify). See
    on the open questions the subagent flagged. Where a criterion won't reduce to a check,
    apply the escalation ladder — it lands the issue in `needs-review`.
 
-5. **Write back (augment in place).** For each ratified issue, run `intake`'s file-or-update step,
-   *existing-issue* path: `gh issue edit <n>` — add the `agent-session:spec` label (`--add-label`), add the verifiable
+5. **Write back (augment in place).** For each ratified issue, run `intake`'s file-or-update step.
+   First ensure the label exists (`gh label create "agent-session:spec" --color 0E8A16 || true`).
+   Then the *existing-issue* path: `gh issue edit <n>` — add the `agent-session:spec` label (`--add-label`), add the verifiable
    criteria + tier sections, **preserving the original author's
    text**. Update the board if configured. Where the ratify pass settled a decision, carry
    `intake`'s Design-decisions step with it — the body, not a comment; comments are invisible
