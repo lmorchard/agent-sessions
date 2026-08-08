@@ -63,11 +63,9 @@ line at each transition:
 | 2b. Plan self-review | `plan.md`'s self-review step | Replaces the human plan review: fix and continue |
 | 2c. Execute | `phases/execute.md` | Per-phase manual pauses deferred to 2f; per-criterion checks are not deferrable |
 | 2d. Independent verification | `execute.md`'s verifier + tamper diff | Never skipped, never self-reported |
-| 2e. Rebase + re-verify | `pr.md`'s **Rebase and re-verify** | Must precede 2f — a pre-rebase diff hides your changes among upstream's and corrupts the self-review diff |
-| 2f. Branch self-review | `pr.md`'s **Self-review** section | Catches what the bot reviewer misses |
-| 2g. Tamper check, push, open PR | `pr.md`'s **Push and open** | Branch pushed as-is: the freeze commit ships with it, so the tamper diff stays re-runnable. Board hook runs here |
-| 2h. Review cycle | `pr.md`'s **Review cycle** | Always run; don't wait for confirmation |
-| 2i. Merge gate | `pr.md`'s **Merge gate** | Report the verdict and stop |
+| 2e. Rebase + re-verify | `open_pr.md`'s **Rebase and re-verify** | Must precede 2f — a pre-rebase diff hides your changes among upstream's and corrupts the self-review diff |
+| 2f. Branch self-review | `open_pr.md`'s **Self-review** section | Catches what the bot reviewer misses |
+| 2g. Tamper check, push, open PR | `open_pr.md`'s **Push and open** | Branch pushed as-is: the freeze commit ships with it, so the tamper diff stays re-runnable. Board hook runs here |
 
 ## What the tier changes
 

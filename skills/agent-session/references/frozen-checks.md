@@ -127,7 +127,7 @@ Phase 0 of every plan, no implementation in it:
 
    Re-anchor the sha if the branch is ever rebased. **The freeze commit must remain an ancestor of
    the pushed head** — nothing in `pr` may collapse it away, because a baseline absent from `origin`
-   turns the tamper diff into a self-report. See `phases/pr.md`.
+   turns the tamper diff into a self-report. See `phases/grade_gate.md`.
 
 A **criterion's** check that *passes* at freeze means the behavior already exists — surface it,
 don't proceed. Either the criterion is already satisfied (the issue may be stale), the check
@@ -303,7 +303,7 @@ check doing its job. Only a check that fails to test its own criterion qualifies
 
 ## The verification gate
 
-This is the *verification* half only. `phases/pr.md` owns the **merge** gate, which adds tier,
+This is the *verification* half only. `phases/grade_gate.md` owns the **merge** gate, which adds tier,
 unresolved review threads, and risk-gated paths on top of everything here — don't read this list
 as complete for merge purposes.
 
