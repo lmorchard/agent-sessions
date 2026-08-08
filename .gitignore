@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 node_modules/
 .driver-state/
+.env
 
 # The driver's express runs create worktrees here. Committing one embeds a git repo
 # inside this one -- which a blanket `git add -A` will do silently. PR #10 adds this

@@ -22,6 +22,14 @@
 
 set -euo pipefail
 
+# Load environment variables from .env if present.
+# This keeps secrets like GITHUB_TOKEN out of shell history and process lists.
+if [[ -f ".env" ]]; then
+  set -a
+  source .env
+  set +a
+fi
+
 MARKER='<!-- agent-session:spec -->'
 GATE_MARKER='<!-- agent-session:gate -->'
 
