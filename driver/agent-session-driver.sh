@@ -43,6 +43,7 @@ SKILL_DIR=""
 REPO_PATH=""
 ISSUE=""
 MAX_ISSUES=1
+MAX_PHASE_ATTEMPTS=3
 MAX_BUDGET=10
 RUN_TIMEOUT=5400
 # Empty means "not given", and the default is computed from --repo further down --
@@ -90,6 +91,37 @@ ALLOWED_TOOLS='Read,Write,Edit,Glob,Grep,Task,TodoWrite,BashOutput,KillShell,Not
 DENIED_TOOLS='Bash(gh pr merge:*),Bash(gh pr merge *),Bash(git push --force:*),Bash(gh repo delete:*)'
 
 # --- plumbing --------------------------------------------------------------
+
+get_attempts() {
+  local issue="$1"
+  local phase="$2"
+  local attempts_file="$STATE_DIR/attempts.tsv"
+  if [ -f "$attempts_file" ]; then
+    local c=$(awk -F '\t' -v key="$issue:$phase" '$1 == key {print $2; exit}' "$attempts_file")
+    echo "${c:-0}"
+  else
+    echo "0"
+  fi
+}
+
+increment_attempts() {
+  local issue="$1"
+  local phase="$2"
+  local attempts_file="$STATE_DIR/attempts.tsv"
+  local count=$(get_attempts "$issue" "$phase")
+  count=$((count + 1))
+  if [ -f "$attempts_file" ]; then
+    awk -F '\t' -v key="$issue:$phase" -v count="$count" '
+      BEGIN { found=0 }
+      $1 == key { print $1 "\t" count; found=1; next }
+      { print $0 }
+      END { if (!found) print key "\t" count }
+    ' "$attempts_file" > "$attempts_file.tmp"
+    mv "$attempts_file.tmp" "$attempts_file"
+  else
+    printf '%s\t%s\n' "$issue:$phase" "$count" > "$attempts_file"
+  fi
+}
 
 log()  { printf '%s  %s\n' "$(date -u +%H:%M:%SZ)" "$*" >&2; }
 say()  { printf '%s\n' "$*"; }
@@ -634,11 +666,45 @@ select_issues() {
     elif [ "$tier" = "conflict" ];     then reason="tier: CONFLICT -- body names both tiers on Tier heading lines; surfacing rather than picking"
     elif [ "$tier" = "missing" ];      then reason="tier: no '## Tier:' line in body"
     elif [ "$tier" = "unparsed" ];     then reason="tier: '## Tier:' line present but names neither tier"
-    elif [ -n "$prline" ];             then reason="already has an open PR: $(printf '%s' "$prline" | cut -f2)"
     elif printf '%s\n' "$parked" | grep -qx "$n" && [ "$RETRY" != "$n" ]; then
       reason="parked: $(park_reason "$n")"
     fi
+    phase="execute"
+    if [ -z "$reason" ] && [ -n "$prline" ]; then
+      prnum="$(printf '%s' "$prline" | cut -f1)"
+      owner_repo="${REPO//\// }"
+      owner=$(echo $owner_repo | awk '{print $1}')
+      repo_name=$(echo $owner_repo | awk '{print $2}')
+      
+      threads_json=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewThreads(first:100){nodes{isResolved}}}}}' -F owner="$owner" -F repo="$repo_name" -F pr="$prnum" 2>/dev/null || echo "{}")
+      unresolved=$(printf '%s' "$threads_json" | jq '[.data.repository.pullRequest.reviewThreads.nodes[]?|select(.isResolved==false)]|length' 2>/dev/null || echo "0")
+      if [ "$unresolved" -gt 0 ]; then
+        phase="address_comments"
+      else
+        local checks_out failed pending
+        if checks_out=$(gh pr checks "$prnum" --repo "$REPO" --json name,bucket 2>&1); then
+          failed=$(printf '%s' "$checks_out" | jq '[.[]|select(.bucket!="pass" and .bucket!="skipping" and .bucket!="pending")]|length' 2>/dev/null || echo "0")
+          pending=$(printf '%s' "$checks_out" | jq '[.[]|select(.bucket=="pending")]|length' 2>/dev/null || echo "0")
+          if [ "$failed" -gt 0 ]; then
+            phase="fix_ci"
+          elif [ "$pending" -gt 0 ]; then
+            reason="PR #$prnum CI is still pending; waiting..."
+          else
+            phase="grade_gate"
+          fi
+        else
+          phase="grade_gate"
+        fi
+      fi
+    fi
 
+    if [ -z "$reason" ]; then
+      local attempts=$(get_attempts "$n" "$phase")
+      if [ "$attempts" -ge "$MAX_PHASE_ATTEMPTS" ]; then
+        reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
+        apply_park_state "$n" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
+      fi
+    fi
     if [ -n "$reason" ]; then
       say "  SKIP    #$n  $reason"
       say "                ${title:0:70}"
@@ -656,7 +722,7 @@ select_issues() {
         say "                note: PR #$(printf '%s' "$mention" | cut -f1) names #$n but declares no" \
             "closing link -- advisory, not a gate"
       fi
-      ELIGIBLE="$ELIGIBLE $n"
+      ELIGIBLE="$ELIGIBLE $n:$phase"
     fi
   done <<EOF
 $candidates
@@ -773,11 +839,16 @@ stream_has_events() { # $1 = stream.jsonl path
 
 # --- stage: invoke ---------------------------------------------------------
 
-build_prompt() { # $1 = issue url
+build_prompt() { # $1 = issue url, $2 = phase
+  local phase="$2"
+  local phase_file="phases/express.md"
+  if [ "$phase" != "execute" ]; then
+    phase_file="phases/$phase.md"
+  fi
   cat <<EOF
 You are running unattended, invoked by the agent-session board-driver.
 
-Read $SKILL_DIR/SKILL.md, then read $SKILL_DIR/phases/express.md and follow it
+Read $SKILL_DIR/SKILL.md, then read $SKILL_DIR/$phase_file and follow it
 exactly for this issue:
 
   $1
@@ -788,7 +859,7 @@ you must read them from there by absolute path.
 Stop at the merge gate and report the verdict. Do not merge the PR and do not enable
 auto-merge.
 
-There is no human watching this run. If express directs you to stop and surface
+There is no human watching this run. If the phase directs you to stop and surface
 something, stop and state plainly what needs a decision and why. Do not substitute
 your own judgment for the decision just because nobody is here to answer: a parked
 issue is a normal, expected outcome for this driver, and an unattended guess is not.
@@ -796,7 +867,8 @@ EOF
 }
 
 run_issue() { # $1 = issue number
-  local n="$1" url ts rundir raw prompt rc=0
+  increment_attempts "$1" "${2:-execute}"
+  local n="$1" phase="${2:-execute}" url ts rundir raw prompt rc=0
   local pre_run_col=""
   if [ -f "$STATE_DIR/columns.tsv" ]; then
     pre_run_col="$(awk -F '\t' -v n="$n" '$1 == n {print $2; exit}' "$STATE_DIR/columns.tsv")"
@@ -809,7 +881,7 @@ run_issue() { # $1 = issue number
   rundir="$STATE_DIR/runs/$n-$ts"
   mkdir -p "$rundir"
   raw="$rundir/stream.jsonl"
-  prompt="$(build_prompt "$url")"
+  prompt="$(build_prompt "$url" "$phase")"
   printf '%s\n' "$prompt" > "$rundir/prompt.txt"
 
   say ""
@@ -992,7 +1064,7 @@ run_issue() { # $1 = issue number
     # Split across two statements rather than nested in one `$( )`: command
     # substitution discards the inner exit status, which is how the failure went
     # unnoticed here in the first place. See issue #39.
-    local prs_json pr_query_failed=0
+    prs_json pr_query_failed=0
     prs_json="$("$PYTHON_BIN" "$GH_QUERY_PY" fetch-open-prs --repo "$REPO")" || pr_query_failed=1
     prline=""
     if [ "$pr_query_failed" -eq 0 ]; then
@@ -1318,7 +1390,43 @@ fi
 
 if [ -n "$ISSUE" ]; then
   say "== select (single issue: #$ISSUE) =="
-  ELIGIBLE="$ISSUE"
+  phase="execute"
+  if prs="$("$PYTHON_BIN" "$GH_QUERY_PY" fetch-open-prs --repo "$REPO")"; then
+    prline="$(printf '%s' "$prs" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-for-issue "$ISSUE")"
+    if [ -n "$prline" ]; then
+      prnum="$(printf '%s' "$prline" | cut -f1)"
+      owner_repo="${REPO//\// }"
+      owner=$(echo $owner_repo | awk '{print $1}')
+      repo_name=$(echo $owner_repo | awk '{print $2}')
+      
+      threads_json=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewThreads(first:100){nodes{isResolved}}}}}' -F owner="$owner" -F repo="$repo_name" -F pr="$prnum" 2>/dev/null || echo "{}")
+      unresolved=$(printf '%s' "$threads_json" | jq '[.data.repository.pullRequest.reviewThreads.nodes[]?|select(.isResolved==false)]|length' 2>/dev/null || echo "0")
+      if [ "$unresolved" -gt 0 ]; then
+        phase="address_comments"
+      else
+        local checks_out failed pending
+        if checks_out=$(gh pr checks "$prnum" --repo "$REPO" --json name,bucket 2>&1); then
+          failed=$(printf '%s' "$checks_out" | jq '[.[]|select(.bucket!="pass" and .bucket!="skipping" and .bucket!="pending")]|length' 2>/dev/null || echo "0")
+          pending=$(printf '%s' "$checks_out" | jq '[.[]|select(.bucket=="pending")]|length' 2>/dev/null || echo "0")
+          if [ "$failed" -gt 0 ]; then
+            phase="fix_ci"
+          elif [ "$pending" -gt 0 ]; then
+            phase="wait_ci"
+          else
+            phase="grade_gate"
+          fi
+        else
+          phase="grade_gate"
+        fi
+      fi
+    fi
+  fi
+  if [ "$phase" != "wait_ci" ]; then
+    ELIGIBLE="$ISSUE:$phase"
+  else
+    ELIGIBLE=""
+    say "PR for #$ISSUE CI is still pending; waiting..."
+  fi
   say "  eligibility check bypassed by --issue"
   load_board
   rm -f "$STATE_DIR/columns.tsv"
@@ -1342,13 +1450,15 @@ if [ -z "$ELIGIBLE" ]; then
   exit 0
 fi
 
-for n in $ELIGIBLE; do
+for item in $ELIGIBLE; do
+  n="${item%%:*}"
+  phase="${item##*:}"
   if [ "$ATTEMPTED" -ge "$MAX_ISSUES" ]; then
     say ""
     say "reached --max-issues $MAX_ISSUES; stopping with issues still eligible."
     break
   fi
-  run_issue "$n" || break
+  run_issue "$n" "$phase" || break
 done
 
 say ""

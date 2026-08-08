@@ -26,7 +26,10 @@ which mode, or assess the current session state and suggest one.
 | `plan` | `phases/plan.md` | Freeze the acceptance checks, then plan vertical slices against current code |
 | `execute` | `phases/execute.md` | Execute the plan; the criteria's checks are the gate, graded by a context that didn't write the code |
 | `express` | `phases/express.md` | Consume a specified issue autonomously through PR; the tier sets the autonomy |
-| `pr` | `phases/pr.md` | Self-review, squash, push, PR, review cycle, then stop at the tiered merge gate |
+| `open_pr` | `phases/open_pr.md` | Self-review, push branch, open PR with pending verdict |
+| `address_comments` | `phases/address_comments.md` | Address review comments on open PR |
+| `fix_ci` | `phases/fix_ci.md` | Fix failing CI checks |
+| `grade_gate` | `phases/grade_gate.md` | Derive merge gate verdict and update PR block |
 
 The **producer/consumer seam** is the `<!-- agent-session:spec -->` marker: `intake` and
 `triage` produce issues carrying it; `plan`/`execute`/`express` refuse to run without it.

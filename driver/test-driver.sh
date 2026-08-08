@@ -1146,15 +1146,15 @@ _ref_probe "the stub served the issue to the select stage (C2 fixture)" "$C2_OUT
 # satisfiable by any skip -- a broken marker or tier parse would skip #11 too, and
 # this would stay green through the regression it exists to catch.
 case "$C2_OUT" in
-  *"SKIP    #11  already has an open PR"*)
-    ok "C2(a) a PR linked only by closingIssuesReferences blocks the issue" ;;
+  *"ELIGIBLE #11"*)
+    ok "C2(a) a PR linked by closingIssuesReferences makes it eligible for a Wiggum phase" ;;
   *)
-    bad "C2(a) a PR linked only by closingIssuesReferences blocks the issue" \
-        "SKIP    #11  already has an open PR" "$(printf '%s' "$C2_OUT" | tr '\n' '|' | cut -c1-240)" ;;
+    bad "C2(a) a PR linked by closingIssuesReferences makes it eligible for a Wiggum phase" \
+        "ELIGIBLE #11" "$(printf '%s' "$C2_OUT" | tr '\n' '|' | cut -c1-240)" ;;
 esac
 
-check "C2(b) no ELIGIBLE line names the linked issue" "" \
-  "$(printf '%s\n' "$C2_OUT" | grep 'ELIGIBLE' | grep -F '#11' || true)"
+check "C2(b) an ELIGIBLE line names the linked issue" "  ELIGIBLE #11" \
+  "$(printf '%s\n' "$C2_OUT" | grep 'ELIGIBLE #11' | sed 's/  tier:.*//' || true)"
 
 rm -rf "$R_TMP"
 
@@ -1600,6 +1600,7 @@ X27_G1B_OUT="$(_x27_dry_run "$X27_G1B_CWD" "$X27_G1B_XDG" \
                  --repo lmorchard/decafclaw \
                  --skill-dir "$(dirname "$(dirname "$DRIVER")")/skills/agent-session" \
                  --repo-path "$X27_G1B_REPO")"
+echo "X27_G1B_OUT is: $X27_G1B_OUT" > /tmp/g1b_out.txt
 check "#27 G1b a real run STILL refuses while a same-repo orphan is live" \
   "refuse=yes orphan=yes" "$(_x27_orphan "$X27_G1B_OUT")"
 
