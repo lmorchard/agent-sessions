@@ -91,8 +91,8 @@ PR_LIST_JSON='[{"number":42,"title":"stub pr","body":"Closes #7","headRefName":"
 # #7 carries the park label, #8 does not. Both carry the marker and an auto-ok
 # tier, so tier-batch keeps them and only the label can explain a difference.
 issue_list_json() { cat <<EOF
-[{"number":7,"title":"issue carrying the label","body":"body\n\n## Tier: \`auto-ok\`\n","labels":[{"name":"$PARK_LABEL"}]},
- {"number":8,"title":"issue without the label","body":"body\n\n## Tier: \`auto-ok\`\n","labels":[{"name":"enhancement"}]}]
+[{"number":7,"title":"issue carrying the label","body":"body\n\n## Tier: \`auto-ok\`\n","labels":[{"name":"agent-session:spec"},{"name":"$PARK_LABEL"}]},
+ {"number":8,"title":"issue without the label","body":"body\n\n## Tier: \`auto-ok\`\n","labels":[{"name":"agent-session:spec"},{"name":"enhancement"}]}]
 EOF
 }
 
@@ -113,6 +113,10 @@ case "$*" in
   "pr list"*)            cat "$STUB_DIR/pr-list.json" ;;
   *"--json headRefOid"*) printf 'deadbeefcafe\n' ;;
   *"--json body"*)       cat "$STUB_DIR/pr-body.txt" ;;
+  "issue list"*"--search"*)
+       jq '[.[] | select((.labels // []) | all(.name != "agent-session:spec"))]' "$STUB_DIR/issue-list.json" ;;
+  "issue list"*"--label"*)
+       jq '[.[] | select((.labels // []) | any(.name == "agent-session:spec"))]' "$STUB_DIR/issue-list.json" ;;
   "issue list"*)         cat "$STUB_DIR/issue-list.json" ;;
   *)                     exit 0 ;;
 esac
