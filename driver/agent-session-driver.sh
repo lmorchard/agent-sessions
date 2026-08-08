@@ -497,23 +497,18 @@ notify_human() { # $1 = issue, $2 = reason
     echo "[$ts] Issue #$issue escalated: $reason" >> "$STATE_DIR/inbox.md"
   fi
   
-  if [ -n "$NTFY_TOPIC" ]; then
-    curl -s -d "Agent Session: Issue #$issue escalated: $reason" "ntfy.sh/$NTFY_TOPIC" >/dev/null || true
+  if [ -n "${NTFY_TOPIC:-}" ]; then
+    curl -s -d "Agent Session: Issue #$issue escalated: $reason" "ntfy.sh/${NTFY_TOPIC:-}" >/dev/null || true
   fi
   
-  if [ -n "$EMAIL_ALERTS" ]; then
-    echo "Agent Session: Issue #$issue escalated: $reason" | mail -s "Agent Escalation: #$issue" "$EMAIL_ALERTS" || true
+  if [ -n "${EMAIL_ALERTS:-}" ]; then
+    echo "Agent Session: Issue #$issue escalated: $reason" | mail -s "Agent Escalation: #$issue" "${EMAIL_ALERTS:-}" || true
   fi
 }
 
 apply_park_state() { # $1 = issue, $2 = outcome, $3 = ts, $4 = reason
   case "$2" in
-    parked|failed|incomplete|no-gate)
-      # `repo` is recorded because this file is kept for auditing and one state dir
-      # serves several repos -- runs.jsonl already mixes two. Its absence in the old
-      # records is a defect this PR's own rationale cites against the file, so
-      # continuing to omit it while quoting it would be incoherent. Nothing reads
-      # this for selection either way.
+    parked|failed|no-gate)
       jq -n -c --arg issue "$1" --arg repo "$REPO" --arg ts "$3" \
                --arg outcome "$2" --arg reason "$4" \
         '{issue:($issue|tonumber), repo:$repo, parked_at:$ts, outcome:$outcome, reason:$reason}' \
@@ -521,6 +516,14 @@ apply_park_state() { # $1 = issue, $2 = outcome, $3 = ts, $4 = reason
       park_label_add "$1"
       say "  parked -- excluded from future selection unless --retry $1"
       notify_human "$1" "$2: $4"
+      ;;
+    incomplete)
+      jq -n -c --arg issue "$1" --arg repo "$REPO" --arg ts "$3" \
+               --arg outcome "$2" --arg reason "$4" \
+        '{issue:($issue|tonumber), repo:$repo, parked_at:$ts, outcome:$outcome, reason:$reason}' \
+        >> "$PARKED_LOG"
+      say "  incomplete -- leaving unparked so the loop can re-evaluate later"
+      park_label_remove "$1"
       ;;
     gate-eligible|gate-human)
       # A verdict means the run got somewhere, so an earlier park no longer holds.
@@ -656,23 +659,24 @@ select_issues() {
       prline="$(printf '%s' "$prs" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-blocking-issue "$n")"
       mention=""
       [ -z "$prline" ] && mention="$(printf '%s' "$prs" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-for-issue "$n")"
-      reason=""
-
+      
+      local is_parked=0
+      local parked_reason=""
       if printf '%s\n' "$parked" | grep -qx "$n" && [ "$RETRY" != "$n" ]; then
-        reason="parked: $(park_reason "$n")"
-        p4_escalate="${p4_escalate}${n}:escalate "
-        say "  SKIP    #$n  $reason"
-        say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
-        continue
-      elif [ "$tier" = "conflict" ] || [ "$tier" = "missing" ] || [ "$tier" = "unparsed" ]; then
-        reason="tier is invalid ($tier)"
-        p4_escalate="${p4_escalate}${n}:escalate "
-        say "  SKIP    #$n  $reason"
-        say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
-        continue
+        is_parked=1
+        parked_reason="parked: $(park_reason "$n")"
+      fi
+
+      local is_invalid_tier=0
+      local tier_reason=""
+      if [ "$tier" = "conflict" ] || [ "$tier" = "missing" ] || [ "$tier" = "unparsed" ]; then
+        is_invalid_tier=1
+        tier_reason="tier is invalid ($tier)"
       fi
 
       phase="execute"
+      reason=""
+
       if [ -n "$prline" ]; then
         prnum="$(printf '%s' "$prline" | cut -f1)"
         owner_repo="${REPO//\// }"
@@ -710,20 +714,38 @@ select_issues() {
         if [ -n "$reason" ]; then
           say "  SKIP    #$n  $reason"
         else
-          local attempts=$(get_attempts "$n" "$phase")
-          if [ "$attempts" -ge "$MAX_PHASE_ATTEMPTS" ]; then
-            reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
-            apply_park_state "$n" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
+          if [ "$is_parked" -eq 1 ] && [ "$phase" = "grade_gate" ]; then
+            reason="$parked_reason"
             p4_escalate="${p4_escalate}${n}:escalate "
             say "  SKIP    #$n  $reason"
             say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
           else
-            p1_unblock="${p1_unblock}${n}:${phase} "
-            say "  ELIGIBLE #$n  tier: auto-ok (Priority 1: Unblock - $phase)"
+            local attempts=$(get_attempts "$n" "$phase")
+            if [ "$attempts" -ge "$MAX_PHASE_ATTEMPTS" ]; then
+              reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
+              apply_park_state "$n" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
+              p4_escalate="${p4_escalate}${n}:escalate "
+              say "  SKIP    #$n  $reason"
+              say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
+            else
+              p1_unblock="${p1_unblock}${n}:${phase} "
+              say "  ELIGIBLE #$n  tier: auto-ok (Priority 1: Unblock - $phase)"
+              [ "$is_parked" -eq 1 ] && say "  NOTE    #$n  Bypassing park state ($parked_reason) to perform Unblock phase: $phase"
+            fi
           fi
         fi
       else
-        if [ "$tier" = "needs-review" ]; then
+        if [ "$is_parked" -eq 1 ]; then
+          reason="$parked_reason"
+          p4_escalate="${p4_escalate}${n}:escalate "
+          say "  SKIP    #$n  $reason"
+          say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
+        elif [ "$is_invalid_tier" -eq 1 ]; then
+          reason="$tier_reason"
+          p4_escalate="${p4_escalate}${n}:escalate "
+          say "  SKIP    #$n  $reason"
+          say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
+        elif [ "$tier" = "needs-review" ]; then
           phase="refine"
           local attempts=$(get_attempts "$n" "$phase")
           if [ "$attempts" -ge "$MAX_PHASE_ATTEMPTS" ]; then
@@ -779,7 +801,7 @@ INNER_EOF
   say "eligible: ${c} ($ELIGIBLE)"
 }
 
-# --- stage: classify--- stage: classify -------------------------------------------------------
+# --- stage: classify -------------------------------------------------------
 #
 # The exit code is NOT the oracle: `claude -p` exits 0 both when express
 # completes and when it stops for a designed escalation. The oracle is the PR's

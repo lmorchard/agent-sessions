@@ -212,7 +212,7 @@ fi
 
 echo "C2: a parking outcome adds the label -- normal path and recovery path"
 
-PARK_BIN="$TMPROOT/park-bin"; make_stubs "$PARK_BIN" "pending"
+PARK_BIN="$TMPROOT/park-bin"; make_stubs "$PARK_BIN" ""
 
 CO_LOG="$TMPROOT/park-classify.log"; CO_SD="$TMPROOT/park-classify-state"
 run_driver "$PARK_BIN" "$CO_LOG" --repo "$REPO" --classify-only "$ISSUE" --state-dir "$CO_SD" >/dev/null

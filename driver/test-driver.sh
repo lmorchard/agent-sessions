@@ -270,9 +270,9 @@ check "no budget set -> no reclassification"   "incomplete"       "$(budget_recl
 # vacuously against a list that is simply gone), and it must NOT name
 # budget-exhausted.
 check "the park case list is present to be checked"     "1" \
-  "$(_code_hits_re '^ *parked\|failed\|incomplete\|no-gate\)')"
+  "$(_code_hits_re '^ *parked\|failed\|no-gate\)')"
 check "budget-exhausted is excluded from the park list" "0" \
-  "$(_code_hits_re '^ *parked\|failed\|incomplete\|no-gate\|budget-exhausted\)')"
+  "$(_code_hits_re '^ *parked\|failed\|no-gate\|budget-exhausted\)')"
 
 # --- the driver takes its child down with it -------------------------------
 
