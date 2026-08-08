@@ -1064,7 +1064,7 @@ run_issue() { # $1 = issue number
     # Split across two statements rather than nested in one `$( )`: command
     # substitution discards the inner exit status, which is how the failure went
     # unnoticed here in the first place. See issue #39.
-    prs_json pr_query_failed=0
+    local prs_json pr_query_failed=0
     prs_json="$("$PYTHON_BIN" "$GH_QUERY_PY" fetch-open-prs --repo "$REPO")" || pr_query_failed=1
     prline=""
     if [ "$pr_query_failed" -eq 0 ]; then
