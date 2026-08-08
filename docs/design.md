@@ -263,6 +263,9 @@ adding modes doesn't confound the LLM mid-phase — the only confounding risk is
 boundary, mitigated by explicit mode arguments + an ask-don't-guess dispatcher. Heavy modes
 fan out to subagents; the board-driver stays *above* the skill as orchestration.
 
+Built (orchestration), in `driver/`:
+- `agent-session-driver.sh` — The **Wiggum Architecture reconciliation loop**. A stateless state machine that evaluates GitHub repository state (issues, PRs, review comments, CI status) and dispatches tightly-scoped, short-lived LLM agents. Tracks attempt counts locally to break infinite loops.
+
 Built (front-of-funnel), in `skills/agent-session/`:
 - `SKILL.md` — dispatcher, context-management notes, conventions.
 - `references/acceptance-criteria.md` — **the novel core**: every criterion names a runnable
@@ -290,7 +293,10 @@ Built (back half, move 1), in `skills/agent-session/`:
 - `phases/execute.md` — per-criterion checks by name as the gate; frozen files read-only to
   implementers; independent verifier + tamper diff, not self-report; evidence produced for
   human-judgment criteria.
-- `phases/pr.md` + `references/pr-body-template.md` — the **tiered merge gate**, derived by
+- `phases/open_pr.md` — Initial PR push and review request.
+- `phases/address_comments.md` — Agent specifically targeting unresolved review threads on an open PR.
+- `phases/fix_ci.md` — Agent specifically targeting failing CI checks on an open PR.
+- `phases/grade_gate.md` + `references/pr-body-template.md` — the **tiered merge gate**, derived by
   reading rows (all checks pass per the verifier + human-graded judgment criteria + clean
   tamper diff + green project gates + no unresolved threads + `auto-ok` + no risk-gated paths).
   Emits a machine-readable `<!-- agent-session:gate -->` block. **Never merges.**

@@ -1401,13 +1401,18 @@ if [ -n "$ISSUE" ]; then
       
       threads_json=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewThreads(first:100){nodes{isResolved}}}}}' -F owner="$owner" -F repo="$repo_name" -F pr="$prnum" 2>/dev/null || echo "{}")
       unresolved=$(printf '%s' "$threads_json" | jq '[.data.repository.pullRequest.reviewThreads.nodes[]?|select(.isResolved==false)]|length' 2>/dev/null || echo "0")
+      unresolved=${unresolved:-0}
       if [ "$unresolved" -gt 0 ]; then
         phase="address_comments"
       else
-        local checks_out failed pending
+        checks_out=""
+        failed=0
+        pending=0
         if checks_out=$(gh pr checks "$prnum" --repo "$REPO" --json name,bucket 2>&1); then
           failed=$(printf '%s' "$checks_out" | jq '[.[]|select(.bucket!="pass" and .bucket!="skipping" and .bucket!="pending")]|length' 2>/dev/null || echo "0")
+          failed=${failed:-0}
           pending=$(printf '%s' "$checks_out" | jq '[.[]|select(.bucket=="pending")]|length' 2>/dev/null || echo "0")
+          pending=${pending:-0}
           if [ "$failed" -gt 0 ]; then
             phase="fix_ci"
           elif [ "$pending" -gt 0 ]; then

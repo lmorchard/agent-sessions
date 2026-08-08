@@ -458,7 +458,7 @@ def classify(
         result["reason"] = reason or "all gate rows satisfied"
     elif verdict == "human-merge-required":
         result["outcome"] = "gate-human"
-        result["reason"] = reason or "no reason given (pr.md requires one)"
+        result["reason"] = reason or "no reason given (grade_gate.md requires one)"
     elif verdict == "pending":
         # pr-body-template.md: pending means the run had not derived the
         # verdict. Not actionable.

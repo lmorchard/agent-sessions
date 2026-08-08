@@ -164,7 +164,7 @@ def test_missing_gate_block_is_no_gate():
 
 def test_reason_defaults_are_supplied():
     g = gate.extract_gate(body_with("2/2 pass", verdict="human-merge-required"))
-    assert "pr.md requires one" in gate.classify(g)["reason"]
+    assert "grade_gate.md requires one" in gate.classify(g)["reason"]
 
 
 def test_explicit_reason_wins_over_the_default():
