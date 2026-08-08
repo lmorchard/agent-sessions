@@ -963,24 +963,24 @@ run_issue() { # $1 = issue number
     # an assertion the driver has not earned. Same discipline the branch itself
     # is being taught.
     outcome="driver-fault"
-    reason="claude exited $rc before starting (no readable events, no session, no spend) -- see $rundir/stderr.txt"
+    reason="${BACKEND:-claude} exited $rc before starting (no readable events, no session, no spend) -- see $rundir/stderr.txt"
   elif [ "$rc" -ne 0 ] && ! has_success_result "$raw"; then
     outcome="failed"
     if [ "$cost_known" -eq 1 ]; then
-      reason="claude exited $rc"
+      reason="${BACKEND:-claude} exited $rc"
     else
       # The run started and did not finish, and the driver cannot say what it
       # cost. Say that, rather than letting the ledger's `cost_usd: 0` stand as a
       # claim -- a missing row prompts someone to go looking, a confident zero
       # does not.
-      reason="claude exited $rc; cost undetermined (no result record in the stream) -- see $rundir/stderr.txt"
+      reason="${BACKEND:-claude} exited $rc; cost undetermined (no result record in the stream) -- see $rundir/stderr.txt"
     fi
   else
     # rc != 0 with a successful result in the stream is the spurious-trailing-record
     # case. Say so out loud rather than swallowing it -- the exit code is still a real
     # signal that something went wrong after the run finished.
     if [ "$rc" -ne 0 ]; then
-      say "  NOTE: claude exited $rc but the stream carries a successful result;"
+      say "  NOTE: ${BACKEND:-claude} exited $rc but the stream carries a successful result;"
       say "        classifying from the gate block, not the exit code."
     fi
     # DEGRADE, distinguishably -- the opposite trade from selection, on purpose.
