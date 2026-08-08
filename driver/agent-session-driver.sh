@@ -487,25 +487,51 @@ park_label_remove() { # $1 = issue number
     || say "  WARNING: could not remove the $PARK_LABEL label from #$1 -- it stays parked"
 }
 
+
+notify_human() { # $1 = issue, $2 = reason
+  local issue="$1"
+  local reason="$2"
+  local ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  
+  if [ -d "$STATE_DIR" ]; then
+    echo "[$ts] Issue #$issue escalated: $reason" >> "$STATE_DIR/inbox.md"
+  fi
+  
+  if [ -n "${NTFY_TOPIC:-}" ]; then
+    curl -s -d "Agent Session: Issue #$issue escalated: $reason" "ntfy.sh/${NTFY_TOPIC:-}" >/dev/null || true
+  fi
+  
+  if [ -n "${EMAIL_ALERTS:-}" ]; then
+    echo "Agent Session: Issue #$issue escalated: $reason" | mail -s "Agent Escalation: #$issue" "${EMAIL_ALERTS:-}" || true
+  fi
+}
+
 apply_park_state() { # $1 = issue, $2 = outcome, $3 = ts, $4 = reason
   case "$2" in
-    parked|failed|incomplete|no-gate)
-      # `repo` is recorded because this file is kept for auditing and one state dir
-      # serves several repos -- runs.jsonl already mixes two. Its absence in the old
-      # records is a defect this PR's own rationale cites against the file, so
-      # continuing to omit it while quoting it would be incoherent. Nothing reads
-      # this for selection either way.
+    parked|failed|no-gate)
       jq -n -c --arg issue "$1" --arg repo "$REPO" --arg ts "$3" \
                --arg outcome "$2" --arg reason "$4" \
         '{issue:($issue|tonumber), repo:$repo, parked_at:$ts, outcome:$outcome, reason:$reason}' \
         >> "$PARKED_LOG"
       park_label_add "$1"
       say "  parked -- excluded from future selection unless --retry $1"
+      notify_human "$1" "$2: $4"
+      ;;
+    incomplete)
+      jq -n -c --arg issue "$1" --arg repo "$REPO" --arg ts "$3" \
+               --arg outcome "$2" --arg reason "$4" \
+        '{issue:($issue|tonumber), repo:$repo, parked_at:$ts, outcome:$outcome, reason:$reason}' \
+        >> "$PARKED_LOG"
+      say "  incomplete -- leaving unparked so the loop can re-evaluate later"
+      park_label_remove "$1"
       ;;
     gate-eligible|gate-human)
       # A verdict means the run got somewhere, so an earlier park no longer holds.
       # These are exactly the outcomes the driver already declines to park.
       park_label_remove "$1"
+      if [ "$2" = "gate-human" ]; then
+        notify_human "$1" "gate-human: $4"
+      fi
       ;;
   esac
   # budget-exhausted, driver-fault and ci-stale deliberately match neither arm.
@@ -581,44 +607,32 @@ ELIGIBLE=""
 select_issues() {
   say "== select =="
   local issues_json total
-  # `labels` is what carries the park state -- see PARK_LABEL. Requesting it here
-  # rather than in a second query is why the park list costs no extra API call.
   issues_json="$(gh issue list --repo "$REPO" --state open --limit 500 \
                    --json number,title,body,labels 2>/dev/null || echo '[]')"
   total="$(printf '%s' "$issues_json" | jq 'length')"
 
-  # tier-batch moved AHEAD of the count line, which used to print first. The count
-  # line is where the marker-less issues get accounted for, and the complement
-  # cannot be taken before the candidate list exists. It reads only issues_json,
-  # so nothing below it was depended on.
   local candidates
   candidates="$(printf '%s' "$issues_json" | "$PYTHON_BIN" "$GATE_PY" tier-batch --marker "$MARKER")"
 
-  # The marker-less set is the COMPLEMENT of what tier-batch emitted -- never a
-  # second jq implementation of the marker test. A hand-copied predicate is the
-  # drift this suite was already burned by once (test-driver.sh:19-25 used to
-  # replicate extract_gate); the complement replicates nothing, so it cannot
-  # disagree with the filter it is reporting on.
   local specced_nums markerless_nums markerless_list n_markerless m
   specced_nums="$(printf '%s' "$candidates" | cut -f1 | tr '\n' ' ')"
-  # `. as $n` before the select is load-bearing, not a style choice: in
-  # `index(f)`, f is evaluated against index's OWN input, so the tempting
-  # `index(.)` searches the keep-list for itself, matches every time, and
-  # silently yields an empty complement -- i.e. it reports "nothing missing"
-  # no matter what. Binding the number first is what makes the test a test.
   markerless_nums="$(printf '%s' "$issues_json" | jq -r --arg keep "$specced_nums" '
       ($keep | split(" ") | map(select(length > 0))) as $k
       | .[] | .number | tostring | . as $n
       | select(($k | index($n)) == null)')"
 
-  # No cap and no "+N more". A truncated list would reintroduce exactly the
-  # failure this reporting exists to fix -- a null rendering as a positive -- one
-  # level up. If the list is long enough to be unwieldy, that IS the message.
+  local p1_unblock=""
+  local p2_execute=""
+  local p3_groom=""
+  local p4_escalate=""
+
   n_markerless=0
   markerless_list=""
   for m in $markerless_nums; do
     n_markerless=$(( n_markerless + 1 ))
     markerless_list="${markerless_list:+$markerless_list, }#$m"
+    p3_groom="${p3_groom}${m}:triage "
+    say "  ELIGIBLE #$m  triage (Priority 3: Groom)"
   done
 
   if [ "$n_markerless" -gt 0 ]; then
@@ -633,104 +647,158 @@ select_issues() {
   touch "$STATE_DIR/columns.tsv"
   load_board
   local prs parked
-  # REFUSE, do not degrade -- see the comment on fetch_open_prs. Every skip
-  # reason below that reads "already has an open PR", and every ELIGIBLE that
-  # depends on no such PR existing, is derived from this one value. On failure
-  # the honest report is that the question could not be asked.
-  #
-  # `die` exits 2, and select_issues is called plainly (not inside `$( )`), so
-  # this ends the process before the run loop rather than a subshell.
   prs="$("$PYTHON_BIN" "$GH_QUERY_PY" fetch-open-prs --repo "$REPO")" || die "open-PR query failed -- cannot tell which issues already have open PRs, so selection would be a guess. Refusing to select. (gh's own error is above.)"
   parked="$(printf '%s' "$issues_json" | parked_numbers || true)"
 
-  if [ -z "$candidates" ]; then
-    say "no issues carry the marker -- nothing for this driver to consider."
-    say "  (marker-carrying issues are produced by \`agent-session intake\` / \`triage\`)"
-    return 0
-  fi
-
   local n tier title col prline mention reason
-  while IFS="$(printf '\t')" read -r n tier title; do
-    [ -n "$n" ] || continue
-    col="$(board_status "$n")"
-    printf '%s\t%s\n' "$n" "${col:-}" >> "$STATE_DIR/columns.tsv"
-    prline="$(printf '%s' "$prs" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-blocking-issue "$n")"
-    # Only asked when nothing BLOCKS, and only to report the near-match rather
-    # than discard it silently. A null rendering as a positive is findings.md
-    # class 2; silently dropping the near-match is the same shape in reverse.
-    mention=""
-    [ -z "$prline" ] && mention="$(printf '%s' "$prs" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-for-issue "$n")"
-    reason=""
-
-    if   [ "$tier" = "needs-review" ]; then reason="tier: needs-review"
-    elif [ "$tier" = "conflict" ];     then reason="tier: CONFLICT -- body names both tiers on Tier heading lines; surfacing rather than picking"
-    elif [ "$tier" = "missing" ];      then reason="tier: no '## Tier:' line in body"
-    elif [ "$tier" = "unparsed" ];     then reason="tier: '## Tier:' line present but names neither tier"
-    elif printf '%s\n' "$parked" | grep -qx "$n" && [ "$RETRY" != "$n" ]; then
-      reason="parked: $(park_reason "$n")"
-    fi
-    phase="execute"
-    if [ -z "$reason" ] && [ -n "$prline" ]; then
-      prnum="$(printf '%s' "$prline" | cut -f1)"
-      owner_repo="${REPO//\// }"
-      owner=$(echo $owner_repo | awk '{print $1}')
-      repo_name=$(echo $owner_repo | awk '{print $2}')
+  if [ -n "$candidates" ]; then
+    while IFS="$(printf '\t')" read -r n tier title; do
+      [ -n "$n" ] || continue
+      col="$(board_status "$n")"
+      printf '%s\t%s\n' "$n" "${col:-}" >> "$STATE_DIR/columns.tsv"
+      prline="$(printf '%s' "$prs" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-blocking-issue "$n")"
+      mention=""
+      [ -z "$prline" ] && mention="$(printf '%s' "$prs" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-for-issue "$n")"
       
-      threads_json=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewThreads(first:100){nodes{isResolved}}}}}' -F owner="$owner" -F repo="$repo_name" -F pr="$prnum" 2>/dev/null || echo "{}")
-      unresolved=$(printf '%s' "$threads_json" | jq '[.data.repository.pullRequest.reviewThreads.nodes[]?|select(.isResolved==false)]|length' 2>/dev/null || echo "0")
-      if [ "$unresolved" -gt 0 ]; then
-        phase="address_comments"
-      else
-        local checks_out failed pending
-        if checks_out=$(gh pr checks "$prnum" --repo "$REPO" --json name,bucket 2>&1); then
-          failed=$(printf '%s' "$checks_out" | jq '[.[]|select(.bucket!="pass" and .bucket!="skipping" and .bucket!="pending")]|length' 2>/dev/null || echo "0")
-          pending=$(printf '%s' "$checks_out" | jq '[.[]|select(.bucket=="pending")]|length' 2>/dev/null || echo "0")
-          if [ "$failed" -gt 0 ]; then
-            phase="fix_ci"
-          elif [ "$pending" -gt 0 ]; then
-            reason="PR #$prnum CI is still pending; waiting..."
+      local is_parked=0
+      local parked_reason=""
+      if printf '%s\n' "$parked" | grep -qx "$n" && [ "$RETRY" != "$n" ]; then
+        is_parked=1
+        parked_reason="parked: $(park_reason "$n")"
+      fi
+
+      local is_invalid_tier=0
+      local tier_reason=""
+      if [ "$tier" = "conflict" ] || [ "$tier" = "missing" ] || [ "$tier" = "unparsed" ]; then
+        is_invalid_tier=1
+        tier_reason="tier is invalid ($tier)"
+      fi
+
+      phase="execute"
+      reason=""
+
+      if [ -n "$prline" ]; then
+        prnum="$(printf '%s' "$prline" | cut -f1)"
+        owner_repo="${REPO//\// }"
+        owner=$(echo $owner_repo | awk '{print $1}')
+        repo_name=$(echo $owner_repo | awk '{print $2}')
+        
+        threads_json=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewThreads(first:100){nodes{isResolved}}}}}' -F owner="$owner" -F repo="$repo_name" -F pr="$prnum" 2>/dev/null || echo "{}")
+        unresolved=$(printf '%s' "$threads_json" | jq '[.data.repository.pullRequest.reviewThreads.nodes[]?|select(.isResolved==false)]|length' 2>/dev/null || echo "0")
+        if [ "$unresolved" -gt 0 ]; then
+          phase="address_comments"
+        else
+          local checks_out failed pending
+          if checks_out=$(gh pr checks "$prnum" --repo "$REPO" --json name,bucket 2>&1); then
+            failed=$(printf '%s' "$checks_out" | jq '[.[]|select(.bucket!="pass" and .bucket!="skipping" and .bucket!="pending")]|length' 2>/dev/null || echo "0")
+            pending=$(printf '%s' "$checks_out" | jq '[.[]|select(.bucket=="pending")]|length' 2>/dev/null || echo "0")
+            if [ "$failed" -gt 0 ]; then
+              phase="fix_ci"
+            elif [ "$pending" -gt 0 ]; then
+              reason="PR #$prnum CI is still pending; waiting..."
+            else
+              local pr_reviews=$(gh pr view "$prnum" --repo "$REPO" --json reviewRequests,reviews 2>/dev/null || echo "{}")
+              local requested=$(printf '%s' "$pr_reviews" | jq '.reviewRequests | length' 2>/dev/null || echo "0")
+              local reviewed=$(printf '%s' "$pr_reviews" | jq '.reviews | length' 2>/dev/null || echo "0")
+              if [ "$requested" -eq 0 ] && [ "$reviewed" -eq 0 ]; then
+                phase="request_review"
+              else
+                phase="grade_gate"
+              fi
+            fi
           else
             phase="grade_gate"
           fi
+        fi
+
+        if [ -n "$reason" ]; then
+          say "  SKIP    #$n  $reason"
         else
-          phase="grade_gate"
+          if [ "$is_parked" -eq 1 ] && [ "$phase" = "grade_gate" ]; then
+            reason="$parked_reason"
+            p4_escalate="${p4_escalate}${n}:escalate "
+            say "  SKIP    #$n  $reason"
+            say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
+          else
+            local attempts=$(get_attempts "$n" "$phase")
+            if [ "$attempts" -ge "$MAX_PHASE_ATTEMPTS" ]; then
+              reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
+              apply_park_state "$n" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
+              p4_escalate="${p4_escalate}${n}:escalate "
+              say "  SKIP    #$n  $reason"
+              say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
+            else
+              p1_unblock="${p1_unblock}${n}:${phase} "
+              say "  ELIGIBLE #$n  tier: auto-ok (Priority 1: Unblock - $phase)"
+              [ "$is_parked" -eq 1 ] && say "  NOTE    #$n  Bypassing park state ($parked_reason) to perform Unblock phase: $phase"
+            fi
+          fi
+        fi
+      else
+        if [ "$is_parked" -eq 1 ]; then
+          reason="$parked_reason"
+          p4_escalate="${p4_escalate}${n}:escalate "
+          say "  SKIP    #$n  $reason"
+          say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
+        elif [ "$is_invalid_tier" -eq 1 ]; then
+          reason="$tier_reason"
+          p4_escalate="${p4_escalate}${n}:escalate "
+          say "  SKIP    #$n  $reason"
+          say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
+        elif [ "$tier" = "needs-review" ]; then
+          phase="refine"
+          local attempts=$(get_attempts "$n" "$phase")
+          if [ "$attempts" -ge "$MAX_PHASE_ATTEMPTS" ]; then
+            reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
+            apply_park_state "$n" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
+            p4_escalate="${p4_escalate}${n}:escalate "
+            say "  SKIP    #$n  $reason"
+            say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
+          else
+            p3_groom="${p3_groom}${n}:${phase} "
+            say "  ELIGIBLE #$n  tier: needs-review (Priority 3: Groom - $phase)"
+          fi
+        elif [ "$tier" = "auto-ok" ]; then
+          phase="execute"
+          local attempts=$(get_attempts "$n" "$phase")
+          if [ "$attempts" -ge "$MAX_PHASE_ATTEMPTS" ]; then
+            reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
+            apply_park_state "$n" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
+            p4_escalate="${p4_escalate}${n}:escalate "
+            say "  SKIP    #$n  $reason"
+            say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
+          else
+            p2_execute="${p2_execute}${n}:${phase} "
+            say "  ELIGIBLE #$n  tier: auto-ok (Priority 2: Execute - $phase)"
+          fi
         fi
       fi
-    fi
-
-    if [ -z "$reason" ]; then
-      local attempts=$(get_attempts "$n" "$phase")
-      if [ "$attempts" -ge "$MAX_PHASE_ATTEMPTS" ]; then
-        reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
-        apply_park_state "$n" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
-      fi
-    fi
-    if [ -n "$reason" ]; then
-      say "  SKIP    #$n  $reason"
-      say "                ${title:0:70}"
-    else
-      say "  ELIGIBLE #$n  tier: auto-ok${col:+  |  board column: $col}"
-      say "                ${title:0:70}"
-      # The column is advisory. Say so where it disagrees, rather than resolving it.
-      if [ -n "$col" ] && [ "$col" != "Ready" ]; then
-        say "                note: board column is '$col', not 'Ready' -- not a gate, see spec.md Q2"
-      fi
-      # So is a mention. This is the near-match the old matcher used to act on:
-      # saying it out loud is what makes the behaviour change legible to an
-      # operator wondering why an issue they thought was taken came up eligible.
-      if [ -n "$mention" ]; then
-        say "                note: PR #$(printf '%s' "$mention" | cut -f1) names #$n but declares no" \
-            "closing link -- advisory, not a gate"
-      fi
-      ELIGIBLE="$ELIGIBLE $n:$phase"
-    fi
-  done <<EOF
+    done <<INNER_EOF
 $candidates
-EOF
+INNER_EOF
+  fi
 
-  ELIGIBLE="$(printf '%s' "$ELIGIBLE" | tr ' ' '\n' | grep -v '^$' || true)"
-  local c; c="$(printf '%s' "$ELIGIBLE" | grep -c . || true)"
-  say "eligible: ${c:-0}"
+  p1_unblock="$(echo "$p1_unblock" | tr -s ' ' '\n' | grep -v '^$' || true)"
+  p2_execute="$(echo "$p2_execute" | tr -s ' ' '\n' | grep -v '^$' || true)"
+  p3_groom="$(echo "$p3_groom" | tr -s ' ' '\n' | grep -v '^$' || true)"
+  p4_escalate="$(echo "$p4_escalate" | tr -s ' ' '\n' | grep -v '^$' || true)"
+
+  ELIGIBLE=""
+  if [ -n "$p1_unblock" ]; then
+    ELIGIBLE="$(echo "$p1_unblock" | head -n 1)"
+  elif [ -n "$p2_execute" ]; then
+    ELIGIBLE="$(echo "$p2_execute" | head -n 1)"
+  elif [ -n "$p3_groom" ]; then
+    ELIGIBLE="$(echo "$p3_groom" | head -n 1)"
+  elif [ -n "$p4_escalate" ]; then
+    ELIGIBLE="$(echo "$p4_escalate" | head -n 1)"
+  fi
+
+  local c=0
+  if [ -n "$ELIGIBLE" ]; then
+    c=1
+  fi
+  say "eligible: ${c} ($ELIGIBLE)"
 }
 
 # --- stage: classify -------------------------------------------------------
