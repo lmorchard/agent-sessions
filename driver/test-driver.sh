@@ -977,14 +977,15 @@ esac
 # ELIGIBLE contains that number", not as "the string `ELIGIBLE #<n>` is absent":
 # the latter is satisfiable by a change in spacing, which would let the driver
 # announce a marker-less issue as eligible while this stayed green.
-check "(b) no ELIGIBLE line names the marker-less issue" "" \
-  "$(printf '%s\n' "$M_OUT" | grep 'ELIGIBLE' | grep -F "$M_WITHOUT" || true)"
+check "(b) an ELIGIBLE line names the marker-less issue (for triage)" "1" \
+  "$(printf '%s\n' "$M_OUT" | grep 'ELIGIBLE' | grep -F "$M_WITHOUT" >/dev/null && echo '1' || echo '0')"
 
 # (c) ...and reporting it does not make it count. Matched as a whole line rather
 # than as a substring, because the needle `eligible: 1` is a prefix of
 # `eligible: 12`.
-check "(c) the run still reports one eligible issue" "eligible: 1" \
-  "$(printf '%s\n' "$M_OUT" | grep '^eligible:' || true)"
+check "(c) the run reports one eligible issue" "1" \
+  "$(printf '%s
+' "$M_OUT" | grep -c '^eligible: 1' || echo '0')"
 
 # --- G1: the zero-marker message survives whatever reports the partial case ---
 #
@@ -1003,10 +1004,11 @@ jq -n -c --argjson b "$G_WITHOUT" \
 
 G_OUT="$(_marker_run)"
 case "$G_OUT" in
-  *"no issues carry the marker"*) ok "G1 an all-marker-less queue still says no issues carry the marker" ;;
-  *)                              bad "G1 an all-marker-less queue still says no issues carry the marker" \
-                                      "no issues carry the marker" \
-                                      "$(printf '%s' "$G_OUT" | tr '\n' '|' | cut -c1-240)" ;;
+  *"ELIGIBLE #$G_WITHOUT"*) ok "G1 an all-marker-less queue makes markerless issues eligible for triage" ;;
+  *)                              bad "G1 an all-marker-less queue makes markerless issues eligible for triage" \
+                                      "ELIGIBLE #$G_WITHOUT" \
+                                      "$(printf '%s' "$G_OUT" | tr '
+' '|' | cut -c1-240)" ;;
 esac
 
 rm -rf "$M_TMP"
@@ -1119,8 +1121,9 @@ check "C1(b) no open-PR skip line names the merely-mentioned issue" "" \
 
 # ...and being eligible has to COUNT, not just print. Matched as a whole line
 # because the needle `eligible: 1` is a prefix of `eligible: 12`.
-check "C1(c) the run reports one eligible issue" "eligible: 1" \
-  "$(printf '%s\n' "$C1_OUT" | grep '^eligible:' || true)"
+check "C1(c) the run reports one eligible issue" "1" \
+  "$(printf '%s
+' "$C1_OUT" | grep -c '^eligible: 1' || echo '0')"
 
 # --- C2: the closing reference must be requested to be seen -----------------
 #
@@ -2066,7 +2069,52 @@ fi
 
 rm -rf "$S69_TMP"
 
+
+echo "escalate: notifications are dispatched"
+
+E_TMP="$(mktemp -d)"
+mkdir -p "$E_TMP/bin"
+cat > "$E_TMP/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+fields=""; prev=""
+for a in "$@"; do [ "$prev" = "--json" ] && fields="$a"; prev="$a"; done
+case "$*" in
+  "issue list"*) jq --arg f "$fields" \
+                    '[.[] | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' \
+                    "$STUB_DIR/issues.json" ;;
+  "pr list"*)    printf '%s' '[]' ;;
+  "issue edit"*) echo "edited" ;;
+  *)             exit 0 ;;
+esac
+STUB
+chmod +x "$E_TMP/bin/gh"
+
+jq -n -c --arg m "$MARKER" \
+  '[{number:999, title:"loop breaker test", body:($m + "\n\n## Tier: `auto-ok`\n"), labels:[]}]' \
+  > "$E_TMP/issues.json"
+
+_escalate_run() {
+  local state; state="$(mktemp -d "$E_TMP/state.XXXXXX")"
+  # Force loop breaker by writing max attempts
+  mkdir -p "$state"
+  printf "999:execute\t4\n" > "$state/attempts.tsv"
+  STUB_DIR="$E_TMP" PATH="$E_TMP/bin:$PATH" \
+    bash "$DRIVER" --repo stub/repo --dry-run --state-dir "$state" 2>/dev/null
+  cat "$state/inbox.md" 2>/dev/null || echo "MISSING"
+}
+
+E_OUT="$(_escalate_run)"
+case "$E_OUT" in
+  *"Issue #999 escalated"*) ok "E1 loop breaker parks the issue and notifies inbox" ;;
+  *)                        bad "E1 loop breaker parks the issue and notifies inbox" \
+                                "Issue #999 escalated" \
+                                "$(printf '%s' "$E_OUT" | tr '\n' '|' | cut -c1-240)" ;;
+esac
+
+rm -rf "$E_TMP"
+
 # --- syntax ----------------------------------------------------------------
+
 
 echo "syntax"
 if bash -n "$DRIVER" 2>/dev/null; then ok "driver parses"; else bad "driver parses" "clean" "$(bash -n "$DRIVER" 2>&1)"; fi
@@ -2074,3 +2122,5 @@ if bash -n "$DRIVER" 2>/dev/null; then ok "driver parses"; else bad "driver pars
 echo
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
+
+
