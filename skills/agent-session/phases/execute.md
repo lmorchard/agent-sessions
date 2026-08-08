@@ -36,6 +36,24 @@ fix-up.
 
 0. **Check Ceremony Threshold:** If this is a small, tactical task (bug fix, < 3 steps), **skip `execute`'s heavy phased structure entirely**. Just implement the fix and jump to `pr`. Only proceed with the steps below for large, architectural, or multi-session tasks that have a `plan.md`.
 
+**TDD Inner Loop (Fail-Implement-Pass):** For each micro-task, enforce strict fail-implement-pass TDD inner loop discipline. Before writing implementation code, run the failing check and observe failure. Then implement, run the check again to confirm pass, and tick the micro-task checkbox.
+
+**Parallel Swarm & Tiered Model Routing:** For independent micro-tasks defined in parallel groups:
+1. **Prepare Prompt Files:** Prior to dispatch, write a dedicated prompt file for each subagent (e.g. `runs/task_1_prompt.txt`, `runs/task_2_prompt.txt`). Each prompt specifies:
+   - Target file(s) and micro-task description.
+   - The exact check/test command to run first to observe failure (TDD inner loop).
+   - Frozen check file rules (read-only).
+
+2. **Execute Deterministic Swarm Orchestration:** Invoke `scripts/run_swarm.py` with the task prompt files:
+```bash
+python3 scripts/run_swarm.py runs/task_1_prompt.txt runs/task_2_prompt.txt
+```
+Or specify a JSON tasks manifest file (`runs/swarm_tasks.json`) if custom task checks or stream outputs are configured:
+```bash
+python3 scripts/run_swarm.py --tasks-file runs/swarm_tasks.json
+```
+The deterministic runner (`scripts/run_swarm.py`) concurrently dispatches parallel `implementer` subagents via `agent_runner.py --tier low` (enforcing low-tier model execution like Claude 3.5 Haiku while reserving the high-tier model for intake, planning, and verification), monitors process PIDs, checks exit codes, validates TDD stream compliance (`scripts/validate_tdd.py`), and reports aggregated pass/fail results without an LLM Commander. Ensure parallel groups contain strictly independent files or functions to avoid git merge conflicts.
+
 1. **Load and review.** Read `plan.md`, `checks.md`, and `spec.md`. Confirm the freeze commit
    exists (`checks.md`'s `Frozen at` sha resolves) — if it doesn't, Phase 0 never happened;
    go back to `plan`. Check existing checkboxes and resume from the first unchecked phase.
@@ -49,9 +67,10 @@ fix-up.
      anticipate, **surface the mismatch** rather than silently improvising.
    - **Run each check the phase advances, by name, and read its output.** Use the exact command
      from `checks.md` — `pytest tests/test_export.py::test_large_export_is_streamed`, not `make
-     test`. Then run the **guards** from `checks.md` and `make lint` / `make test` / `make check`
-     for regressions. A guard that flips pass→fail is a regression you just caused; fix it before
-     moving on, and never by weakening the guard.
+     test`. Then run the **guards** from `checks.md` and `make lint` / `make typecheck` / `make check`
+     for regressions. Run project linters (`ruff check`, `eslint`, `npm run lint`) and typecheckers
+     (`pyright`, `tsc`) locally before committing to prevent CI lint/type failures. A guard or linter that
+     flips pass→fail is a regression you just caused; fix it before moving on, and never by weakening the guard.
    - Tick `- [ ]` → `- [x]` only after reading the actual output of that specific command.
      Never from an impression that it should pass.
    - **A failing frozen check means the implementation is wrong.** Fix the code. Do not edit,

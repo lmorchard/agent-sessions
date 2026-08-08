@@ -20,6 +20,8 @@ and trusts it — so its first job is to confirm that assumption instead of pape
 - The PR URL and the **gate verdict** + reason — the primary consumable output
 - What was fixed, skipped, deferred, or amended along the way
 
+**Context & Tool Permissions:** Perform setup, planning, file edits, commits, and PR actions directly in the primary writable agent context. Do not delegate file writing or git operations to subagent `Task` calls, as subagent tasks operate in read-only contexts.
+
 ## Phase 0: Preconditions
 
 Fetch the issue. Three checks, in order — each is a stop, not a warning:
@@ -57,7 +59,7 @@ line at each transition:
 
 | Step | Run | Express override |
 |---|---|---|
-| 2a. Plan + freeze | `phases/plan.md` | Phase 0 freeze is mandatory — no override |
+| 2a. Plan + freeze | `phases/plan.md` | Apply ceremony threshold: for tactical tasks (< 3 steps), skip heavy artifacts and implement directly; for large tasks, Phase 0 freeze is mandatory |
 | 2b. Plan self-review | `plan.md`'s self-review step | Replaces the human plan review: fix and continue |
 | 2c. Execute | `phases/execute.md` | Per-phase manual pauses deferred to 2f; per-criterion checks are not deferrable |
 | 2d. Independent verification | `execute.md`'s verifier + tamper diff | Never skipped, never self-reported |

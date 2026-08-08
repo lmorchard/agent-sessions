@@ -48,13 +48,11 @@ and a drifted worktree path means a run that tests the wrong branch.
    a. **Use the project's existing worktree location.** Use the location found above; only fall back to `.worktrees/` with no precedent.
    b. Confirm it's ignored. If it isn't, put the `.gitignore` line on the feature branch or pick an
       already-ignored location — don't commit setup changes to the default branch.
-   c. `git worktree add {location}/{branch-name} -b {branch-name} origin/main`
-   d. `cd` into the worktree.
-   e. Run project setup auto-detected from project files (venv / `npm install` / `go mod
-      download` / `cargo build`).
-   f. Run the test suite for a clean baseline. **Report failures rather than proceeding
-      silently** — a red baseline makes every later check ambiguous, since you can no longer
-      tell your failure from the pre-existing one.
+   c. If an open PR exists for `{branch-name}`, reuse or set up the worktree on that branch, fetch PR details (`gh pr view`) and review comments (`gh api repos/{owner}/{repo}/pulls/{number}/comments`), and proceed to address any unresolved review comments/threads. If a local branch or worktree for `{branch-name}` exists from a prior run *without* an open PR, clean it up (`git worktree remove --force` / `git branch -D`) so setup starts fresh from `origin/main`.
+   d. `git worktree add {location}/{branch-name} -b {branch-name} origin/main`
+   e. `cd` into the worktree.
+   f. Run project setup auto-detected from project files (venv / `npm install` / `go mod download` / `cargo build`).
+   g. Run the test suite for a clean baseline. **Report failures rather than proceeding silently** — a red baseline makes every later check ambiguous, since you can no longer tell your failure from the pre-existing one.
 
 8. **Determine Ceremony Threshold.** 
    - **Small/Tactical:** Skip creating a session directory or any markdown files. Track state in-context with `todowrite`.

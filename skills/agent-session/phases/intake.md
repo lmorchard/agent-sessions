@@ -6,7 +6,7 @@ intent capture and criteria judgment are human work; everything downstream trust
 produces.
 
 Reads the shared engine: `references/acceptance-criteria.md`, `references/criteria-grammar.md`,
-`references/spec-template.md`. Dispatches research per `references/documentarian-prompt.md`.
+`references/spec-template.md`, and reads `docs/agent-ledger.md` (if it exists) as a source of architectural continuity. Dispatches research per `references/documentarian-prompt.md`.
 
 ## Two entry modes
 

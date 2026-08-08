@@ -64,29 +64,56 @@ def has_marker(text: str, marker: str) -> bool:
 
 
 def extract_gate(body: str, marker: str = GATE_MARKER) -> str:
-    """Return the fenced block that follows `marker`, or "" if absent.
+    """Return the block that follows `marker`, or "" if absent.
 
-    Port of the driver's awk: find the marker line, treat the next ``` as the
-    opening fence, and stop at the following one.
+    If the block after `marker` is fenced in ```, returns the lines inside the fence.
+    If unfenced, returns key-value lines following `marker` until the next heading or EOF.
     """
-    if not marker:
+    if not marker or not body:
         return ""
 
-    found = False
-    opened = False
-    out: list[str] = []
-    for line in (body or "").split("\n"):
-        if not found:
-            if line.strip() == marker:
-                found = True
-            continue
-        if line.startswith("```"):
-            if not opened:
-                opened = True
-                continue
+    lines = (body or "").split("\n")
+    found_idx = -1
+    for i, line in enumerate(lines):
+        if line.strip() == marker:
+            found_idx = i
             break
-        if opened:
+
+    if found_idx == -1:
+        return ""
+
+    remaining = lines[found_idx + 1:]
+    first_non_empty_idx = -1
+    for i, line in enumerate(remaining):
+        if line.strip():
+            first_non_empty_idx = i
+            break
+
+    if first_non_empty_idx == -1:
+        return ""
+
+    if remaining[first_non_empty_idx].strip().startswith("```"):
+        opened = False
+        out: list[str] = []
+        for line in remaining[first_non_empty_idx:]:
+            if line.strip().startswith("```"):
+                if not opened:
+                    opened = True
+                    continue
+                break
+            if opened:
+                out.append(line)
+        return "\n".join(out)
+
+    out = []
+    for line in remaining[first_non_empty_idx:]:
+        sline = line.strip()
+        if sline.startswith("#") or sline.startswith("<!--"):
+            break
+        if ":" in sline:
             out.append(line)
+        elif not sline and out:
+            break
     return "\n".join(out)
 
 

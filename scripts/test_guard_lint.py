@@ -28,7 +28,7 @@ def test_invariant_guard_clean():
 def test_json_scanning(monkeypatch, capsys):
     guard_lint.failures.clear()
     json_data = '[{"body": "## Regression guards\\n- 34 passed\\n"}]'
-    monkeypatch.setattr("sys.stdin", type("Stdin", (), {"isatty": lambda: False, "read": lambda: json_data})())
+    monkeypatch.setattr("sys.stdin", type("Stdin", (), {"isatty": lambda *a, **kw: False, "read": lambda *a, **kw: json_data})())
     
     ret = guard_lint.main()
     assert ret == 1

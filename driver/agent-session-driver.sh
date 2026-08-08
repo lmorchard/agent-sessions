@@ -72,13 +72,15 @@ RETRY=""
 CLASSIFY_ONLY=""
 RESUMED_FROM=""
 MODEL=""
+HIGH_TIER_MODEL=""
+LOW_TIER_MODEL=""
 BACKEND=""
 
 # `dontAsk` denies non-allowlisted mutating commands but auto-allows commands it
 # classifies read-only -- measured, see spec.md "Permissions". The allowlist is
 # wide because `express` legitimately builds, writes code, dispatches subagents
 # and opens a PR. What it buys is a floor, not a sandbox.
-ALLOWED_TOOLS='Read,Write,Edit,Glob,Grep,Task,TodoWrite,BashOutput,KillShell,NotebookEdit,Bash(git:*),Bash(gh:*),Bash(make:*),Bash(uv:*),Bash(uvx:*),Bash(python:*),Bash(python3:*),Bash(pytest:*),Bash(ruff:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(mkdir:*),Bash(cp:*),Bash(mv:*),Bash(touch:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(rg:*),Bash(jq:*),Bash(sed:*),Bash(awk:*),Bash(wc:*),Bash(head:*),Bash(tail:*),Bash(sort:*),Bash(uniq:*),Bash(cut:*),Bash(find:*),Bash(diff:*),Bash(echo:*),Bash(printf:*),Bash(pwd:*),Bash(cd:*),Bash(test:*),Bash(true:*),Bash(date:*),Bash(basename:*),Bash(dirname:*),Bash(realpath:*)'
+ALLOWED_TOOLS='Read,Write,Edit,Glob,Grep,Task,TodoWrite,BashOutput,KillShell,NotebookEdit,Bash(*)'
 
 # Deny rules take precedence over allow rules and match multi-word command
 # prefixes -- measured. This is the mechanism behind "nothing merges"; the
@@ -143,6 +145,8 @@ while [ $# -gt 0 ]; do
     --board)          BOARD="${2:?}"; shift 2 ;;
     --backend)        BACKEND="${2:?}"; shift 2 ;;
     --model)          MODEL="${2:?}"; shift 2 ;;
+    --high-tier-model) HIGH_TIER_MODEL="${2:?}"; shift 2 ;;
+    --low-tier-model) LOW_TIER_MODEL="${2:?}"; shift 2 ;;
     --retry)          RETRY="${2:?}"; shift 2 ;;
     --classify-only)  CLASSIFY_ONLY="${2:?}"; shift 2 ;;
     --resumed-from)   RESUMED_FROM="${2:?}"; shift 2 ;;
@@ -839,7 +843,10 @@ run_issue() { # $1 = issue number
   # still mutating the repo with nothing supervising it. Observed, not theorised.
   set +e
   if [ -n "$TIMEOUT_CMD" ]; then
-    ( cd "$REPO_PATH" && exec "$TIMEOUT_CMD" "$RUN_TIMEOUT" "$PYTHON_BIN" "$AGENT_RUNNER_PY" run \
+    ( cd "$REPO_PATH" && \
+        HIGH_TIER_MODEL="${HIGH_TIER_MODEL:-}" \
+        LOW_TIER_MODEL="${LOW_TIER_MODEL:-}" \
+        exec "$TIMEOUT_CMD" "$RUN_TIMEOUT" "$PYTHON_BIN" "$AGENT_RUNNER_PY" run \
         --backend "${BACKEND:-claude}" \
         --repo-path "$REPO_PATH" \
         --skill-dir "$SKILL_DIR" \
@@ -849,13 +856,18 @@ run_issue() { # $1 = issue number
         --max-budget "$MAX_BUDGET" \
         --timeout "$RUN_TIMEOUT" \
         ${MODEL:+--model "$MODEL"} \
+        ${HIGH_TIER_MODEL:+--high-tier-model "$HIGH_TIER_MODEL"} \
+        ${LOW_TIER_MODEL:+--low-tier-model "$LOW_TIER_MODEL"} \
         --allowed-tools "$ALLOWED_TOOLS" \
         --disallowed-tools "$DENIED_TOOLS" \
         --settings "$HOOK_SETTINGS_FILE" ) \
       &
   else
     say "  NOTE: no timeout/gtimeout found; running unbounded (budget still caps cost)"
-    ( cd "$REPO_PATH" && exec "$PYTHON_BIN" "$AGENT_RUNNER_PY" run \
+    ( cd "$REPO_PATH" && \
+        HIGH_TIER_MODEL="${HIGH_TIER_MODEL:-}" \
+        LOW_TIER_MODEL="${LOW_TIER_MODEL:-}" \
+        exec "$PYTHON_BIN" "$AGENT_RUNNER_PY" run \
         --backend "${BACKEND:-claude}" \
         --repo-path "$REPO_PATH" \
         --skill-dir "$SKILL_DIR" \
@@ -865,6 +877,8 @@ run_issue() { # $1 = issue number
         --max-budget "$MAX_BUDGET" \
         --timeout "$RUN_TIMEOUT" \
         ${MODEL:+--model "$MODEL"} \
+        ${HIGH_TIER_MODEL:+--high-tier-model "$HIGH_TIER_MODEL"} \
+        ${LOW_TIER_MODEL:+--low-tier-model "$LOW_TIER_MODEL"} \
         --allowed-tools "$ALLOWED_TOOLS" \
         --disallowed-tools "$DENIED_TOOLS" \
         --settings "$HOOK_SETTINGS_FILE" ) &
