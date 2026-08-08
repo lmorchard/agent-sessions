@@ -55,15 +55,17 @@ criteria), and you do the part that does (ratify). See
    read as verified. Also give each subagent read-only tools where the harness allows it — a
    scanner has no business editing the repo it's scoring.
 
-3. **Present the triage table** to the user: which issues are already fine, which are
-   under-specified, and for each weak one the *proposed* criteria + tier. Let the user pick
-   which to augment now (don't auto-edit the whole backlog).
+3. **Headless proposal (Async ratify pass).** Because you are running autonomously, there is no user to pick from a table interactively. Instead, for the issue you scanned:
+   - **Post your proposed EARS criteria, checks, and tier as a comment on the GitHub issue** using `gh issue comment <n> --body <text>`.
+   - Apply the `agent-session:needs-human` label so the human knows they need to review it.
+   - Do NOT apply the `agent-session:spec` label yet, because the human hasn't ratified the criteria.
+   - Stop execution here. Do not edit the issue body yet.
 
-4. **Ratify per issue (human, fast pass).** For each chosen issue, the proposal inverts the
-   authoring effort: the user reacts to drafted criteria + checks rather than composing
-   from a blank page. Most confirm quickly; some need a short `intake`-style back-and-forth
-   on the open questions the subagent flagged. Where a criterion won't reduce to a check,
-   apply the escalation ladder — it lands the issue in `needs-review`.
+   *(When the human reviews your comment, they will either manually apply `agent-session:spec` to advance the issue, or they will reply with clarifications, which you will read on the next pass.)*
+
+4. **Follow-up pass (Reading human replies).** If you are triaging an issue that already has a proposed spec comment from you, read the subsequent comments from the human.
+   - If they approved it, proceed to Step 5.
+   - If they provided corrections, synthesize them into an updated spec and confirm if it is now complete. Proceed to Step 5 if complete, otherwise post a follow-up comment and stop.
 
 5. **Write back (augment in place).** For each ratified issue, run `intake`'s file-or-update step.
    First ensure the label exists (`gh label create "agent-session:spec" --color 0E8A16 || true`).
@@ -88,8 +90,6 @@ criteria), and you do the part that does (ratify). See
 
 ## Escalation — stop and surface when
 
-- An issue's intent is genuinely unclear (not just under-specified) → flag it for the user
-  rather than inventing criteria for a goal you're guessing at.
-- The scan surfaces duplicate/obsolete issues → note them; don't augment; suggest closing.
-- A subagent can't tell what "done" would mean → that issue needs a human `intake`, not
-  batch augmentation. Say so.
+- An issue's intent is genuinely unclear (not just under-specified) → leave a GitHub comment explaining the ambiguity, apply the `agent-session:needs-human` label, and stop.
+- The scan surfaces duplicate/obsolete issues → comment suggesting closure, apply `agent-session:needs-human`, and stop.
+- A subagent can't tell what "done" would mean → comment asking the human for direction, apply `agent-session:needs-human`, and stop.
