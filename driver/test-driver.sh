@@ -8,6 +8,8 @@
 # wrongness would silently misreport every outcome the driver ever records.
 
 set -uo pipefail
+MARKER=''
+GATE_MARKER=''
 
 DRIVER="$(cd "$(dirname "$0")" && pwd)/agent-session-driver.sh"
 PASS=0
@@ -51,7 +53,7 @@ _code_hits_re() { grep -v '^[[:space:]]*#' "$DRIVER" | grep -cE -- "$1"; }
 # the driver shipped 53 lines with it. Behavioural coverage of the parser lives
 # in driver/test_gate.py, which imports the module; these wrappers keep the
 # bash-side end-to-end assertions honest.
-GATE_MARKER='<!-- agent-session:gate -->'
+
 GATE_PY="$(cd "$(dirname "$0")" && pwd)/gate.py"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
@@ -70,7 +72,6 @@ echo "classify: verdict values"
 # Shaped exactly like references/pr-body-template.md's example.
 BODY_HUMAN='## Merge gate
 
-<!-- agent-session:gate -->
 ```yaml
 tier: needs-review
 checks: C1 pass · C2 pass
@@ -93,7 +94,7 @@ BODY_PENDING="${BODY_HUMAN/verdict: human-merge-required/verdict: pending}"
 BODY_NOGATE='## Summary
 
 Just an ordinary PR body with no gate block at all.'
-BODY_NOVERDICT='<!-- agent-session:gate -->
+BODY_NOVERDICT='## Merge gate
 ```yaml
 tier: auto-ok
 checks: C1 pass
@@ -115,7 +116,7 @@ BODY_PROSE='## Summary
 
 I considered whether this was eligible-for-auto-merge and decided it was.
 
-<!-- agent-session:gate -->
+## Merge gate
 ```yaml
 verdict: human-merge-required
 reason: a human-judgment criterion is ungraded
@@ -127,7 +128,7 @@ check "prose mentioning a verdict does not override the block" "gate-human" "$(o
 
 echo "select: anchored tier extraction"
 
-MARKER='<!-- agent-session:spec -->'
+
 
 
 # This is #585's real shape: an auto-ok heading, and a tier PARAGRAPH that
@@ -159,10 +160,8 @@ check "tier heading naming neither -> unparsed"            "unparsed"     "$(tie
 # A marker-less issue is dropped by selection, which is NOT the same as tiering
 # it `missing`. Assert the selection path (tier-batch), not the single-body tier.
 candidates_of() { # stdin = gh issue list JSON array -> TSV rows
-  "$PYTHON_BIN" "$GATE_PY" tier-batch --marker "$MARKER"
+  "$PYTHON_BIN" "$GATE_PY" tier-batch
 }
-check "no marker -> not a candidate at all"                ""             \
-  "$(jq -n -c '[{number:1, title:"t", body:"## Tier: `auto-ok`\nNo marker here."}]' | candidates_of)"
 check "marker but no tier heading -> missing, not dropped"  "1	missing	t" \
   "$(jq -n -c --arg m "$MARKER" '[{number:1, title:"t", body:($m + "\nno heading")}]' | candidates_of)"
 
@@ -174,7 +173,7 @@ echo "ci-stale: a gate ci row is a claim about a commit"
 # local ci_sha_of/is_stale helpers annotated "Mirrors the driver's extraction +
 # comparison exactly" -- with nothing enforcing that. It did not mirror it.
 is_stale() { # $1 = ci row value, $2 = current head -> stale|current
-  local body="$GATE_MARKER
+  local body="## Merge gate
 \`\`\`yaml
 verdict: eligible-for-auto-merge
 ci: $1
@@ -205,7 +204,7 @@ check "check names are not mistaken for a sha"   "current" \
 # string appears anywhere, comments included. findings.md calls that "a spelling
 # check, not a test". Now they assert behaviour through the shipped parser.
 _warn_count() { # $1 = ci row -> number of warnings the parser emits
-  _classify "$GATE_MARKER
+  _classify "## Merge gate
 \`\`\`yaml
 verdict: eligible-for-auto-merge
 ci: $1
@@ -840,7 +839,7 @@ echo "issue query: the park filter's field must be requested, not assumed"
 Q_TMP="$(mktemp -d)"
 mkdir -p "$Q_TMP/bin"
 cat > "$Q_TMP/issues.json" <<'JSON'
-[{"number":7,"title":"labeled","body":"<!-- agent-session:spec -->\n\n## Tier: `auto-ok`\n","labels":[{"name":"driver-parked"}]}]
+[{"number":7,"title":"labeled","body":"## Tier: `auto-ok`\n","labels":[{"name":"agent-session:spec"},{"name":"driver-parked"}]}]
 JSON
 cat > "$Q_TMP/bin/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -898,9 +897,18 @@ cat > "$M_TMP/bin/gh" <<'STUB'
 fields=""; prev=""
 for a in "$@"; do [ "$prev" = "--json" ] && fields="$a"; prev="$a"; done
 case "$*" in
-  "issue list"*) jq --arg f "$fields" \
-                    '[.[] | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' \
-                    "$STUB_DIR/issues.json" ;;
+  "issue list"*"--search"*)
+       jq --arg f "$fields" \
+       '[.[] | select((.labels // []) | all(.name != "agent-session:spec")) | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' \
+       "$STUB_DIR/issues.json" ;;
+  "issue list"*"--label"*)
+       jq --arg f "$fields" \
+       '[.[] | select((.labels // []) | any(.name == "agent-session:spec")) | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' \
+       "$STUB_DIR/issues.json" ;;
+  "issue list"*)
+       jq --arg f "$fields" \
+       '[.[] | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' \
+       "$STUB_DIR/issues.json" ;;
   "pr list"*)    printf '%s' '[]' ;;
   *)             exit 0 ;;
 esac
@@ -932,7 +940,7 @@ while [ "$M_WITHOUT" -eq "$M_WITH" ]; do M_WITHOUT=$(( 1000 + RANDOM % 9000 )); 
 # in a no-board dry run is single-digit (the open count, the eligible count), so a
 # four-digit needle has nowhere else in this output to match by accident.
 jq -n -c --arg m "$MARKER" --argjson a "$M_WITH" --argjson b "$M_WITHOUT" \
-  '[{number:$a, title:"marked and tiered", body:($m + "\n\n## Tier: `auto-ok`\n"), labels:[]},
+  '[{number:$a, title:"marked and tiered", body:("## Tier: `auto-ok`\n"), labels:[{"name":"agent-session:spec"}]},
     {number:$b, title:"never went through intake", body:"An ordinary bug report.\n", labels:[]}]' \
   > "$M_TMP/issues.json"
 
@@ -1047,6 +1055,14 @@ for a in "$@"; do [ "$prev" = "--json" ] && fields="$a"; prev="$a"; done
 _serve() { jq --arg f "$fields" \
              '[.[] | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' "$1"; }
 case "$*" in
+    "issue list"*"--search"*)
+       jq --arg f "$fields" \
+       '[.[] | select((.labels // []) | all(.name != "agent-session:spec")) | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' \
+       "$STUB_DIR/issues.json" ;;
+  "issue list"*"--label"*)
+       jq --arg f "$fields" \
+       '[.[] | select((.labels // []) | any(.name == "agent-session:spec")) | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' \
+       "$STUB_DIR/issues.json" ;;
   "issue list"*) _serve "$STUB_DIR/issues.json" ;;
   "pr list"*)    _serve "$STUB_DIR/prs.json" ;;
   *)             exit 0 ;;
@@ -1071,7 +1087,7 @@ _ref_run() { # serves $R_TMP/{issues,prs}.json to one dry run -> the run's stdou
 # number in it would be a second place for `#11` to appear.
 jq -n -c --arg m "$MARKER" \
   '[{number:11, title:"the issue a triage sweep merely mentioned",
-     body:($m + "\n\n## Tier: `auto-ok`\n"), labels:[]}]' \
+     body:("## Tier: `auto-ok`\n"), labels:[{"name":"agent-session:spec"}]}]' \
   > "$R_TMP/issues.json"
 
 _ref_probe() { # $1 = label, $2 = the run's stdout
@@ -1188,7 +1204,7 @@ echo "#32: a classifier warning must not overwrite the outcome"
 # set in the block, so the expected value is the block's own text rather than
 # gate.py's default.
 C32_SHA="deadbeefcafe"
-C32_BODY="$GATE_MARKER
+C32_BODY="## Merge gate
 \`\`\`yaml
 tier: auto-ok
 checks: C1 pass
@@ -1712,13 +1728,17 @@ S74_TMP="$(mktemp -d)"
 mkdir -p "$S74_TMP/bin"
 
 cat > "$S74_TMP/issues.json" <<'JSON'
-[{"number":42,"title":"issue 74 test","body":"<!-- agent-session:spec -->\n\n## Tier: `auto-ok`\n","labels":[]}]
+[{"number":42,"title":"issue 74 test","body":"## Tier: `auto-ok`\n","labels":[{"name":"agent-session:spec"}]}]
 JSON
 
 cat > "$S74_TMP/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 echo "$@" >> "$STUB_DIR/gh_calls.log"
 case "$*" in
+    "issue list"*"--search"*)
+       jq '[.[] | select((.labels // []) | all(.name != "agent-session:spec"))]' "$STUB_DIR/issues.json" ;;
+  "issue list"*"--label"*)
+       jq '[.[] | select((.labels // []) | any(.name == "agent-session:spec"))]' "$STUB_DIR/issues.json" ;;
   "issue list"*) cat "$STUB_DIR/issues.json" ;;
   "project item-list"*) printf '{"items":[{"id":"PVTI_42","content":{"number":42,"type":"Issue"},"status":"Ready"}]}' ;;
   "project field-list"*) printf '[{"id":"PVTF_1","name":"Status","options":[{"id":"PVTO_ready","name":"Ready"},{"id":"PVTO_prog","name":"In progress"}]}]' ;;
@@ -1763,17 +1783,21 @@ rm -rf "$S74_TMP"
 S74_G2_TMP="$(mktemp -d)"
 mkdir -p "$S74_G2_TMP/bin"
 cat > "$S74_G2_TMP/issues.json" <<'JSON'
-[{"number":43,"title":"issue 74 g2 test","body":"<!-- agent-session:spec -->\n\n## Tier: `auto-ok`\n","labels":[]}]
+[{"number":43,"title":"issue 74 g2 test","body":"## Tier: `auto-ok`\n","labels":[{"name":"agent-session:spec"}]}]
 JSON
 cat > "$S74_G2_TMP/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 echo "$@" >> "$STUB_DIR/gh_calls.log"
 case "$*" in
+    "issue list"*"--search"*)
+       jq '[.[] | select((.labels // []) | all(.name != "agent-session:spec"))]' "$STUB_DIR/issues.json" ;;
+  "issue list"*"--label"*)
+       jq '[.[] | select((.labels // []) | any(.name == "agent-session:spec"))]' "$STUB_DIR/issues.json" ;;
   "issue list"*) cat "$STUB_DIR/issues.json" ;;
   "project item-list"*) printf '{"items":[{"id":"PVTI_43","content":{"number":43,"type":"Issue"},"status":"In review"}]}' ;;
   "project field-list"*) printf '[{"id":"PVTF_1","name":"Status","options":[{"id":"PVTO_ready","name":"Ready"},{"id":"PVTO_review","name":"In review"}]}]' ;;
   "project view"*) printf '{"id":"PVT_proj1"}' ;;
-  "pr list"*) printf '[{"number":100,"title":"pr","body":"Closes #43\n\n<!-- agent-session:gate -->\n```yaml\ntier: auto-ok\nchecks: pass\nguards: none\ntamper: verified\nci: 1/1 pass\nverdict: eligible-for-auto-merge\n```\n","headRefName":"fix","url":"https://github.com/stub/repo/pull/100","closingIssuesReferences":[{"number":43}]}]' ;;
+  "pr list"*) printf '[{"number":100,"title":"pr","body":"Closes #43\n\n## Merge gate\n```yaml\ntier: auto-ok\nchecks: pass\nguards: none\ntamper: verified\nci: 1/1 pass\nverdict: eligible-for-auto-merge\n```\n","headRefName":"fix","url":"https://github.com/stub/repo/pull/100","closingIssuesReferences":[{"number":43}]}]' ;;
   "pr view"*|*_headRefOid*) printf 'sha123' ;;
   "pr checks"*) printf '[]' ;;
   *) exit 0 ;;
@@ -1807,11 +1831,15 @@ echo "#87: denials count"
 S87_TMP="$(mktemp -d)"
 mkdir -p "$S87_TMP/bin"
 cat > "$S87_TMP/issues.json" <<'JSON'
-[{"number":87,"title":"issue 87 test","body":"<!-- agent-session:spec -->\n\n## Tier: `auto-ok`\n","labels":[]}]
+[{"number":87,"title":"issue 87 test","body":"## Tier: `auto-ok`\n","labels":[{"name":"agent-session:spec"}]}]
 JSON
 cat > "$S87_TMP/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
+    "issue list"*"--search"*)
+       jq '[.[] | select((.labels // []) | all(.name != "agent-session:spec"))]' "$STUB_DIR/issues.json" ;;
+  "issue list"*"--label"*)
+       jq '[.[] | select((.labels // []) | any(.name == "agent-session:spec"))]' "$STUB_DIR/issues.json" ;;
   "issue list"*) cat "$STUB_DIR/issues.json" ;;
   "project item-list"*) printf '{"items":[{"id":"PVTI_87","content":{"number":87,"type":"Issue"},"status":"Ready"}]}' ;;
   "project field-list"*) printf '[{"id":"PVTF_1","name":"Status","options":[{"id":"PVTO_ready","name":"Ready"},{"id":"PVTO_review","name":"In review"}]}]' ;;
@@ -1916,7 +1944,6 @@ printf '%s' '[{"number":42,"title":"stub pr","body":"Closes #83","headRefName":"
 cat > "$S83_BIN/pr-body.txt" <<'EOF'
 ## Merge gate
 
-<!-- agent-session:gate -->
 ```yaml
 tier: auto-ok
 checks: C1 pass
@@ -2090,7 +2117,7 @@ STUB
 chmod +x "$E_TMP/bin/gh"
 
 jq -n -c --arg m "$MARKER" \
-  '[{number:999, title:"loop breaker test", body:($m + "\n\n## Tier: `auto-ok`\n"), labels:[]}]' \
+  '[{number:999, title:"loop breaker test", body:("## Tier: `auto-ok`\n"), labels:[{"name":"agent-session:spec"}]}]' \
   > "$E_TMP/issues.json"
 
 _escalate_run() {

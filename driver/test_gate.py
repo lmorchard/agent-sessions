@@ -32,7 +32,6 @@ def body_with(
     lines = [
         "## Merge gate",
         "",
-        gate.GATE_MARKER,
         "```yaml",
         "tier: auto-ok",
         f"checks: {checks}",
@@ -59,13 +58,10 @@ def test_extract_gate_returns_block_contents():
     assert "## Merge gate" not in got
 
 
-def test_extract_gate_absent_marker_is_empty():
+def test_extract_gate_absent_heading_is_empty():
     assert gate.extract_gate("no gate here\n```\nstuff\n```") == ""
 
 
-def test_extract_gate_empty_marker_is_empty():
-    """`extract_gate()` will behave incorrectly if called with an empty `marker`. Add guard."""
-    assert gate.extract_gate("some\n\n```\nstuff\n```", marker="") == ""
 
 
 def test_extract_gate_stops_at_closing_fence():
@@ -73,7 +69,7 @@ def test_extract_gate_stops_at_closing_fence():
 
 
 def test_extract_gate_handles_unfenced_block():
-    unfenced = "## Merge gate\n\n<!-- agent-session:gate -->\nverdict: eligible-for-auto-merge\nreason: All tests passed\n\n## References\n"
+    unfenced = "## Merge gate\n\nverdict: eligible-for-auto-merge\nreason: All tests passed\n\n## References\n"
     got = gate.extract_gate(unfenced)
     assert "verdict: eligible-for-auto-merge" in got
     assert "reason: All tests passed" in got
@@ -159,7 +155,7 @@ def test_missing_gate_block_is_no_gate():
     r = gate.classify(gate.extract_gate("a PR body with no gate"))
     assert r["outcome"] == "no-gate"
     assert r["has_gate"] is False
-    assert gate.GATE_MARKER in r["reason"]
+    assert "## Merge gate" in r["reason"]
 
 
 def test_reason_defaults_are_supplied():
@@ -175,7 +171,7 @@ def test_explicit_reason_wins_over_the_default():
 # --- tier extraction ------------------------------------------------------
 
 def _issue(*tier_lines):
-    return "\n".join([gate.SPEC_MARKER, "", "prose", *tier_lines])
+    return "\n".join(["prose", *tier_lines])
 
 
 @pytest.mark.parametrize("lines,expected", [
@@ -195,8 +191,6 @@ def test_tier_anchor_ignores_the_phrase_in_prose():
     assert gate.tier_of(body) == "auto-ok"
 
 
-def test_no_marker_is_missing():
-    assert gate.tier_of("## Tier: `auto-ok`\nno marker") == "missing"
 
 
 def test_shipped_spec_template_parses_through_the_shipped_parser():
@@ -217,7 +211,7 @@ def test_shipped_spec_template_parses_through_the_shipped_parser():
         Path(__file__).parent.parent
         / "skills/agent-session/references/spec-template.md"
     ).read_text()
-    assert gate.tier_of(template, marker="") in ("auto-ok", "needs-review")
+    assert gate.tier_of(template) in ("auto-ok", "needs-review")
 
 
 # --- budget reclassification ----------------------------------------------
@@ -267,21 +261,17 @@ def test_module_imports_without_site_packages():
 
 # --- selection: tier-batch (replaces the driver's inline TIER_JQ) -----------
 
-def test_tier_batch_drops_marker_less_issues():
-    """Dropped is not the same as `missing`, and collapsing them would hide a defect."""
-    rows = gate.tier_batch([{"number": 1, "title": "t", "body": "## Tier: `auto-ok`"}])
-    assert rows == []
 
 
-def test_tier_batch_reports_missing_for_specced_issue_with_no_heading():
-    rows = gate.tier_batch([{"number": 7, "title": "t", "body": gate.SPEC_MARKER}])
+def test_tier_batch_reports_missing_for_issue_with_no_heading():
+    rows = gate.tier_batch([{"number": 7, "title": "t", "body": "no heading"}])
     assert rows == [("7", "missing", "t")]
 
 
 def test_tier_batch_tabs_in_titles_are_neutralised():
     """The driver reads these rows with `cut -f`, so an embedded tab would shift fields."""
     rows = gate.tier_batch(
-        [{"number": 3, "title": "a\tb", "body": gate.SPEC_MARKER + "\n## Tier: `auto-ok`"}])
+        [{"number": 3, "title": "a\tb", "body": "## Tier: `auto-ok`"}])
     assert rows == [("3", "auto-ok", "a b")]
 
 
@@ -290,60 +280,8 @@ def test_tier_batch_null_body_is_skipped_not_crashed():
 
 
 def test_tier_batch_surfaces_conflict_rather_than_picking():
-    body = gate.SPEC_MARKER + "\n## Tier: `needs-review`\n## Tier: `auto-ok` (revised)"
+    body = "" + "\n## Tier: `needs-review`\n## Tier: `auto-ok` (revised)"
     assert gate.tier_batch([{"number": 5, "title": "t", "body": body}])[0][1] == "conflict"
-
-
-# --- issue #19: marker line-anchoring tests -------------------------------
-
-def test_inline_code_span_spec_marker_does_not_count_as_spec_marker():
-    """#19 C1: spec marker in inline code span must not trigger tier_batch or tier_of."""
-    quoting_body = (
-        "An issue quoting `<!-- agent-session:spec -->` inline in prose\n\n"
-        "## Tier: `auto-ok`"
-    )
-    bare_body = (
-        f"{gate.SPEC_MARKER}\n\n"
-        "An issue with bare marker\n\n"
-        "## Tier: `auto-ok`"
-    )
-    # (a) tier_batch on a code-span-only body returns []
-    assert gate.tier_batch([{"number": 1, "title": "t", "body": quoting_body}]) == []
-    # (b) tier_of on the same body returns "missing"
-    assert gate.tier_of(quoting_body) == "missing"
-    # (c) positive control: bare marker body emits row with tier
-    assert gate.tier_batch([{"number": 2, "title": "t2", "body": bare_body}]) == [
-        ("2", "auto-ok", "t2")
-    ]
-
-
-def test_inline_code_span_gate_marker_does_not_extract_gate():
-    """#19 C2: gate marker in inline code span must not extract a gate block."""
-    quoting_pr_body = (
-        "PR body quoting `<!-- agent-session:gate -->` inline\n"
-        "```yaml\n"
-        "verdict: eligible-for-auto-merge\n"
-        "```"
-    )
-    bare_pr_body = body_with("2/2 pass @ abc1234")
-
-    # (a) extract_gate on code-span-only PR body returns empty string
-    assert gate.extract_gate(quoting_pr_body) == ""
-    # (b) positive control: real gate block is extracted
-    assert "verdict: eligible-for-auto-merge" in gate.extract_gate(bare_pr_body)
-
-
-def test_corpus_bodies_snapshot_verdicts():
-    """#19 GUARD: snapshot corpus bodies whose marker sits alone on line 1 keep exact verdicts."""
-    corpus = [
-        (f"{gate.SPEC_MARKER}\n## Tier: `auto-ok`", "auto-ok"),
-        (f"{gate.SPEC_MARKER}\n## Tier: `needs-review`", "needs-review"),
-        (f"{gate.SPEC_MARKER}\n## Tier: undecided", "unparsed"),
-        (f"{gate.SPEC_MARKER}\nno tier heading", "missing"),
-        (f"{gate.SPEC_MARKER}\n## Tier: `needs-review`\n## Tier: `auto-ok` (revised)", "conflict"),
-    ]
-    for body, expected in corpus:
-        assert gate.tier_of(body) == expected
 
 
 # --- issue #30: live CI grading for pending/unparseable verdicts -----------

@@ -26,7 +26,7 @@ criteria), and you do the part that does (ratify). See
    concurrency). Each subagent, in its own context:
    - reads the issue body,
    - scores spec-completeness: does it have a clear goal? verifiable acceptance criteria?
-     is it already marked with `<!-- agent-session:spec -->`?
+     is it already marked with the `agent-session:spec` label?
    - if under-specified, does light codebase research and **drafts *proposed* criteria +
      checks + guards + a tier** per `acceptance-criteria.md` — a proposal, not a commitment,
    - **runs each proposed check** and records what it observed, so the ratify pass knows which
@@ -66,8 +66,8 @@ criteria), and you do the part that does (ratify). See
    apply the escalation ladder — it lands the issue in `needs-review`.
 
 5. **Write back (augment in place).** For each ratified issue, run `intake`'s file-or-update step,
-   *existing-issue* path: `gh issue edit <n>` — prepend the marker, add the verifiable
-   criteria + tier sections, apply the tier label, **preserving the original author's
+   *existing-issue* path: `gh issue edit <n>` — add the `agent-session:spec` label (`--add-label`), add the verifiable
+   criteria + tier sections, **preserving the original author's
    text**. Update the board if configured. Where the ratify pass settled a decision, carry
    `intake`'s Design-decisions step with it — the body, not a comment; comments are invisible
    to every downstream mode.

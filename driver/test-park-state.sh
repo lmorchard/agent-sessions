@@ -73,7 +73,6 @@ Closes #$ISSUE
 
 ## Merge gate
 
-<!-- agent-session:gate -->
 \`\`\`yaml
 tier: auto-ok
 checks: C1 pass
@@ -92,8 +91,8 @@ PR_LIST_JSON='[{"number":42,"title":"stub pr","body":"Closes #7","headRefName":"
 # #7 carries the park label, #8 does not. Both carry the marker and an auto-ok
 # tier, so tier-batch keeps them and only the label can explain a difference.
 issue_list_json() { cat <<EOF
-[{"number":7,"title":"issue carrying the label","body":"<!-- agent-session:spec -->\nbody\n\n## Tier: \`auto-ok\`\n","labels":[{"name":"$PARK_LABEL"}]},
- {"number":8,"title":"issue without the label","body":"<!-- agent-session:spec -->\nbody\n\n## Tier: \`auto-ok\`\n","labels":[{"name":"enhancement"}]}]
+[{"number":7,"title":"issue carrying the label","body":"body\n\n## Tier: \`auto-ok\`\n","labels":[{"name":"$PARK_LABEL"}]},
+ {"number":8,"title":"issue without the label","body":"body\n\n## Tier: \`auto-ok\`\n","labels":[{"name":"enhancement"}]}]
 EOF
 }
 

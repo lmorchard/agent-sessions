@@ -10,7 +10,7 @@ model is good at.
 
 ## Inputs
 
-- A GitHub issue carrying `<!-- agent-session:spec -->` with criteria + checks + tier
+- A GitHub issue carrying the `agent-session:spec` label with criteria + checks + tier
 - `spec.md` in the session directory (populated by session setup)
 - The relevant source files
 

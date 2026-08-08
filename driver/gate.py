@@ -36,8 +36,6 @@ import json
 import re
 import sys
 
-GATE_MARKER = "<!-- agent-session:gate -->"
-SPEC_MARKER = "<!-- agent-session:spec -->"
 
 # A bare 7-40 char hex token anywhere in the ci row.
 #
@@ -56,26 +54,19 @@ _TIER_HEADING_RE = re.compile(r"^##[ \t]*Tier[ \t]*:")
 _NO_VERDICT_OUTCOMES = ("incomplete", "parked", "no-gate")
 
 
-def has_marker(text: str, marker: str) -> bool:
-    """Return True if `marker` sits on a line by itself in `text`."""
-    if not marker or not text:
-        return False
-    return any(line.strip() == marker for line in text.split("\n"))
 
+def extract_gate(body: str) -> str:
+    """Return the YAML block following `## Merge gate`, or "" if absent.
 
-def extract_gate(body: str, marker: str = GATE_MARKER) -> str:
-    """Return the block that follows `marker`, or "" if absent.
-
-    If the block after `marker` is fenced in ```, returns the lines inside the fence.
-    If unfenced, returns key-value lines following `marker` until the next heading or EOF.
+    Finds the first ```yaml or ``` block after the `## Merge gate` heading.
     """
-    if not marker or not body:
+    if not body:
         return ""
 
-    lines = (body or "").split("\n")
+    lines = body.split("\n")
     found_idx = -1
     for i, line in enumerate(lines):
-        if line.strip() == marker:
+        if line.strip().lower().startswith("## merge gate"):
             found_idx = i
             break
 
@@ -92,28 +83,25 @@ def extract_gate(body: str, marker: str = GATE_MARKER) -> str:
     if first_non_empty_idx == -1:
         return ""
 
-    if remaining[first_non_empty_idx].strip().startswith("```"):
-        opened = False
-        out: list[str] = []
-        for line in remaining[first_non_empty_idx:]:
-            if line.strip().startswith("```"):
-                if not opened:
-                    opened = True
-                    continue
-                break
-            if opened:
-                out.append(line)
-        return "\n".join(out)
-
-    out = []
+    out: list[str] = []
+    opened = False
     for line in remaining[first_non_empty_idx:]:
         sline = line.strip()
-        if sline.startswith("#") or sline.startswith("<!--"):
+        if sline.startswith("```"):
+            if not opened:
+                opened = True
+                continue
             break
-        if ":" in sline:
+        if opened:
             out.append(line)
-        elif not sline and out:
-            break
+        elif sline and not sline.startswith("<!--"):
+            # If we hit non-empty text before a fence, we might be unfenced.
+            # But the new spec says "extract the YAML block using standard markdown codeblock extractors"
+            # We can allow unfenced if it's key-value like before, but inside the fence is preferred.
+            if ":" in sline:
+                out.append(line)
+            else:
+                break
     return "\n".join(out)
 
 
@@ -357,7 +345,6 @@ def classify(
     gate: str,
     head_sha: str = "",
     ci_checks: list[dict] | str | None = None,
-    marker: str = GATE_MARKER,
 ) -> dict:
     """Classify a gate block into an outcome + reason.
 
@@ -392,7 +379,7 @@ def classify(
 
     if not result["has_gate"]:
         result["outcome"] = "no-gate"
-        result["reason"] = f"PR exists but carries no {marker} block"
+        result["reason"] = "PR exists but carries no ## Merge gate block"
         return _check_substitute_and_return(result)
 
     result["fields"] = gate_fields(gate)
@@ -473,7 +460,7 @@ def classify(
     return _check_substitute_and_return(result)
 
 
-def tier_of(body: str, marker: str = SPEC_MARKER) -> str:
+def tier_of(body: str) -> str:
     """Tier named by an issue body: auto-ok | needs-review | conflict | missing | unparsed.
 
     The `^## Tier:` anchor is load-bearing: #585's tier paragraph contains the
@@ -485,8 +472,6 @@ def tier_of(body: str, marker: str = SPEC_MARKER) -> str:
     not resolved -- and it fired for real when a re-tiering appended a second
     `## Tier:` heading instead of replacing the first.
     """
-    if marker and not has_marker(body, marker):
-        return "missing"
     lines = [ln for ln in (body or "").split("\n") if _TIER_HEADING_RE.search(ln)]
     if not lines:
         return "missing"
@@ -501,10 +486,10 @@ def tier_of(body: str, marker: str = SPEC_MARKER) -> str:
     return "unparsed"
 
 
-def tier_batch(issues: list, marker: str = SPEC_MARKER) -> list[tuple[str, str, str]]:
-    """(number, tier, title) for every issue carrying `marker`. Others are dropped.
+def tier_batch(issues: list) -> list[tuple[str, str, str]]:
+    """(number, tier, title) for every issue passed in. Others are dropped.
 
-    Replaces the driver's inline `TIER_JQ` jq program. Dropping a marker-less
+    Replaces the driver's inline `TIER_JQ` jq program. Dropping a unlabelled
     issue is deliberate and is *not* the same as `missing`: an issue without the
     marker is not a candidate at all (nothing has specced it), whereas `missing`
     means specced but carrying no `## Tier:` line, which is a real defect worth
@@ -513,10 +498,10 @@ def tier_batch(issues: list, marker: str = SPEC_MARKER) -> list[tuple[str, str, 
     rows: list[tuple[str, str, str]] = []
     for issue in issues or []:
         body = issue.get("body")
-        if body is None or not has_marker(body, marker):
+        if body is None:
             continue
         title = str(issue.get("title", "")).replace("\t", " ")
-        rows.append((str(issue.get("number", "")), tier_of(body, marker=marker), title))
+        rows.append((str(issue.get("number", "")), tier_of(body), title))
     return rows
 
 
@@ -542,17 +527,14 @@ def _main(argv: list[str] | None = None) -> int:
     c = sub.add_parser("classify", help="PR body on stdin -> classification JSON")
     c.add_argument("--head-sha", default="")
     c.add_argument("--ci-checks", default=None)
-    c.add_argument("--marker", default=GATE_MARKER)
 
     t = sub.add_parser("tier", help="issue body on stdin -> tier JSON")
-    t.add_argument("--marker", default=SPEC_MARKER)
 
     tb = sub.add_parser(
         "tier-batch",
         help="gh issue list JSON array on stdin -> TSV of number/tier/title for "
              "marker-carrying issues only",
     )
-    tb.add_argument("--marker", default=SPEC_MARKER)
 
     b = sub.add_parser("budget-reclass", help="reclassify an outcome by spend")
     b.add_argument("--outcome", required=True)
@@ -562,20 +544,19 @@ def _main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     if args.cmd == "classify":
-        gate = extract_gate(sys.stdin.read(), marker=args.marker)
+        gate = extract_gate(sys.stdin.read())
         out = classify(
             gate,
             head_sha=args.head_sha,
             ci_checks=args.ci_checks,
-            marker=args.marker,
         )
     elif args.cmd == "tier":
-        out = {"tier": tier_of(sys.stdin.read(), marker=args.marker)}
+        out = {"tier": tier_of(sys.stdin.read())}
     elif args.cmd == "tier-batch":
         # TSV, not JSON: this replaces a jq program whose output the driver's
         # selection loop already reads field-by-field with `cut`. Emitting the
         # same shape keeps the change to parsing only.
-        for row in tier_batch(json.load(sys.stdin), marker=args.marker):
+        for row in tier_batch(json.load(sys.stdin)):
             sys.stdout.write("\t".join(row) + "\n")
         return 0
     else:

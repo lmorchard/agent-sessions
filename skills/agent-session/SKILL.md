@@ -31,7 +31,7 @@ which mode, or assess the current session state and suggest one.
 | `fix_ci` | `phases/fix_ci.md` | Fix failing CI checks |
 | `grade_gate` | `phases/grade_gate.md` | Derive merge gate verdict and update PR block |
 
-The **producer/consumer seam** is the `<!-- agent-session:spec -->` marker: `intake` and
+The **producer/consumer seam** is the `agent-session:spec` label: `intake` and
 `triage` produce issues carrying it; `plan`/`execute`/`express` refuse to run without it.
 
 ## The shared engine (in-dir references)

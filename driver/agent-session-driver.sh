@@ -22,8 +22,6 @@
 
 set -euo pipefail
 
-MARKER='<!-- agent-session:spec -->'
-GATE_MARKER='<!-- agent-session:gate -->'
 
 # Park state lives on the ISSUE, as a label, and this is the whole name of it.
 #
@@ -606,20 +604,24 @@ ELIGIBLE=""
 
 select_issues() {
   say "== select =="
-  local issues_json total
-  issues_json="$(gh issue list --repo "$REPO" --state open --limit 500 \
+  local candidates_json markerless_json total
+  candidates_json="$(gh issue list --repo "$REPO" --state open --limit 500 \
+                   --label "agent-session:spec" \
                    --json number,title,body,labels 2>/dev/null || echo '[]')"
-  total="$(printf '%s' "$issues_json" | jq 'length')"
+  markerless_json="$(gh issue list --repo "$REPO" --state open --limit 500 \
+                   --search "-label:agent-session:spec type:issue state:open" \
+                   --json number,title,body,labels 2>/dev/null || echo '[]')"
+  local candidates_count
+  candidates_count="$(printf '%s' "$candidates_json" | jq 'length')"
+  local n_markerless
+  n_markerless="$(printf '%s' "$markerless_json" | jq 'length')"
+  total=$(( candidates_count + n_markerless ))
 
   local candidates
-  candidates="$(printf '%s' "$issues_json" | "$PYTHON_BIN" "$GATE_PY" tier-batch --marker "$MARKER")"
+  candidates="$(printf '%s' "$candidates_json" | "$PYTHON_BIN" "$GATE_PY" tier-batch)"
 
   local specced_nums markerless_nums markerless_list n_markerless m
-  specced_nums="$(printf '%s' "$candidates" | cut -f1 | tr '\n' ' ')"
-  markerless_nums="$(printf '%s' "$issues_json" | jq -r --arg keep "$specced_nums" '
-      ($keep | split(" ") | map(select(length > 0))) as $k
-      | .[] | .number | tostring | . as $n
-      | select(($k | index($n)) == null)')"
+  markerless_nums="$(printf '%s' "$markerless_json" | jq -r '.[].number')"
 
   local p1_unblock=""
   local p2_execute=""
@@ -636,7 +638,7 @@ select_issues() {
   done
 
   if [ "$n_markerless" -gt 0 ]; then
-    say "repo $REPO: read $total open issues ($(( total - n_markerless )) carry the marker;" \
+    say "repo $REPO: read $total open issues ($(( total - n_markerless )) carry the label;" \
         "$n_markerless do not: $markerless_list -- run triage)"
   else
     say "repo $REPO: read $total open issues"
@@ -648,6 +650,8 @@ select_issues() {
   load_board
   local prs parked
   prs="$("$PYTHON_BIN" "$GH_QUERY_PY" fetch-open-prs --repo "$REPO")" || die "open-PR query failed -- cannot tell which issues already have open PRs, so selection would be a guess. Refusing to select. (gh's own error is above.)"
+  # Fetch all issues for park lookup
+  local issues_json="$(gh issue list --repo "$REPO" --state open --limit 500 --json number,title,body,labels 2>/dev/null || echo '[]')"
   parked="$(printf '%s' "$issues_json" | parked_numbers || true)"
 
   local n tier title col prline mention reason
