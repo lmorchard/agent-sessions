@@ -35,6 +35,7 @@ and a checker that quietly skips is the same defect one level up.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -169,12 +170,11 @@ def check_tables() -> None:
 # --- check 3: derivable counts ---------------------------------------------
 
 def live_bash_assertions() -> int | None:
-    script = ROOT / "driver" / "test-driver.sh"
-    if not script.exists():
-        return None
     try:
-        r = subprocess.run(["bash", str(script)], capture_output=True, text=True,
-                           cwd=ROOT, timeout=120)
+        env = dict(os.environ)
+        env["AGENT_SESSIONS_GATE_TEST_WIRING_INNER_RUN"] = "1"
+        r = subprocess.run(["make", "gate-test"], capture_output=True, text=True,
+                           cwd=ROOT, timeout=120, env=env)
     except (OSError, subprocess.TimeoutExpired):
         return None
     m = re.search(r"(\d+) passed", r.stdout)
@@ -185,7 +185,7 @@ def check_counts() -> None:
     """Any '<N> assertion(s)' claim in a maintained doc must match the suite."""
     actual = live_bash_assertions()
     if actual is None:
-        skips.append("assertion counts: could not run driver/test-driver.sh "
+        skips.append("assertion counts: could not run make gate-test "
                      "(NOT verified -- this is a skip, not a pass)")
         return
 

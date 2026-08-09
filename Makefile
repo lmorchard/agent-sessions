@@ -35,7 +35,7 @@ check: driver-check
 
 .PHONY: check-parallel driver-test-sh
 
-check-parallel: gate-test driver-test-sh park-test skill-readonly docs-check assertion-lint commit-lint
+check-parallel: gate-test skill-readonly docs-check assertion-lint commit-lint
 
 board-audit:
 	@python3 scripts/board_audit.py --owner lmorchard --project 9 --repo lmorchard/agent-sessions
@@ -49,22 +49,14 @@ driver-check:
 	fi; \
 	echo "driver-check: no executable merge path in $(DRIVER)"
 
-# Two suites, one parser. driver/test_gate.py IMPORTS driver/gate.py rather than
-# restating it -- which is the whole point of extracting it. test-driver.sh used
-# to hand-copy the parsers, the copies drifted, and the suite ended up grading a
-# replica that called a stale-CI PR eligible for auto-merge where the shipped
-# code voided it.
-#
 # `uv` runs the tests; the driver itself calls plain `python3`, because gate.py is
 # stdlib-only and must stay portable to a GHA runner.
-driver-test:
-	@uv run --quiet pytest -n auto driver/test_*.py scripts/test_*.py
+driver-test: gate-test
 
 gate-test:
 	@uv run --quiet pytest -n auto driver/test_*.py scripts/test_*.py
 
-park-test:
-	@uv run --quiet pytest -n auto driver/test_*.py scripts/test_*.py
+park-test: gate-test
 
 # Replaces move 3's `skill-untouched` guard, which pinned skills/ to a snapshot to
 # prove the driver needed no skill edit. That claim is now verified and permanently

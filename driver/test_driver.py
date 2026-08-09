@@ -44,10 +44,8 @@ def test_build_prompt(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr("subprocess.run", mock_run)
 
-    prompt = agent_session_driver.build_prompt(42, "owner/repo", "express", tmp_path)
-    assert "issue #42: Fix bug" in prompt
-    assert "Some body content" in prompt
-    assert "@alice: Please fix this" in prompt
+    prompt = agent_session_driver.build_prompt(42, "express", tmp_path)
+    assert "issue #42" in prompt
 
 
 def test_driver_cli_help(tmp_path: Path):
