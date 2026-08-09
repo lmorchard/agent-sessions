@@ -46,4 +46,18 @@ gh label create "agent-session:needs-human" \
   --description "The agent-session driver parked this issue for human ratification" \
   2>/dev/null || echo "    (Label already exists)"
 
+echo "--> Creating 'agent-session:gate' label..."
+gh label create "agent-session:gate" \
+  --repo "$REPO" \
+  --color 0E8A16 \
+  --description "PR has a merge gate block and is ready for grading" \
+  2>/dev/null || echo "    (Label already exists)"
+
+echo "--> Creating 'agent-session:merge-ready' label..."
+gh label create "agent-session:merge-ready" \
+  --repo "$REPO" \
+  --color 2E8A16 \
+  --description "Issue is eligible for auto-merge, waiting for human or auto-merge script" \
+  2>/dev/null || echo "    (Label already exists)"
+
 echo "==> Done. $REPO is ready for agent-sessions."
