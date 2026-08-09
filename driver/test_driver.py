@@ -87,3 +87,26 @@ def test_driver_env_defaults(tmp_path: Path, monkeypatch):
 
     ret = agent_session_driver.main(["--dry-run"])
     assert ret == 0
+
+
+def test_has_new_human_comment(monkeypatch):
+    class MockResult:
+        returncode = 0
+
+        def __init__(self, login):
+            self.stdout = json.dumps({"comments": [{"author": {"login": login}, "body": "Comment text"}]})
+
+    def mock_run_human(cmd, *args, **kwargs):
+        return MockResult("alice")
+
+    monkeypatch.setattr("subprocess.run", mock_run_human)
+    has_human, login = agent_session_driver.has_new_human_comment(42, "owner/repo")
+    assert has_human is True
+    assert login == "alice"
+
+    def mock_run_bot(cmd, *args, **kwargs):
+        return MockResult("github-actions[bot]")
+
+    monkeypatch.setattr("subprocess.run", mock_run_bot)
+    has_human, login = agent_session_driver.has_new_human_comment(42, "owner/repo")
+    assert has_human is False

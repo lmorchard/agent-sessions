@@ -130,6 +130,27 @@ def park_label_remove(issue_number: str | int, repo: str) -> None:
         say(f"  WARNING: could not remove the {PARK_LABEL} label from #{issue_number} -- it stays parked")
 
 
+def has_new_human_comment(issue_number: str | int, repo: str) -> tuple[bool, str]:
+    """Check if the latest comment on a parked issue is from a human user.
+    Returns (has_human_comment, author_login).
+    """
+    try:
+        cmd = ["gh", "issue", "view", str(issue_number), "--repo", repo, "--json", "comments"]
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        data = json.loads(res.stdout)
+        comments = data.get("comments", [])
+        if not comments:
+            return False, ""
+        latest = comments[-1]
+        author = latest.get("author", {})
+        login = author.get("login", "")
+        if not login or login.endswith("[bot]") or login in ("github-actions", "agent-session"):
+            return False, ""
+        return True, login
+    except Exception:
+        return False, ""
+
+
 def notify_human(issue_number: str | int, reason: str, state_dir: Path | None) -> None:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     if state_dir and state_dir.exists():
@@ -734,8 +755,15 @@ def main(argv: list[str] | None = None) -> int:
         m = str(m_iss.get("number"))
         markerless_list.append(f"#{m}")
         if m in parked and str(m) != args.retry:
-            reason = park_reason(m, state_dir)
-            say(f"  SKIP    #{m}  parked: {reason}")
+            has_human, human_login = has_new_human_comment(m, repo)
+            if has_human:
+                say(f"  UNPARK  #{m}  new comment from @{human_login} detected -- removing {PARK_LABEL}")
+                park_label_remove(m, repo)
+                clear_attempt_labels(m, repo)
+            else:
+                reason = park_reason(m, state_dir)
+                say(f"  SKIP    #{m}  parked: {reason}")
+                continue
         else:
             phase = "triage"
             attempts = get_attempts(m, repo, issues_json=all_issues_json)
@@ -759,6 +787,13 @@ def main(argv: list[str] | None = None) -> int:
         tier = gate.tier_of(body)
 
         is_parked = n in parked and str(n) != args.retry
+        if is_parked:
+            has_human, human_login = has_new_human_comment(n, repo)
+            if has_human:
+                say(f"  UNPARK  #{n}  new comment from @{human_login} detected -- removing {PARK_LABEL}")
+                park_label_remove(n, repo)
+                clear_attempt_labels(n, repo)
+                is_parked = False
         parked_r = park_reason(n, state_dir) if is_parked else ""
 
         is_invalid_tier = tier in ("conflict", "missing", "unparsed")
