@@ -40,6 +40,7 @@ fi
 # no repo at all -- and visible on the issue, where a human decides whether to
 # --retry. See issue #5, decision D2.
 PARK_LABEL='agent-session:needs-human'
+INTERACTIVE_LABEL='agent-session:needs-human-interactive'
 MERGE_READY_LABEL='agent-session:merge-ready'
 
 # --- defaults --------------------------------------------------------------
@@ -449,8 +450,8 @@ touch "$RUNS_LOG" "$PARKED_LOG"
 # THIS function by name with sed and runs it, so a rename fails the check closed
 # rather than leaving it grading a copy. Do not mirror this logic in a test file.
 parked_numbers() { # issues json on stdin -> one parked issue number per line
-  jq -r --arg label "$PARK_LABEL" \
-     '.[]? | select((.labels // []) | any(.name == $label)) | .number' 2>/dev/null | sort -u
+  jq -r --arg label "$PARK_LABEL" --arg interactive "$INTERACTIVE_LABEL" \
+     '.[]? | select((.labels // []) | any(.name == $label or .name == $interactive)) | .number' 2>/dev/null | sort -u
 }
 
 # The label carries no reason, so the reason comes from the run history -- which is

@@ -46,6 +46,13 @@ gh label create "agent-session:needs-human" \
   --description "The agent-session driver parked this issue for human ratification" \
   2>/dev/null || echo "    (Label already exists)"
 
+echo "--> Creating 'agent-session:needs-human-interactive' label..."
+gh label create "agent-session:needs-human-interactive" \
+  --repo "$REPO" \
+  --color D93F0B \
+  --description "Issue requires an interactive terminal session for visual/aesthetic iteration" \
+  2>/dev/null || echo "    (Label already exists)"
+
 echo "--> Creating 'agent-session:gate' label..."
 gh label create "agent-session:gate" \
   --repo "$REPO" \

@@ -92,4 +92,5 @@ criteria), and you do the part that does (ratify). See
 
 - An issue's intent is genuinely unclear (not just under-specified) → leave a GitHub comment explaining the ambiguity, apply the `agent-session:needs-human` label, and stop.
 - The scan surfaces duplicate/obsolete issues → comment suggesting closure, apply `agent-session:needs-human`, and stop.
+- An issue requires subjective visual/aesthetic iteration (like layout density, game feel, or UI design) → apply the `agent-session:needs-human-interactive` label instead. These cannot be handled asynchronously; they require an interactive prototype session in the CLI.
 - A subagent can't tell what "done" would mean → comment asking the human for direction, apply `agent-session:needs-human`, and stop.
