@@ -61,12 +61,12 @@ criteria), and you do the part that does (ratify). See
    - Do NOT apply the `agent-session:spec` label yet, because the human hasn't ratified the criteria.
    - Stop execution here. Do not edit the issue body yet.
 
-   - In your comment, explicitly ask the human to reply with 'Approved' or to provide corrections. Tell them NOT to manually apply the `agent-session:spec` label themselves, as you need to formally update the issue body first on your next pass.
+   - In your comment, explicitly ask the human to reply with 'Approved' or to provide corrections, and instruct them to **manually remove the `agent-session:needs-human` label** when they are done replying so you know to read their feedback.
 
-4. **Follow-up pass (Reading human replies).** If you are triaging an issue that already has a proposed spec comment from you, read the subsequent comments from the human.
-   - If the human explicitly approved the spec (e.g., "Approved", "Looks good", "Dependencies are fine"), proceed to Step 5.
-   - If they provided corrections, synthesize them into an updated spec and confirm if it is now complete. Proceed to Step 5 if complete, otherwise post a follow-up comment and stop.
-   - IMPORTANT: If you proceed to Step 5, you MUST explicitly remove the `agent-session:needs-human` label (`gh issue edit <n> --remove-label agent-session:needs-human`) so the background driver stops viewing the issue as parked.
+4. **Follow-up pass (Reading human replies).** The human has explicitly removed the `agent-session:needs-human` parking label, signaling that they have left feedback in the issue comments. Read the subsequent comments from the human.
+   - If they explicitly approved the spec (e.g., "Approved", "Looks good", "Dependencies are fine"), proceed to Step 5.
+   - If they provided corrections, synthesize them into an updated spec. If the spec is now complete, proceed to Step 5. 
+   - If the spec STILL needs human input after synthesizing their corrections, post a follow-up comment asking for further clarification, RE-APPLY the `agent-session:needs-human` label, and stop.
 
 5. **Write back (augment in place).** For each ratified issue, run `intake`'s file-or-update step.
    First ensure the label exists (`gh label create "agent-session:spec" --color 0E8A16 || true`).
