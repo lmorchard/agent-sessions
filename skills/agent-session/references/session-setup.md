@@ -27,7 +27,7 @@ and a drifted worktree path means a run that tests the wrong branch.
    fresh. If resuming, suggest the next mode and stop here.
 
 3. **Fetch the issue and detect the marker.** `gh issue view <n> --json title,body,labels`.
-   - **`<!-- agent-session:spec -->` present** — the issue carries a spec with verifiable
+   - **`agent-session:spec` label present** — the issue carries a spec with verifiable
      criteria. Capture the body (strip the marker line and any trailing `_Filed by_` footer).
    - **Marker absent** — the issue has not been through the front of the funnel. It has no
      criteria to verify against, so there is nothing for the back half to grade. **Stop and

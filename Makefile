@@ -77,7 +77,7 @@ driver-test: gate-test
 # drops a failing test file into scripts/ and requires this recipe to notice it
 # with no edit here.
 gate-test:
-	@uv run --quiet pytest driver/test_*.py scripts/test_*.py
+	@uv run --quiet pytest -n auto driver/test_*.py scripts/test_*.py
 
 # The frozen acceptance checks for issue #5, wired in AFTER the work landed --
 # deliberately, because guard G1 was "make check green" and it had to pass at the

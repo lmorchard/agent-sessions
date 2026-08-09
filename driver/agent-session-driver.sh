@@ -30,9 +30,6 @@ if [[ -f ".env" ]]; then
   set +a
 fi
 
-MARKER='<!-- agent-session:spec -->'
-GATE_MARKER='<!-- agent-session:gate -->'
-
 # Park state lives on the ISSUE, as a label, and this is the whole name of it.
 #
 # It used to live in ./.driver-state/parked.jsonl, which was wrong twice over: the
@@ -42,7 +39,9 @@ GATE_MARKER='<!-- agent-session:gate -->'
 # everything. A label is durable, scoped to the target repo -- parked.jsonl records
 # no repo at all -- and visible on the issue, where a human decides whether to
 # --retry. See issue #5, decision D2.
-PARK_LABEL='driver-parked'
+PARK_LABEL='agent-session:needs-human'
+INTERACTIVE_LABEL='agent-session:needs-human-interactive'
+MERGE_READY_LABEL='agent-session:merge-ready'
 
 # --- defaults --------------------------------------------------------------
 
@@ -100,35 +99,36 @@ DENIED_TOOLS='Bash(gh pr merge:*),Bash(gh pr merge *),Bash(git push --force:*),B
 
 # --- plumbing --------------------------------------------------------------
 
-get_attempts() {
+get_attempts() { # $1 = issue number
   local issue="$1"
-  local phase="$2"
-  local attempts_file="$STATE_DIR/attempts.tsv"
-  if [ -f "$attempts_file" ]; then
-    local c=$(awk -F '\t' -v key="$issue:$phase" '$1 == key {print $2; exit}' "$attempts_file")
-    echo "${c:-0}"
+  local labels_json=""
+  if [ -n "${issues_json:-}" ]; then
+    labels_json="$(printf '%s' "$issues_json" | jq -c --arg n "$issue" '.[] | select(.number == ($n|tonumber)) | .labels // []' 2>/dev/null || echo '[]')"
+  fi
+  if [ -z "$labels_json" ] || [ "$labels_json" = "[]" ]; then
+    labels_json="$(gh issue view "$issue" --repo "$REPO" --json labels --jq '.labels' 2>/dev/null || echo '[]')"
+  fi
+  
+  if printf '%s' "$labels_json" | grep -q 'agent-session:attempt-3'; then
+    echo "3"
+  elif printf '%s' "$labels_json" | grep -q 'agent-session:attempt-2'; then
+    echo "2"
+  elif printf '%s' "$labels_json" | grep -q 'agent-session:attempt-1'; then
+    echo "1"
   else
     echo "0"
   fi
 }
 
-increment_attempts() {
+clear_attempt_labels() { # $1 = issue number
+  "$PYTHON_BIN" "$LABEL_MANAGER_PY" ${REPO:+--repo "$REPO"} clear-attempts --issue "$1" >/dev/null 2>&1 || true
+}
+
+increment_attempts() { # $1 = issue number
   local issue="$1"
-  local phase="$2"
-  local attempts_file="$STATE_DIR/attempts.tsv"
-  local count=$(get_attempts "$issue" "$phase")
+  local count=$(get_attempts "$issue")
   count=$((count + 1))
-  if [ -f "$attempts_file" ]; then
-    awk -F '\t' -v key="$issue:$phase" -v count="$count" '
-      BEGIN { found=0 }
-      $1 == key { print $1 "\t" count; found=1; next }
-      { print $0 }
-      END { if (!found) print key "\t" count }
-    ' "$attempts_file" > "$attempts_file.tmp"
-    mv "$attempts_file.tmp" "$attempts_file"
-  else
-    printf '%s\t%s\n' "$issue:$phase" "$count" > "$attempts_file"
-  fi
+  "$PYTHON_BIN" "$LABEL_MANAGER_PY" ${REPO:+--repo "$REPO"} attempt --issue "$issue" --count "$count" >/dev/null 2>&1 || true
 }
 
 log()  { printf '%s  %s\n' "$(date -u +%H:%M:%SZ)" "$*" >&2; }
@@ -451,8 +451,8 @@ touch "$RUNS_LOG" "$PARKED_LOG"
 # THIS function by name with sed and runs it, so a rename fails the check closed
 # rather than leaving it grading a copy. Do not mirror this logic in a test file.
 parked_numbers() { # issues json on stdin -> one parked issue number per line
-  jq -r --arg label "$PARK_LABEL" \
-     '.[]? | select((.labels // []) | any(.name == $label)) | .number' 2>/dev/null | sort -u
+  jq -r --arg label "$PARK_LABEL" --arg interactive "$INTERACTIVE_LABEL" \
+     '.[]? | select((.labels // []) | any(.name == $label or .name == $interactive)) | .number' 2>/dev/null | sort -u
 }
 
 # The label carries no reason, so the reason comes from the run history -- which is
@@ -476,22 +476,12 @@ parked_numbers() { # issues json on stdin -> one parked issue number per line
 # touched one site would have reproduced the bug it closed.
 
 park_label_add() { # $1 = issue number
-  # The label has to exist before it can be applied, and `gh label create` exits 1
-  # when it already does (verified, not assumed) -- hence the discard. Never fatal:
-  # losing a recorded outcome over a label write would be the worse failure. Never
-  # silent either, because a failed add leaves the issue selectable, which is the
-  # exact wrong-in-the-optimistic-direction this issue is about.
-  gh label create "$PARK_LABEL" --repo "$REPO" --color FBCA04 \
-     --description "the agent-session driver parked this issue" >/dev/null 2>&1 || true
-  gh issue edit "$1" --repo "$REPO" --add-label "$PARK_LABEL" >/dev/null 2>&1 \
+  "$PYTHON_BIN" "$LABEL_MANAGER_PY" ${REPO:+--repo "$REPO"} park --issue "$1" >/dev/null 2>&1 \
     || say "  WARNING: could not add the $PARK_LABEL label to #$1 -- it stays selectable"
 }
 
 park_label_remove() { # $1 = issue number
-  # Unconditional: `--remove-label` on an issue that lacks the label exits 0 with no
-  # error (verified), so reading the labels first would spend an API call to prevent
-  # nothing.
-  gh issue edit "$1" --repo "$REPO" --remove-label "$PARK_LABEL" >/dev/null 2>&1 \
+  "$PYTHON_BIN" "$LABEL_MANAGER_PY" ${REPO:+--repo "$REPO"} unpark --issue "$1" >/dev/null 2>&1 \
     || say "  WARNING: could not remove the $PARK_LABEL label from #$1 -- it stays parked"
 }
 
@@ -522,6 +512,7 @@ apply_park_state() { # $1 = issue, $2 = outcome, $3 = ts, $4 = reason
         '{issue:($issue|tonumber), repo:$repo, parked_at:$ts, outcome:$outcome, reason:$reason}' \
         >> "$PARKED_LOG"
       park_label_add "$1"
+      clear_attempt_labels "$1"
       say "  parked -- excluded from future selection unless --retry $1"
       notify_human "$1" "$2: $4"
       ;;
@@ -533,13 +524,14 @@ apply_park_state() { # $1 = issue, $2 = outcome, $3 = ts, $4 = reason
       say "  incomplete -- leaving unparked so the loop can re-evaluate later"
       park_label_remove "$1"
       ;;
-    gate-eligible|gate-human)
+    gate-eligible)
       # A verdict means the run got somewhere, so an earlier park no longer holds.
-      # These are exactly the outcomes the driver already declines to park.
+      "$PYTHON_BIN" "$LABEL_MANAGER_PY" ${REPO:+--repo "$REPO"} merge-ready --issue "$1" >/dev/null 2>&1 || true
+      notify_human "$1" "gate-eligible: $4"
+      ;;
+    gate-human)
       park_label_remove "$1"
-      if [ "$2" = "gate-human" ]; then
-        notify_human "$1" "gate-human: $4"
-      fi
+      notify_human "$1" "gate-human: $4"
       ;;
   esac
   # budget-exhausted, driver-fault and ci-stale deliberately match neither arm.
@@ -614,20 +606,29 @@ ELIGIBLE=""
 
 select_issues() {
   say "== select =="
-  local issues_json total
-  issues_json="$(gh issue list --repo "$REPO" --state open --limit 500 \
+  local candidates_json markerless_json total
+  candidates_json="$(gh issue list --repo "$REPO" --state open --limit 500 \
+                   --search "label:agent-session:spec -label:agent-session:merge-ready type:issue state:open" \
                    --json number,title,body,labels 2>/dev/null || echo '[]')"
-  total="$(printf '%s' "$issues_json" | jq 'length')"
+  markerless_json="$(gh issue list --repo "$REPO" --state open --limit 500 \
+                   --search "-label:agent-session:spec type:issue state:open" \
+                   --json number,title,body,labels 2>/dev/null || echo '[]')"
+  local candidates_count
+  candidates_count="$(printf '%s' "$candidates_json" | jq 'length')"
+  local n_markerless
+  n_markerless="$(printf '%s' "$markerless_json" | jq 'length')"
+  total=$(( candidates_count + n_markerless ))
 
   local candidates
-  candidates="$(printf '%s' "$issues_json" | "$PYTHON_BIN" "$GATE_PY" tier-batch --marker "$MARKER")"
+  candidates="$(printf '%s' "$candidates_json" | "$PYTHON_BIN" "$GATE_PY" tier-batch)"
 
   local specced_nums markerless_nums markerless_list n_markerless m
-  specced_nums="$(printf '%s' "$candidates" | cut -f1 | tr '\n' ' ')"
-  markerless_nums="$(printf '%s' "$issues_json" | jq -r --arg keep "$specced_nums" '
-      ($keep | split(" ") | map(select(length > 0))) as $k
-      | .[] | .number | tostring | . as $n
-      | select(($k | index($n)) == null)')"
+  markerless_nums="$(printf '%s' "$markerless_json" | jq -r '.[].number')"
+
+  local issues_json
+  issues_json="$(jq -s '.[0] + .[1]' <(printf '%s' "$candidates_json") <(printf '%s' "$markerless_json") 2>/dev/null || echo '[]')"
+  local parked
+  parked="$(printf '%s' "$issues_json" | parked_numbers || true)"
 
   local p1_unblock=""
   local p2_execute=""
@@ -639,12 +640,34 @@ select_issues() {
   for m in $markerless_nums; do
     n_markerless=$(( n_markerless + 1 ))
     markerless_list="${markerless_list:+$markerless_list, }#$m"
-    p3_groom="${p3_groom}${m}:triage "
-    say "  ELIGIBLE #$m  triage (Priority 3: Groom)"
+
+    local is_parked=0
+    local parked_reason=""
+    if printf '%s\n' "${parked:-}" | grep -qx "$m" && [ "${RETRY:-}" != "$m" ]; then
+      is_parked=1
+      parked_reason="parked: $(park_reason "$m")"
+    fi
+
+    if [ "$is_parked" -eq 1 ]; then
+      # We just skip it; it is parked and needs human attention.
+      # Escalate queue is currently just re-running it (which gets stuck in loop breaker).
+      say "  SKIP    #$m  $parked_reason"
+    else
+      local phase="triage"
+      local attempts=$(get_attempts "$m")
+      if [ "${attempts:-0}" -ge "${MAX_PHASE_ATTEMPTS:-3}" ]; then
+        local reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
+        apply_park_state "$m" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
+        say "  SKIP    #$m  $reason"
+      else
+        p3_groom="${p3_groom}${m}:triage "
+        say "  ELIGIBLE #$m  triage (Priority 3: Groom)"
+      fi
+    fi
   done
 
   if [ "$n_markerless" -gt 0 ]; then
-    say "repo $REPO: read $total open issues ($(( total - n_markerless )) carry the marker;" \
+    say "repo $REPO: read $total open issues ($(( total - n_markerless )) carry the label;" \
         "$n_markerless do not: $markerless_list -- run triage)"
   else
     say "repo $REPO: read $total open issues"
@@ -654,9 +677,8 @@ select_issues() {
   rm -f "$STATE_DIR/columns.tsv"
   touch "$STATE_DIR/columns.tsv"
   load_board
-  local prs parked
+  local prs
   prs="$("$PYTHON_BIN" "$GH_QUERY_PY" fetch-open-prs --repo "$REPO")" || die "open-PR query failed -- cannot tell which issues already have open PRs, so selection would be a guess. Refusing to select. (gh's own error is above.)"
-  parked="$(printf '%s' "$issues_json" | parked_numbers || true)"
 
   local n tier title col prline mention reason
   if [ -n "$candidates" ]; then
@@ -724,17 +746,13 @@ select_issues() {
         else
           if [ "$is_parked" -eq 1 ] && [ "$phase" = "grade_gate" ]; then
             reason="$parked_reason"
-            p4_escalate="${p4_escalate}${n}:escalate "
             say "  SKIP    #$n  $reason"
-            say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
           else
-            local attempts=$(get_attempts "$n" "$phase")
+            local attempts=$(get_attempts "$n")
             if [ "$attempts" -ge "$MAX_PHASE_ATTEMPTS" ]; then
               reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
               apply_park_state "$n" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
-              p4_escalate="${p4_escalate}${n}:escalate "
               say "  SKIP    #$n  $reason"
-              say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
             else
               p1_unblock="${p1_unblock}${n}:${phase} "
               say "  ELIGIBLE #$n  tier: auto-ok (Priority 1: Unblock - $phase)"
@@ -745,36 +763,28 @@ select_issues() {
       else
         if [ "$is_parked" -eq 1 ]; then
           reason="$parked_reason"
-          p4_escalate="${p4_escalate}${n}:escalate "
           say "  SKIP    #$n  $reason"
-          say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
         elif [ "$is_invalid_tier" -eq 1 ]; then
           reason="$tier_reason"
-          p4_escalate="${p4_escalate}${n}:escalate "
           say "  SKIP    #$n  $reason"
-          say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
         elif [ "$tier" = "needs-review" ]; then
           phase="refine"
-          local attempts=$(get_attempts "$n" "$phase")
+          local attempts=$(get_attempts "$n")
           if [ "$attempts" -ge "$MAX_PHASE_ATTEMPTS" ]; then
             reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
             apply_park_state "$n" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
-            p4_escalate="${p4_escalate}${n}:escalate "
             say "  SKIP    #$n  $reason"
-            say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
           else
             p3_groom="${p3_groom}${n}:${phase} "
             say "  ELIGIBLE #$n  tier: needs-review (Priority 3: Groom - $phase)"
           fi
         elif [ "$tier" = "auto-ok" ]; then
           phase="execute"
-          local attempts=$(get_attempts "$n" "$phase")
+          local attempts=$(get_attempts "$n")
           if [ "$attempts" -ge "$MAX_PHASE_ATTEMPTS" ]; then
             reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
             apply_park_state "$n" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
-            p4_escalate="${p4_escalate}${n}:escalate "
             say "  SKIP    #$n  $reason"
-            say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
           else
             p2_execute="${p2_execute}${n}:${phase} "
             say "  ELIGIBLE #$n  tier: auto-ok (Priority 2: Execute - $phase)"
@@ -833,6 +843,7 @@ INNER_EOF
 # Rule: bash for orchestration, Python for parsing and classification.
 GATE_PY="$(cd "$(dirname "$0")" && pwd)/gate.py"
 AGENT_RUNNER_PY="$(cd "$(dirname "$0")" && pwd)/agent_runner.py"
+LABEL_MANAGER_PY="${LABEL_MANAGER_PY:-$(cd "$(dirname "$0")"/../scripts && pwd)/label_manager.py}"
 
 GATE_JSON=""
 GATE_BLOCK=""
@@ -921,6 +932,10 @@ build_prompt() { # $1 = issue url, $2 = phase
   if [ "$phase" != "execute" ]; then
     phase_file="phases/$phase.md"
   fi
+  local comments_note=""
+  if [ "$phase" = "triage" ]; then
+    comments_note="When viewing the issue using gh issue view, pass --comments so you read the full comment thread."
+  fi
   cat <<EOF
 You are running unattended, invoked by the agent-session board-driver.
 
@@ -929,7 +944,9 @@ exactly for this issue:
 
   $1
 
-The skill is not installed as a registered skill. Its files live at $SKILL_DIR and
+${comments_note:+$comments_note
+
+}The skill is not installed as a registered skill. Its files live at $SKILL_DIR and
 you must read them from there by absolute path.
 
 Stop at the merge gate and report the verdict. Do not merge the PR and do not enable
@@ -1147,10 +1164,21 @@ run_issue() { # $1 = issue number
       prline="$(printf '%s' "$prs_json" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-for-issue "$n")"
     fi
     if [ -z "$prline" ]; then
-      outcome="parked"
-      if [ "$pr_query_failed" -eq 1 ]; then
+      if [ "${phase:-}" = "triage" ] || [ "${phase:-}" = "refine" ]; then
+        local current_labels
+        current_labels="$(gh issue view "$n" --repo "$REPO" --json labels --jq '.labels[].name' 2>/dev/null || echo '')"
+        if printf '%s\n' "$current_labels" | grep -qx "$PARK_LABEL"; then
+          outcome="parked"
+          reason="parked by agent during ${phase}: $(printf '%s' "$final" | tr '\n' ' ' | cut -c1-400)"
+        else
+          outcome="incomplete"
+          reason="${phase} completed; issue unparked for re-evaluation: $(printf '%s' "$final" | tr '\n' ' ' | cut -c1-400)"
+        fi
+      elif [ "$pr_query_failed" -eq 1 ]; then
+        outcome="parked"
         reason="open-PR query failed; cannot tell whether a PR was opened. run's own account: $(printf '%s' "$final" | tr '\n' ' ' | cut -c1-400)"
       else
+        outcome="parked"
         reason="no PR opened; run's own account: $(printf '%s' "$final" | tr '\n' ' ' | cut -c1-400)"
       fi
     else

@@ -121,7 +121,7 @@ reading, and an unattended mode has nobody to ask.
 
 ## Filing as a GitHub issue
 
-`intake` lifts this into an issue body, prepends `<!-- agent-session:spec -->` (the resume
+`intake` lifts this into an issue body, adds the `agent-session:spec` label (the resume
 marker), applies the tier label, and keeps `file:line` refs verbatim (a snapshot; the
 resumer re-researches if they drift). The **Verifiable acceptance criteria** and **Tier**
 sections are what a downstream loop reads — never strip them.

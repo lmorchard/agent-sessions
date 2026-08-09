@@ -26,7 +26,8 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DRIVER="$HERE/agent-session-driver.sh"
-PARK_LABEL="driver-parked"
+PARK_LABEL="agent-session:needs-human"
+INTERACTIVE_LABEL="agent-session:needs-human-interactive"
 REPO="stub/repo"
 ISSUE=7
 
@@ -43,7 +44,7 @@ has()  { # $1 = label, $2 = needle, $3 = haystack
 # number independently over the whole concatenated argv log, and `$PARK_LABEL` also
 # appears in the `gh label create` line -- so "with the park label" was satisfiable by
 # the create call, and `gh issue edit 7 --add-label wrong-label` plus
-# `gh label create driver-parked` would have passed all three. Adjacent evidence, in
+# `gh label create agent-session:needs-human` would have passed all three. Adjacent evidence, in
 # the check meant to catch it. Order-tolerant on purpose: pinning flag order would
 # make the check brittle, and a brittle check trains the operator to wave it through.
 has_call() { # $1 = label, $2 = log file, $3 = needle A, $4 = needle B
@@ -73,7 +74,6 @@ Closes #$ISSUE
 
 ## Merge gate
 
-<!-- agent-session:gate -->
 \`\`\`yaml
 tier: auto-ok
 checks: C1 pass
@@ -92,8 +92,8 @@ PR_LIST_JSON='[{"number":42,"title":"stub pr","body":"Closes #7","headRefName":"
 # #7 carries the park label, #8 does not. Both carry the marker and an auto-ok
 # tier, so tier-batch keeps them and only the label can explain a difference.
 issue_list_json() { cat <<EOF
-[{"number":7,"title":"issue carrying the label","body":"<!-- agent-session:spec -->\nbody\n\n## Tier: \`auto-ok\`\n","labels":[{"name":"$PARK_LABEL"}]},
- {"number":8,"title":"issue without the label","body":"<!-- agent-session:spec -->\nbody\n\n## Tier: \`auto-ok\`\n","labels":[{"name":"enhancement"}]}]
+[{"number":7,"title":"issue carrying the label","body":"body\n\n## Tier: \`auto-ok\`\n","labels":[{"name":"agent-session:spec"},{"name":"$PARK_LABEL"}]},
+ {"number":8,"title":"issue without the label","body":"body\n\n## Tier: \`auto-ok\`\n","labels":[{"name":"agent-session:spec"},{"name":"enhancement"}]}]
 EOF
 }
 
@@ -114,6 +114,12 @@ case "$*" in
   "pr list"*)            cat "$STUB_DIR/pr-list.json" ;;
   *"--json headRefOid"*) printf 'deadbeefcafe\n' ;;
   *"--json body"*)       cat "$STUB_DIR/pr-body.txt" ;;
+  "issue list"*"-label:agent-session:spec"*)
+       jq '[.[] | select((.labels // []) | all(.name != "agent-session:spec"))]' "$STUB_DIR/issue-list.json" ;;
+  "issue list"*"label:agent-session:spec"*)
+       jq '[.[] | select((.labels // []) | any(.name == "agent-session:spec"))]' "$STUB_DIR/issue-list.json" ;;
+  "issue list"*"--label"*)
+       jq '[.[] | select((.labels // []) | any(.name == "agent-session:spec"))]' "$STUB_DIR/issue-list.json" ;;
   "issue list"*)         cat "$STUB_DIR/issue-list.json" ;;
   *)                     exit 0 ;;
 esac
@@ -246,7 +252,7 @@ for verdict_pair in "eligible-for-auto-merge:gate-eligible" "human-merge-require
   has  "$expected: the outcome is what the gate said" "outcome  $expected" "$UP_OUT"
   has_call "  removes the park label from the right issue, in one call" \
            "$UP_LOG" "issue edit $ISSUE" "--remove-label $PARK_LABEL"
-  hasnt "  and never adds it"                         "--add-label"        "$UP_ARGV"
+  hasnt "  and never adds the park label again"        "--add-label $PARK_LABEL" "$UP_ARGV"
 done
 
 # --- C4: durability, and --retry still overrides ---------------------------

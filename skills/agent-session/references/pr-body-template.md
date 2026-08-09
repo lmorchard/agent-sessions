@@ -29,7 +29,6 @@ tamper diff clean.
 
 ## Merge gate
 
-<!-- agent-session:gate -->
 ```yaml
 tier: auto-ok
 checks: C1 pass · C2 pass · C3 human-graded-pending

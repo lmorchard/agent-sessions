@@ -13,11 +13,10 @@ Reads the shared engine: `references/acceptance-criteria.md`, `references/criter
 Determined by input, like `dev-session` brainstorm's blank-slate/refine split:
 
 - **New request** (a prompt, or an empty/sketch issue) → develop a spec from scratch.
-- **Existing issue** (URL given, issue has a body but no `<!-- agent-session:spec -->`
-  marker, or is under-specified) → *augment* it: read what's there, keep the author's
+- **Existing issue** (URL given, issue has a body but no `agent-session:spec` label, or is under-specified) → *augment* it: read what's there, keep the author's
   intent, backfill the missing criteria + tier. This is the mode `triage` drives per issue.
 
-If the issue already carries the marker, it's already specified — confirm it still holds
+If the issue already carries the label, it's already specified — confirm it still holds
 and stop; don't re-interview. (An issue that went `needs-review` for a *withheld decision* is the
 exception, and needs no rule here: `acceptance-criteria.md`'s trigger 1 already names that case, and
 5/5 control reps navigated it from the tier rules alone — see the micro-test in `docs/design.md`.)
@@ -77,11 +76,11 @@ exception, and needs no rule here: `acceptance-criteria.md`'s trigger 1 already 
    doing) and get confirmation before filing.
 
 10. **File or update the issue.**
-   - *New:* `gh issue create` with body = `<!-- agent-session:spec -->` + spec; title from
-     the Goal (<70 chars); apply the tier label (`--label`); add to the board's Ready
+   - **Ensure the label exists:** run `gh label create "agent-session:spec" --color 0E8A16` (ignore the error if it already exists).
+   - *New:* `gh issue create` with body = spec; title from
+     the Goal (<70 chars); apply the `agent-session:spec` label (`--label`); add to the board's Ready
      column if configured.
-   - *Existing (augment):* `gh issue edit <n>` — prepend the marker, add the spec sections,
-     apply the tier label. **Preserve the original author's text**; augment, don't overwrite
+   - *Existing (augment):* `gh issue edit <n>` — add the `agent-session:spec` label (`--add-label`), add the spec sections. **Preserve the original author's text**; augment, don't overwrite
      intent.
    - **The `## Tier:` heading is the one section you replace rather than add.** A body with two
      `## Tier:` headings reads as a conflict and the issue is skipped — so when a decision revises a

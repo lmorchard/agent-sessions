@@ -21,7 +21,7 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
 
 ## Process
 
-0. **Ceremony Threshold:** If this is a small/tactical task, there won't be a `checks.md` or a freeze commit. Skip steps related to the tamper diff and frozen manifest. Do the self-review, run tests (`make check`), push, and open the PR. Write a gate block exactly as shown in the template, making sure to include the `<!-- agent-session:gate -->` HTML comment before the ```yaml code block following `references/pr-body-template.md` with all required fields (`tier`, `checks`, `guards`, `tamper`, `freeze`, `project-gates`, `ci`, `threads`, `risk-paths`, `verdict`, `reason`). Use `freeze: <commit-sha>` (or `freeze: none` if no freeze commit exists) and `tamper: clean`. Only proceed with the full tamper-diff and frozen-check rules if those artifacts exist.
+0. **Ceremony Threshold:** If this is a small/tactical task, there won't be a `checks.md` or a freeze commit. Skip steps related to the tamper diff and frozen manifest. Do the self-review, run tests (`make check`), push, and open the PR. Write a gate block exactly as shown in the template, making sure to place it directly after the `## Merge gate` heading following `references/pr-body-template.md` with all required fields (`tier`, `checks`, `guards`, `tamper`, `freeze`, `project-gates`, `ci`, `threads`, `risk-paths`, `verdict`, `reason`). Use `freeze: <commit-sha>` (or `freeze: none` if no freeze commit exists) and `tamper: clean`. Only proceed with the full tamper-diff and frozen-check rules if those artifacts exist.
 
 1. **Rebase onto `origin/main` first.** `git fetch origin && git rebase origin/main`. Sessions
    run long and main advances; pre-rebase, `git diff origin/main..HEAD` can show dozens of
@@ -74,7 +74,7 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
    the recorded verdict becomes a claim the run made about itself rather than a command a reviewer can
    check. Leave history alone and let the merge button decide its shape.
 
-6. **Open the PR** using `references/pr-body-template.md`. Title under 70 chars. Fill the
+6. **Open the PR** using `references/pr-body-template.md`. Apply the `agent-session:gate` label (`gh pr edit <n> --add-label "agent-session:gate"`). Title under 70 chars. Fill the
    **Acceptance criteria** table from the *independent verifier's* report — never from the
    implementer's own run. Include `Closes #N`, links to `spec.md` / `checks.md` / `plan.md`, and
    the gate block.

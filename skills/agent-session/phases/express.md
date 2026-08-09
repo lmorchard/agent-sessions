@@ -26,7 +26,7 @@ and trusts it — so its first job is to confirm that assumption instead of pape
 
 Fetch the issue. Three checks, in order — each is a stop, not a warning:
 
-1. **Marker.** Does the body carry `<!-- agent-session:spec -->` with criteria that name checks?
+1. **Marker.** Does the body carry the `agent-session:spec` label with criteria that name checks?
    If not, **stop and route to `/agent-session intake <url>`**. There is nothing here to verify
    against, and inventing criteria now would mean the implementer authored its own oracle.
    Don't run a brainstorm to fill the gap — that's intake's job and it's human work.
