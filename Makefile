@@ -29,8 +29,13 @@ help:
 	@echo ""
 	@echo "  REPO=$(REPO)  REPO_PATH=$(REPO_PATH)  BOARD=$(BOARD)"
 
-check: driver-check driver-test park-test skill-readonly docs-check assertion-lint commit-lint
+check: driver-check
+	@$(MAKE) -j check-parallel
 	@echo "all checks passed"
+
+.PHONY: check-parallel driver-test-sh
+
+check-parallel: gate-test driver-test-sh park-test skill-readonly docs-check assertion-lint commit-lint
 
 board-audit:
 	@python3 scripts/board_audit.py --owner lmorchard --project 9 --repo lmorchard/agent-sessions
@@ -52,8 +57,13 @@ driver-check:
 #
 # `uv` runs the tests; the driver itself calls plain `python3`, because gate.py is
 # stdlib-only and must stay portable to a GHA runner.
-driver-test: gate-test
+driver-test-sh:
 	@bash driver/test-driver.sh
+
+driver-test:
+	@$(MAKE) -j driver-test-parallel
+
+driver-test-parallel: gate-test driver-test-sh
 
 # Globs, not a list. This recipe used to name its five test files one path at a
 # time, and scripts/test_assertion_lint.py was written, passed, and never added
