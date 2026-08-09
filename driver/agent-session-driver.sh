@@ -1190,7 +1190,7 @@ run_issue() { # $1 = issue number
       if [ "${phase:-}" = "triage" ] || [ "${phase:-}" = "refine" ]; then
         local current_labels
         current_labels="$(gh issue view "$n" --repo "$REPO" --json labels --jq '.labels[].name' 2>/dev/null || echo '')"
-        if printf '%s\n' "$current_labels" | grep -qx "$PARK_LABEL"; then
+        if printf '%s\n' "$current_labels" | grep -qx -e "$PARK_LABEL" -e "$INTERACTIVE_LABEL"; then
           outcome="parked"
           reason="parked by agent during ${phase}: $(printf '%s' "$final" | tr '\n' ' ' | cut -c1-400)"
         else
