@@ -2199,10 +2199,10 @@ esac
 
 : > "$A155_TMP/gh_edit_calls.txt"
 STUB_DIR="$A155_TMP" PATH="$A155_TMP/bin:$PATH" \
+  PYTHON_BIN="python3" LABEL_MANAGER_PY="$(cd "$(dirname "$DRIVER")"/../scripts && pwd)/label_manager.py" \
   bash -c "
 $(sed -n '/^park_label_remove()/,/^}$/p' "$DRIVER")
-$(sed -n '/^clear_attempt_labels()/,/^}$/p' "$DRIVER")
-PARK_LABEL='agent-session:needs-human'; REPO='stub/repo'; park_label_remove 155
+REPO='stub/repo'; park_label_remove 155
 " 2>&1
 
 case "$(cat "$A155_TMP/gh_edit_calls.txt" 2>/dev/null)" in

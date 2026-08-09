@@ -121,22 +121,14 @@ get_attempts() { # $1 = issue number
 }
 
 clear_attempt_labels() { # $1 = issue number
-  gh issue edit "$1" --repo "$REPO" \
-     --remove-label "agent-session:attempt-1" \
-     --remove-label "agent-session:attempt-2" \
-     --remove-label "agent-session:attempt-3" >/dev/null 2>&1 || true
+  "$PYTHON_BIN" "$LABEL_MANAGER_PY" ${REPO:+--repo "$REPO"} clear-attempts --issue "$1" >/dev/null 2>&1 || true
 }
 
 increment_attempts() { # $1 = issue number
   local issue="$1"
   local count=$(get_attempts "$issue")
   count=$((count + 1))
-  
-  gh label create "agent-session:attempt-$count" --repo "$REPO" --color "D93F0B" \
-     --description "Execution attempt counter for agent-session driver" >/dev/null 2>&1 || true
-
-  clear_attempt_labels "$issue"
-  gh issue edit "$issue" --repo "$REPO" --add-label "agent-session:attempt-$count" >/dev/null 2>&1 || true
+  "$PYTHON_BIN" "$LABEL_MANAGER_PY" ${REPO:+--repo "$REPO"} attempt --issue "$issue" --count "$count" >/dev/null 2>&1 || true
 }
 
 log()  { printf '%s  %s\n' "$(date -u +%H:%M:%SZ)" "$*" >&2; }
@@ -484,24 +476,13 @@ parked_numbers() { # issues json on stdin -> one parked issue number per line
 # touched one site would have reproduced the bug it closed.
 
 park_label_add() { # $1 = issue number
-  # The label has to exist before it can be applied, and `gh label create` exits 1
-  # when it already does (verified, not assumed) -- hence the discard. Never fatal:
-  # losing a recorded outcome over a label write would be the worse failure. Never
-  # silent either, because a failed add leaves the issue selectable, which is the
-  # exact wrong-in-the-optimistic-direction this issue is about.
-  gh label create "$PARK_LABEL" --repo "$REPO" --color FBCA04 \
-     --description "the agent-session driver parked this issue" >/dev/null 2>&1 || true
-  gh issue edit "$1" --repo "$REPO" --add-label "$PARK_LABEL" >/dev/null 2>&1 \
+  "$PYTHON_BIN" "$LABEL_MANAGER_PY" ${REPO:+--repo "$REPO"} park --issue "$1" >/dev/null 2>&1 \
     || say "  WARNING: could not add the $PARK_LABEL label to #$1 -- it stays selectable"
 }
 
 park_label_remove() { # $1 = issue number
-  # Unconditional: `--remove-label` on an issue that lacks the label exits 0 with no
-  # error (verified), so reading the labels first would spend an API call to prevent
-  # nothing.
-  gh issue edit "$1" --repo "$REPO" --remove-label "$PARK_LABEL" >/dev/null 2>&1 \
+  "$PYTHON_BIN" "$LABEL_MANAGER_PY" ${REPO:+--repo "$REPO"} unpark --issue "$1" >/dev/null 2>&1 \
     || say "  WARNING: could not remove the $PARK_LABEL label from #$1 -- it stays parked"
-  clear_attempt_labels "$1"
 }
 
 
@@ -545,10 +526,7 @@ apply_park_state() { # $1 = issue, $2 = outcome, $3 = ts, $4 = reason
       ;;
     gate-eligible)
       # A verdict means the run got somewhere, so an earlier park no longer holds.
-      park_label_remove "$1"
-      # Apply merge-ready label to prevent infinite grade_gate loops
-      gh label create "$MERGE_READY_LABEL" --repo "$REPO" --color 2E8A16 --description "Issue is eligible for auto-merge, waiting for human or auto-merge script" >/dev/null 2>&1 || true
-      gh issue edit "$1" --repo "$REPO" --add-label "$MERGE_READY_LABEL" >/dev/null 2>&1 || true
+      "$PYTHON_BIN" "$LABEL_MANAGER_PY" ${REPO:+--repo "$REPO"} merge-ready --issue "$1" >/dev/null 2>&1 || true
       notify_human "$1" "gate-eligible: $4"
       ;;
     gate-human)
@@ -865,6 +843,7 @@ INNER_EOF
 # Rule: bash for orchestration, Python for parsing and classification.
 GATE_PY="$(cd "$(dirname "$0")" && pwd)/gate.py"
 AGENT_RUNNER_PY="$(cd "$(dirname "$0")" && pwd)/agent_runner.py"
+LABEL_MANAGER_PY="${LABEL_MANAGER_PY:-$(cd "$(dirname "$0")"/../scripts && pwd)/label_manager.py}"
 
 GATE_JSON=""
 GATE_BLOCK=""
