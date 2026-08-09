@@ -270,6 +270,13 @@ def test_new_test_file_runs_under_gate_test_with_no_makefile_edit():
         / "scripts"
         / f"test_zz_gate_wiring_probe_{os.getpid()}_{secrets.token_hex(4)}.py"
     )
+    def _cleanup():
+        probe.unlink(missing_ok=True)
+        pycache = probe.parent / "__pycache__"
+        if pycache.is_dir():
+            for pyc in pycache.glob(f"{probe.stem}*"):
+                pyc.unlink(missing_ok=True)
+
     try:
         probe.write_text(PROBE_SOURCE)
 
@@ -287,7 +294,7 @@ def test_new_test_file_runs_under_gate_test_with_no_makefile_edit():
             f"--- output ---\n{combined}"
         )
 
-        probe.unlink(missing_ok=True)
+        _cleanup()
 
         without_probe = _make_gate_test()
         assert without_probe.returncode == 0, (
@@ -297,7 +304,7 @@ def test_new_test_file_runs_under_gate_test_with_no_makefile_edit():
             f"--- stderr ---\n{without_probe.stderr}"
         )
     finally:
-        probe.unlink(missing_ok=True)
+        _cleanup()
 
     assert makefile.read_bytes() == makefile_before, (
         "the Makefile changed during this test; C2 requires the new test file to be "

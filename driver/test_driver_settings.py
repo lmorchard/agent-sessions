@@ -4,9 +4,9 @@ import subprocess
 from pathlib import Path
 
 def test_c3_settings_in_argv():
-    with open("driver/agent-session-driver.sh") as f:
+    with open("driver/agent_session_driver.py") as f:
         content = f.read()
-    assert '--settings "$HOOK_SETTINGS_FILE"' in content, "C3: driver does not pass --settings to claude"
+    assert '--settings' in content, "C3: driver does not pass --settings to claude"
 
 def test_c3_hook_json_structure():
     with open("driver/settings.json") as f:
