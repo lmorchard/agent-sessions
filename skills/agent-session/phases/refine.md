@@ -14,11 +14,11 @@ A stateless phase for the unattended agent-session driver. It takes a `tier: nee
    - Run the proposed check command.
    - If it passes (which means it's a guard, not a criterion) or errors due to missing fixtures, fix it or revert to `needs-review`.
 
-4. **Rewrite the issue body (if upgraded).** If you successfully drafted automated criteria that fail:
-   - Rewrite the entire issue body.
-   - Change `## Tier: needs-review` to `## Tier: auto-ok`.
-   - Replace the old criteria with your new verifiable criteria + checks.
+4. **Apply Tier Label & Update Issue.** If you successfully drafted automated criteria that fail:
+   - Apply the `agent-session:auto-ok` label (`gh issue edit <n> --add-label "agent-session:auto-ok" --remove-label "agent-session:needs-review"`).
+   - Replace the old criteria with your new verifiable criteria + checks in the issue body.
    - PRESERVE the original author's description and context text verbatim. Do not delete their context.
-   - Update the issue using `gh issue edit <n> --body "<body>"`.
+   - Update the issue body using `gh issue edit <n> --body "<body>"`.
+   - If the issue remains `needs-review`, ensure `agent-session:needs-review` label is applied.
 
 5. **Stop.** Output a concise summary of the outcome (Upgraded to auto-ok OR Left as needs-review). No PR gate block is needed for `refine` since no code was committed. The driver will read the updated tier on its next loop.

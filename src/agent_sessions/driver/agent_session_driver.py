@@ -752,7 +752,7 @@ def main(argv: list[str] | None = None) -> int:
         is_parked = n in parked and str(n) != args.retry
         parked_r = park_reason(n, state_dir) if is_parked else ""
 
-        is_invalid_tier = tier in ("conflict", "missing", "unparsed")
+        is_invalid_tier = tier in ("conflict", "unparsed")
         tier_r = f"tier is invalid ({tier})"
 
         prline = gh_query.pr_blocking_issue(n, open_prs)
@@ -790,7 +790,7 @@ def main(argv: list[str] | None = None) -> int:
                 say(f"  SKIP    #{n}  parked: {parked_r}")
             elif is_invalid_tier:
                 say(f"  SKIP    #{n}  {tier_r}")
-            elif tier == "needs-review":
+            elif tier in ("needs-review", "missing"):
                 phase = "refine"
                 attempts = get_attempts(n, repo, issues_json=all_issues_json)
                 if attempts >= args.max_phase_attempts:
