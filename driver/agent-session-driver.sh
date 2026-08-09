@@ -621,15 +621,15 @@ select_issues() {
 
   local issue_filter=""
   if [ "$ALL_ISSUES" -eq 0 ]; then
-    local ready_search=""
+    local board_nums=""
     if [ -n "$BOARD" ]; then
-      local ready_nums
-      ready_nums="$(printf '%s' "$BOARD_JSON" | jq -r '.items[]? | select(.status == "Ready") | .content.number // empty' 2>/dev/null || true)"
-      for rn in $ready_nums; do
-        ready_search="${ready_search} issue:$rn"
-      done
+      board_nums="$(printf '%s' "$BOARD_JSON" | jq -r '.items[]? | select(.status == "Ready" or .priority == "P0" or .priority == "P1") | .content.number // empty' 2>/dev/null || true)"
     fi
-    issue_filter="(label:P0 OR label:P1${ready_search})"
+    local board_search=""
+    for bn in $board_nums; do
+      board_search="${board_search} issue:$bn"
+    done
+    issue_filter="(label:P0 OR label:P1${board_search})"
   fi
 
   local candidates_search="label:agent-session:spec -label:agent-session:merge-ready type:issue state:open"
