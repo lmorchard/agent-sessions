@@ -516,6 +516,16 @@ apply_park_state() { # $1 = issue, $2 = outcome, $3 = ts, $4 = reason
       say "  parked -- excluded from future selection unless --retry $1"
       notify_human "$1" "$2: $4"
       ;;
+    gate-human)
+      jq -n -c --arg issue "$1" --arg repo "$REPO" --arg ts "$3" \
+               --arg outcome "$2" --arg reason "$4" \
+        '{issue:($issue|tonumber), repo:$repo, parked_at:$ts, outcome:$outcome, reason:$reason}' \
+        >> "$PARKED_LOG"
+      park_label_add "$1"
+      clear_attempt_labels "$1"
+      say "  parked for human review -- excluded from future selection unless --retry $1"
+      notify_human "$1" "gate-human: $4"
+      ;;
     incomplete)
       jq -n -c --arg issue "$1" --arg repo "$REPO" --arg ts "$3" \
                --arg outcome "$2" --arg reason "$4" \
@@ -528,10 +538,6 @@ apply_park_state() { # $1 = issue, $2 = outcome, $3 = ts, $4 = reason
       # A verdict means the run got somewhere, so an earlier park no longer holds.
       "$PYTHON_BIN" "$LABEL_MANAGER_PY" ${REPO:+--repo "$REPO"} merge-ready --issue "$1" >/dev/null 2>&1 || true
       notify_human "$1" "gate-eligible: $4"
-      ;;
-    gate-human)
-      park_label_remove "$1"
-      notify_human "$1" "gate-human: $4"
       ;;
   esac
   # budget-exhausted, driver-fault and ci-stale deliberately match neither arm.
