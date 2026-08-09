@@ -463,23 +463,43 @@ def check_pr_reviews(repo: str, pr_num: str | int) -> tuple[int, int]:
         return 0, 0
 
 
+def load_env_file(env_file: Path | str = ".env") -> None:
+    path = Path(env_file)
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
 def main(argv: list[str] | None = None) -> int:
+    load_env_file(".env")
+
     parser = argparse.ArgumentParser(description="Agent session driver")
-    parser.add_argument("--repo", required=True)
-    parser.add_argument("--skill-dir", required=True)
-    parser.add_argument("--repo-path", required=True)
-    parser.add_argument("--issue", default="")
-    parser.add_argument("--max-issues", type=int, default=1)
-    parser.add_argument("--max-budget-usd", type=float, default=10.0)
-    parser.add_argument("--max-phase-attempts", type=int, default=3)
-    parser.add_argument("--timeout", type=int, default=5400)
-    parser.add_argument("--state-dir", default="")
-    parser.add_argument("--board", default="")
-    parser.add_argument("--backend", default="claude")
-    parser.add_argument("--model", default="")
-    parser.add_argument("--high-tier-model", default="")
-    parser.add_argument("--low-tier-model", default="")
-    parser.add_argument("--retry", default="")
+    parser.add_argument("--repo", default=os.environ.get("REPO") or os.environ.get("DRIVER_REPO") or "")
+    parser.add_argument("--skill-dir", default=os.environ.get("SKILL_DIR") or os.environ.get("DRIVER_SKILL_DIR") or "")
+    parser.add_argument("--repo-path", default=os.environ.get("REPO_PATH") or os.environ.get("DRIVER_REPO_PATH") or "")
+    parser.add_argument("--issue", default=os.environ.get("ISSUE") or "")
+    parser.add_argument("--max-issues", type=int, default=int(os.environ.get("MAX_ISSUES", "1")))
+    parser.add_argument(
+        "--max-budget-usd",
+        type=float,
+        default=float(os.environ.get("MAX_BUDGET_USD") or os.environ.get("MAX_BUDGET") or "10.0"),
+    )
+    parser.add_argument("--max-phase-attempts", type=int, default=int(os.environ.get("MAX_PHASE_ATTEMPTS", "3")))
+    parser.add_argument(
+        "--timeout", type=int, default=int(os.environ.get("RUN_TIMEOUT") or os.environ.get("TIMEOUT") or "5400")
+    )
+    parser.add_argument("--state-dir", default=os.environ.get("STATE_DIR") or "")
+    parser.add_argument("--board", default=os.environ.get("BOARD") or os.environ.get("DRIVER_BOARD") or "")
+    parser.add_argument(
+        "--backend", default=os.environ.get("BACKEND") or os.environ.get("DRIVER_BACKEND") or "claude"
+    )
+    parser.add_argument("--model", default=os.environ.get("MODEL") or "")
+    parser.add_argument("--high-tier-model", default=os.environ.get("HIGH_TIER_MODEL") or "")
+    parser.add_argument("--low-tier-model", default=os.environ.get("LOW_TIER_MODEL") or "")
+    parser.add_argument("--retry", default=os.environ.get("RETRY") or "")
     parser.add_argument("--classify-only", default="")
     parser.add_argument("--resumed-from", default="")
     parser.add_argument("--dry-run", action="store_true")
@@ -488,22 +508,21 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
-    # Load .env if present
-    env_file = Path(".env")
-    if env_file.is_file():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-
     repo = args.repo
+    if not repo:
+        die("--repo (or REPO in .env) is required")
+
     parts = repo.split("/")
     if len(parts) != 2 or not parts[0] or not parts[1] or "." in parts or ".." in parts:
         die(f"--repo must be owner/name, with exactly one '/': {repo}")
 
-    skill_dir = abspath(args.skill_dir) if args.skill_dir else Path("")
-    repo_path = abspath(args.repo_path) if args.repo_path else Path("")
+    if not args.skill_dir:
+        die("--skill-dir (or SKILL_DIR in .env) is required")
+    if not args.repo_path:
+        die("--repo-path (or REPO_PATH in .env) is required")
+
+    skill_dir = abspath(args.skill_dir)
+    repo_path = abspath(args.repo_path)
 
     state_dir_str = args.state_dir
     if not state_dir_str:
