@@ -76,6 +76,7 @@ STATE_DIR=""
 BOARD=""
 DRY_RUN=0
 ALLOW_NESTED=0
+ALL_ISSUES=0
 RETRY=""
 CLASSIFY_ONLY=""
 RESUMED_FROM=""
@@ -163,7 +164,8 @@ agent-session-driver.sh --repo <owner/name> --skill-dir <path> --repo-path <path
                           DENIED_TOOLS), but the nesting is usually a typo, so it
                           must be opted into. Pointing the driver at its own repo
                           is the legitimate case the flag exists for.
-  --retry <n>             ignore issue n's park label for this invocation
+   --retry <n>             ignore issue n's park label for this invocation
+   --all-issues            triage all open issues instead of filtering to P0/P1 and Ready column
    --classify-only <n>     classify + record issue n from live PR state; no
                            claude invocation. Recovers the outcome of a run whose
                            driver died after the run itself finished.
@@ -192,6 +194,7 @@ while [ $# -gt 0 ]; do
     --resumed-from)   RESUMED_FROM="${2:?}"; shift 2 ;;
     --dry-run)        DRY_RUN=1; shift ;;
     --allow-nested-skill-dir) ALLOW_NESTED=1; shift ;;
+    --all-issues)     ALL_ISSUES=1; shift ;;
     -h|--help)        usage; exit 0 ;;
     *)                die "unknown argument: $1 (try --help)" ;;
   esac
@@ -612,12 +615,36 @@ ELIGIBLE=""
 
 select_issues() {
   say "== select =="
+  if [ "$ALL_ISSUES" -eq 0 ] && [ -n "$BOARD" ]; then
+    load_board
+  fi
+
+  local issue_filter=""
+  if [ "$ALL_ISSUES" -eq 0 ]; then
+    local ready_search=""
+    if [ -n "$BOARD" ]; then
+      local ready_nums
+      ready_nums="$(printf '%s' "$BOARD_JSON" | jq -r '.items[]? | select(.status == "Ready") | .content.number // empty' 2>/dev/null || true)"
+      for rn in $ready_nums; do
+        ready_search="${ready_search} issue:$rn"
+      done
+    fi
+    issue_filter="(label:P0 OR label:P1${ready_search})"
+  fi
+
+  local candidates_search="label:agent-session:spec -label:agent-session:merge-ready type:issue state:open"
+  local markerless_search="-label:agent-session:spec type:issue state:open"
+  if [ -n "$issue_filter" ]; then
+    candidates_search="${candidates_search} ${issue_filter}"
+    markerless_search="${markerless_search} ${issue_filter}"
+  fi
+
   local candidates_json markerless_json total
   candidates_json="$(gh issue list --repo "$REPO" --state open --limit 500 \
-                   --search "label:agent-session:spec -label:agent-session:merge-ready type:issue state:open" \
+                   --search "$candidates_search" \
                    --json number,title,body,labels 2>/dev/null || echo '[]')"
   markerless_json="$(gh issue list --repo "$REPO" --state open --limit 500 \
-                   --search "-label:agent-session:spec type:issue state:open" \
+                   --search "$markerless_search" \
                    --json number,title,body,labels 2>/dev/null || echo '[]')"
   local candidates_count
   candidates_count="$(printf '%s' "$candidates_json" | jq 'length')"
