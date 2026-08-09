@@ -645,8 +645,32 @@ select_issues() {
   for m in $markerless_nums; do
     n_markerless=$(( n_markerless + 1 ))
     markerless_list="${markerless_list:+$markerless_list, }#$m"
-    p3_groom="${p3_groom}${m}:triage "
-    say "  ELIGIBLE #$m  triage (Priority 3: Groom)"
+
+    local is_parked=0
+    local parked_reason=""
+    if printf '%s\n' "${parked:-}" | grep -qx "$m" && [ "${RETRY:-}" != "$m" ]; then
+      is_parked=1
+      parked_reason="parked: $(park_reason "$m")"
+    fi
+
+    if [ "$is_parked" -eq 1 ]; then
+      p4_escalate="${p4_escalate}${m}:escalate "
+      say "  SKIP    #$m  $parked_reason"
+      say "  ELIGIBLE #$m  escalate (Priority 4: Escalate)"
+    else
+      local phase="triage"
+      local attempts=$(get_attempts "$m" "$phase")
+      if [ "${attempts:-0}" -ge "${MAX_PHASE_ATTEMPTS:-3}" ]; then
+        local reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
+        apply_park_state "$m" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
+        p4_escalate="${p4_escalate}${m}:escalate "
+        say "  SKIP    #$m  $reason"
+        say "  ELIGIBLE #$m  escalate (Priority 4: Escalate)"
+      else
+        p3_groom="${p3_groom}${m}:triage "
+        say "  ELIGIBLE #$m  triage (Priority 3: Groom)"
+      fi
+    fi
   done
 
   if [ "$n_markerless" -gt 0 ]; then
