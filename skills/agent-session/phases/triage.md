@@ -61,7 +61,7 @@ criteria), and you do the part that does (ratify). See
    - Do NOT apply the `agent-session:spec` label yet, because the human hasn't ratified the criteria.
    - Stop execution here. Do not edit the issue body yet.
 
-   *(When the human reviews your comment, they will either manually apply `agent-session:spec` to advance the issue, or they will reply with clarifications, which you will read on the next pass.)*
+   - In your comment, explicitly ask the human to reply with 'Approved' or to provide corrections. Tell them NOT to manually apply the `agent-session:spec` label themselves, as you need to formally update the issue body first on your next pass.
 
 4. **Follow-up pass (Reading human replies).** If you are triaging an issue that already has a proposed spec comment from you, read the subsequent comments from the human.
    - If they approved it, proceed to Step 5.
