@@ -2227,6 +2227,33 @@ esac
 
 rm -rf "$A155_TMP"
 
+echo "#788: triage outcome recognizes INTERACTIVE_LABEL"
+T788_TMP="$(mktemp -d)"
+mkdir -p "$T788_TMP/bin"
+cat > "$T788_TMP/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
+  echo "agent-session:needs-human-interactive"
+  exit 0
+fi
+exit 0
+STUB
+chmod +x "$T788_TMP/bin/gh"
+
+T788_OUT="$(PATH="$T788_TMP/bin:$PATH" PARK_LABEL="agent-session:needs-human" INTERACTIVE_LABEL="agent-session:needs-human-interactive" phase="triage" n="788" REPO="stub/repo" final="interactive collaboration required" pr_query_failed=0 bash -c "
+test_fn() {
+$(sed -n '1190,1206p' "$DRIVER")
+  echo \"outcome:\$outcome\"
+}
+test_fn
+")"
+
+case "$T788_OUT" in
+  *"outcome:parked"*) ok "#788 triage outcome recognizes INTERACTIVE_LABEL as parked" ;;
+  *) bad "#788 triage outcome recognizes INTERACTIVE_LABEL as parked" "outcome:parked" "$T788_OUT" ;;
+esac
+rm -rf "$T788_TMP"
+
 echo "#159: Agent Lab Notebook via GitHub Discussions"
 
 LN159_TMP="$(mktemp -d)"
