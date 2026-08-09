@@ -811,6 +811,16 @@ INNER_EOF
     fi
   done
 
+  # If all candidates failed to lock (or none were found), but candidates did exist,
+  # ensure we print eligible: 0 correctly. But if no candidates existed, test asserts eligible: 0.
+  # Wait, why did test fail? Because in the test, git remote is not configured for the stubs,
+  # so `acquire_lock` returns 1 (false) because `git push` fails or `git remote get-url origin` fails!
+  # Look at acquire_lock:
+  #   if ! git -C "$REPO_PATH" remote get-url origin >/dev/null 2>&1; then return 0; fi
+  # But in test stubs, REPO_PATH is a temp directory with NO remote origin!
+  # So `git remote get-url origin` fails and `acquire_lock` returns 0 (success) IF it reaches that check.
+  # Let's check why acquire_lock failed in the test!
+
   local c=0
   if [ -n "$ELIGIBLE" ]; then
     c=1
@@ -1306,6 +1316,8 @@ acquire_lock() { # $1 = issue number, $2 = phase
   if ! git -C "$REPO_PATH" rev-parse --git-dir >/dev/null 2>&1; then
     return 0
   fi
+  # In test suites (e.g. test-driver.sh), REPO_PATH points to a stub directory that has no remote origin.
+  # If remote 'origin' does not exist, bypass git ref locking and succeed immediately.
   if ! git -C "$REPO_PATH" remote get-url origin >/dev/null 2>&1; then
     return 0
   fi
