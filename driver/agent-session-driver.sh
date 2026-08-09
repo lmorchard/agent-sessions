@@ -750,7 +750,7 @@ select_issues() {
         if [ -n "$reason" ]; then
           say "  SKIP    #$n  $reason"
         else
-          if [ "$is_parked" -eq 1 ] && [ "$phase" = "grade_gate" ]; then
+          if [ "$is_parked" -eq 1 ]; then
             reason="$parked_reason"
             say "  SKIP    #$n  $reason"
           else
