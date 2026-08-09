@@ -459,18 +459,32 @@ def classify(
     return _check_substitute_and_return(result)
 
 
-def tier_of(body: str) -> str:
-    """Tier named by an issue body: auto-ok | needs-review | conflict | missing | unparsed.
+def tier_from_labels(labels: list[str] | None) -> str | None:
+    if not labels:
+        return None
+    lbl_set = set(labels)
+    has_auto = "agent-session:auto-ok" in lbl_set
+    has_review = "agent-session:needs-review" in lbl_set
+    if has_auto and has_review:
+        return "conflict"
+    if has_auto:
+        return "auto-ok"
+    if has_review:
+        return "needs-review"
+    return None
 
-    The `^## Tier:` anchor is load-bearing: #585's tier paragraph contains the
-    string "needs-review" in prose, so an unanchored match reads both tiers and
-    the issue looks ambiguous when it is not.
 
-    `conflict` is deliberate rather than a fallback to the first heading. The
-    contract is that the body is authoritative and disagreements are surfaced,
-    not resolved -- and it fired for real when a re-tiering appended a second
-    `## Tier:` heading instead of replacing the first.
+def tier_of(body: str = "", labels: list[str] | None = None) -> str:
+    """Tier named by issue labels or body: auto-ok | needs-review | conflict | missing | unparsed.
+
+    Checks GitHub labels (`agent-session:auto-ok`, `agent-session:needs-review`) first,
+    then falls back to checking issue body `^## Tier:` headings.
     """
+    if labels:
+        lbl_tier = tier_from_labels(labels)
+        if lbl_tier is not None:
+            return lbl_tier
+
     lines = [ln for ln in (body or "").split("\n") if _TIER_HEADING_RE.search(ln)]
     if not lines:
         return "missing"
@@ -497,7 +511,8 @@ def tier_batch(issues: list) -> list[tuple[str, str, str]]:
         if body is None:
             continue
         title = str(issue.get("title", "")).replace("\t", " ")
-        rows.append((str(issue.get("number", "")), tier_of(body), title))
+        labels = [l.get("name", "") for l in issue.get("labels", []) if isinstance(l, dict)]
+        rows.append((str(issue.get("number", "")), tier_of(body, labels=labels), title))
     return rows
 
 

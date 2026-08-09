@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from agent_sessions.driver import agent_runner, discussion_manager, gate, gh_query
 
+SPEC_LABEL = "agent-session:spec"
 PARK_LABEL = "agent-session:needs-human"
 INTERACTIVE_LABEL = "agent-session:needs-human-interactive"
 MERGE_READY_LABEL = "agent-session:merge-ready"
@@ -463,6 +464,26 @@ def check_pr_reviews(repo: str, pr_num: str | int) -> tuple[int, int]:
         return 0, 0
 
 
+def fetch_pr_gate_text(repo: str, prnum: str | int) -> tuple[str, str]:
+    """Returns (full_text_including_comments, head_sha)."""
+    try:
+        res = subprocess.run(
+            ["gh", "pr", "view", str(prnum), "--repo", repo, "--json", "body,comments,headRefOid"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        data = json.loads(res.stdout)
+        body = data.get("body", "") or ""
+        head_sha = data.get("headRefOid", "") or ""
+        comms = data.get("comments", []) or []
+        comment_texts = [c.get("body", "") for c in comms if isinstance(c, dict) and c.get("body")]
+        full_text = body + ("\n\n" + "\n\n".join(comment_texts) if comment_texts else "")
+        return full_text, head_sha
+    except Exception:
+        return "", ""
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Agent session driver")
     parser.add_argument("--repo", required=True)
@@ -626,21 +647,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             pr_num = matching_pr_dict.get("number") or ""
             prurl = matching_pr_dict.get("url", "")
-            pr_body = matching_pr_dict.get("body", "")
-            try:
-                res = subprocess.run(
-                    ["gh", "pr", "view", str(pr_num), "--repo", repo, "--json", "headRefOid"],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                head_sha = json.loads(res.stdout).get("headRefOid", "")
-            except Exception:
-                head_sha = ""
-
+            pr_text, head_sha = fetch_pr_gate_text(repo, pr_num)
             failed_ci, _ = check_pr_ci_status(repo, pr_num)
             ci_checks = "failed" if failed_ci > 0 else "pass"
-            outcome_res = gate.classify(pr_body, head_sha=head_sha, ci_checks=ci_checks)
+            outcome_res = gate.classify(pr_text, head_sha=head_sha, ci_checks=ci_checks)
             outcome = outcome_res["outcome"]
             reason = outcome_res["reason"]
 
@@ -689,16 +699,15 @@ def main(argv: list[str] | None = None) -> int:
     else:
         filtered_issues = open_issues
 
-    candidates_json = [
-        iss
-        for iss in filtered_issues
-        if MARKER in iss.get("body", "")
-        and not any(
-            isinstance(l, dict) and l.get("name") == "agent-session:merge-ready"
-            for l in iss.get("labels", [])
-        )
-    ]
-    markerless_json = [iss for iss in filtered_issues if MARKER not in iss.get("body", "")]
+    candidates_json = []
+    markerless_json = []
+    for iss in filtered_issues:
+        labels = [l.get("name", "") for l in iss.get("labels", []) if isinstance(l, dict)]
+        if SPEC_LABEL in labels:
+            if MERGE_READY_LABEL not in labels:
+                candidates_json.append(iss)
+        else:
+            markerless_json.append(iss)
     all_issues_json = candidates_json + markerless_json
     parked = parked_numbers(all_issues_json)
 
@@ -737,7 +746,8 @@ def main(argv: list[str] | None = None) -> int:
     for c_iss in candidates_json:
         n = str(c_iss.get("number"))
         body = c_iss.get("body", "")
-        tier = gate.tier_of(body)
+        labels = [l.get("name", "") for l in c_iss.get("labels", []) if isinstance(l, dict)]
+        tier = gate.tier_of(body, labels=labels)
 
         is_parked = n in parked and str(n) != args.retry
         parked_r = park_reason(n, state_dir) if is_parked else ""
@@ -960,18 +970,10 @@ def main(argv: list[str] | None = None) -> int:
                     reason = f"no PR opened; run's own account: {final_text[:400]}"
             else:
                 prnum, prurl = prline.split("\t")[:2]
-                try:
-                    res = subprocess.run(["gh", "pr", "view", prnum, "--repo", repo, "--json", "body,headRefOid"], capture_output=True, text=True, check=True)
-                    pr_data = json.loads(res.stdout)
-                    pr_body = pr_data.get("body", "")
-                    head_sha = pr_data.get("headRefOid", "")
-                except Exception:
-                    pr_body = ""
-                    head_sha = ""
-
+                pr_text, head_sha = fetch_pr_gate_text(repo, prnum)
                 failed_ci, _ = check_pr_ci_status(repo, prnum)
                 ci_checks = "failed" if failed_ci > 0 else "pass"
-                outcome_res = gate.classify(pr_body, head_sha=head_sha, ci_checks=ci_checks)
+                outcome_res = gate.classify(pr_text, head_sha=head_sha, ci_checks=ci_checks)
                 outcome = outcome_res["outcome"]
                 reason = outcome_res["reason"]
                 (rundir / "gate.yaml").write_text(outcome_res.get("gate", ""), encoding="utf-8")
