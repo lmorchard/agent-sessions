@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-import agent_session_driver  # noqa: E402
+from agent_sessions.driver import agent_session_driver
 
 
 def test_abspath_resolution(tmp_path: Path, monkeypatch):
@@ -53,3 +53,37 @@ def test_driver_cli_help(tmp_path: Path):
     res = subprocess.run([str(driver_script), "--help"], capture_output=True, text=True)
     assert res.returncode == 0
     assert "--repo" in res.stdout
+
+
+def test_driver_env_defaults(tmp_path: Path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "REPO=owner/repo\n"
+        "REPO_PATH=/tmp/repo\n"
+        "SKILL_DIR=/tmp/skill\n"
+        "BOARD=owner/1\n"
+        "BACKEND=opencode\n"
+        "HIGH_TIER_MODEL=model-high\n"
+        "LOW_TIER_MODEL=model-low\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPO", "owner/repo")
+    monkeypatch.setenv("REPO_PATH", "/tmp/repo")
+    monkeypatch.setenv("SKILL_DIR", "/tmp/skill")
+    monkeypatch.setenv("BOARD", "owner/1")
+    monkeypatch.setenv("BACKEND", "opencode")
+    monkeypatch.setenv("HIGH_TIER_MODEL", "model-high")
+    monkeypatch.setenv("LOW_TIER_MODEL", "model-low")
+
+    class MockResult:
+        stdout = json.dumps([])
+        returncode = 0
+
+    def mock_run(cmd, *args, **kwargs):
+        return MockResult()
+
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    ret = agent_session_driver.main(["--dry-run"])
+    assert ret == 0
