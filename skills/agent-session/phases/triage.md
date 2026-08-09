@@ -63,7 +63,7 @@ criteria), and you do the part that does (ratify). See
 
    - In your comment, explicitly ask the human to reply with 'Approved' or to provide corrections, and instruct them to **manually remove the `agent-session:needs-human` label** when they are done replying so you know to read their feedback.
 
-4. **Follow-up pass (Reading human replies).** The human has explicitly removed the `agent-session:needs-human` parking label, signaling that they have left feedback in the issue comments. Read the subsequent comments from the human.
+4. **Follow-up pass (Reading human replies).** The human has explicitly removed the `agent-session:needs-human` parking label, signaling that they have left feedback in the issue comments. **Explicitly fetch and read the comments** using `gh issue view <n> --comments`.
    - If they explicitly approved the spec (e.g., "Approved", "Looks good", "Dependencies are fine"), proceed to Step 5.
    - If they provided corrections, synthesize them into an updated spec. If the spec is now complete, proceed to Step 5. 
    - If the spec STILL needs human input after synthesizing their corrections, post a follow-up comment asking for further clarification, RE-APPLY the `agent-session:needs-human` label, and stop.
