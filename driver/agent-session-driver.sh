@@ -802,15 +802,25 @@ INNER_EOF
   p4_escalate="$(echo "$p4_escalate" | tr -s ' ' '\n' | grep -v '^$' || true)"
 
   ELIGIBLE=""
-  if [ -n "$p1_unblock" ]; then
-    ELIGIBLE="$(echo "$p1_unblock" | head -n 1)"
-  elif [ -n "$p2_execute" ]; then
-    ELIGIBLE="$(echo "$p2_execute" | head -n 1)"
-  elif [ -n "$p3_groom" ]; then
-    ELIGIBLE="$(echo "$p3_groom" | head -n 1)"
-  elif [ -n "$p4_escalate" ]; then
-    ELIGIBLE="$(echo "$p4_escalate" | head -n 1)"
-  fi
+  local all_candidates=""
+  # Preserve priority order: p1_unblock, p2_execute, p3_groom, p4_escalate
+  [ -n "$p1_unblock" ] && all_candidates="${all_candidates}${p1_unblock} "
+  [ -n "$p2_execute" ] && all_candidates="${all_candidates}${p2_execute} "
+  [ -n "$p3_groom" ]    && all_candidates="${all_candidates}${p3_groom} "
+  [ -n "$p4_escalate" ] && all_candidates="${all_candidates}${p4_escalate} "
+  all_candidates="$(echo "$all_candidates" | tr -s ' ' '\n' | grep -v '^$' || true)"
+
+  for item in $all_candidates; do
+    [ -n "$item" ] || continue
+    local n="${item%%:*}"
+    local phase="${item##*:}"
+    if acquire_lock "$n" "$phase"; then
+      ELIGIBLE="$item"
+      break
+    else
+      say "  SKIP    #$n  lock contention (another agent holds or held lock)"
+    fi
+  done
 
   local c=0
   if [ -n "$ELIGIBLE" ]; then
@@ -1306,6 +1316,91 @@ run_issue() { # $1 = issue number
 
 # --- main ------------------------------------------------------------------
 
+CURRENT_LOCK_ISSUE=""
+
+release_lock() {
+  if [ -n "$CURRENT_LOCK_ISSUE" ]; then
+    log "Releasing lock for #$CURRENT_LOCK_ISSUE..."
+    if git -C "$REPO_PATH" rev-parse --git-dir >/dev/null 2>&1 && git -C "$REPO_PATH" remote get-url origin >/dev/null 2>&1; then
+      git -C "$REPO_PATH" push origin ":refs/locks/issue-$CURRENT_LOCK_ISSUE" 2>/dev/null || true
+    fi
+    CURRENT_LOCK_ISSUE=""
+  fi
+}
+
+acquire_lock() { # $1 = issue number, $2 = phase
+  local issue="$1"
+  local phase="$2"
+
+  # When running in dry-run mode or test harnesses without an active repo path or git repo, bypass locking.
+  if [ -z "${REPO_PATH:-}" ]; then
+    return 0
+  fi
+  if ! git -C "$REPO_PATH" rev-parse --git-dir >/dev/null 2>&1; then
+    return 0
+  fi
+  # In test suites (e.g. test-driver.sh), REPO_PATH points to a stub directory that has no remote origin.
+  # If remote 'origin' does not exist, bypass git ref locking and succeed immediately.
+  if ! git -C "$REPO_PATH" remote get-url origin >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local lock_ref="refs/locks/issue-$issue"
+  local empty_tree_sha="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+  local host
+  host="$(hostname 2>/dev/null || echo "unknown-host")"
+  local run_id
+  run_id="$(uuidgen 2>/dev/null || date +%s)"
+
+  local ttl_seconds=7200
+  case "$phase" in
+    triage|groom|refine) ttl_seconds=600 ;;
+    *) ttl_seconds=7200 ;;
+  esac
+
+  local commit_msg="agent-session lock: issue $issue
+
+phase: $phase
+host: $host
+run_id: $run_id"
+
+  local lock_sha
+  lock_sha="$(printf '%s\n' "$commit_msg" | git -C "$REPO_PATH" commit-tree "$empty_tree_sha" 2>/dev/null)" || return 1
+
+  local current_lock
+  current_lock="$(git -C "$REPO_PATH" ls-remote origin "$lock_ref" 2>/dev/null | awk '{print $1}')"
+
+  if [ -z "$current_lock" ]; then
+    if git -C "$REPO_PATH" push origin "$lock_sha:$lock_ref" >/dev/null 2>&1; then
+      CURRENT_LOCK_ISSUE="$issue"
+      log "Acquired fresh lock for #$issue (phase: $phase)"
+      return 0
+    else
+      return 1
+    fi
+  fi
+
+  git -C "$REPO_PATH" fetch origin "$lock_ref" --depth 1 -q >/dev/null 2>&1 || true
+
+  local lock_time=0
+  lock_time="$(git -C "$REPO_PATH" log -1 --format=%ct "$current_lock" 2>/dev/null || echo "0")"
+  local now
+  now="$(date +%s)"
+  local lock_age=$(( now - lock_time ))
+
+  if [ "$lock_age" -lt "$ttl_seconds" ]; then
+    return 1
+  else
+    if git -C "$REPO_PATH" push --force-with-lease="$lock_ref:$current_lock" origin "$lock_sha:$lock_ref" >/dev/null 2>&1; then
+      CURRENT_LOCK_ISSUE="$issue"
+      log "Stole stale lock for #$issue (age ${lock_age}s > TTL ${ttl_seconds}s)"
+      return 0
+    else
+      return 1
+    fi
+  fi
+}
+
 TOTAL_COST=0
 ATTEMPTED=0
 CHILD_PID=""
@@ -1321,6 +1416,7 @@ cleanup() {
     say "cleanup: terminating in-flight run (pid $CHILD_PID)"
     kill -TERM "$CHILD_PID" 2>/dev/null || true
   fi
+  release_lock
   rm -f "$SUMMARY_TMP"
 }
 trap cleanup EXIT INT TERM
@@ -1531,7 +1627,11 @@ if [ -n "$ISSUE" ]; then
     fi
   fi
   if [ "$phase" != "wait_ci" ]; then
-    ELIGIBLE="$ISSUE:$phase"
+    if acquire_lock "$ISSUE" "$phase"; then
+      ELIGIBLE="$ISSUE:$phase"
+    else
+      die "could not acquire lock for #$ISSUE (contention with another agent)"
+    fi
   else
     ELIGIBLE=""
     say "PR for #$ISSUE CI is still pending; waiting..."
