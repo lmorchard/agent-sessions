@@ -629,7 +629,7 @@ select_issues() {
     for bn in $board_nums; do
       board_search="${board_search} issue:$bn"
     done
-    issue_filter="(label:P0 OR label:P1${board_search})"
+    issue_filter="(label:P0 OR label:P1 OR label:P2 OR label:P3 OR label:P4 OR label:P5${board_search})"
   fi
 
   local candidates_search="label:agent-session:spec -label:agent-session:merge-ready type:issue state:open"
