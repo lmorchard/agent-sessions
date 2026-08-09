@@ -238,22 +238,27 @@ has_call "normal path: labels the right issue with the park label, in one call" 
 
 # --- C3: a gate verdict un-parks -------------------------------------------
 #
-# CRITERION: WHEN a run's outcome is gate-eligible or gate-human, THE DRIVER
-# SHALL remove the park label from that issue.
+# CRITERION: WHEN a run's outcome is gate-eligible, THE DRIVER SHALL remove the park label
+# AND apply merge-ready. WHEN a run's outcome is gate-human, THE DRIVER SHALL park the issue.
 
-echo "C3: a gate outcome removes the label"
+echo "C3: gate-eligible unparks/marks merge-ready; gate-human parks for human review"
 
-for verdict_pair in "eligible-for-auto-merge:gate-eligible" "human-merge-required:gate-human"; do
-  verdict="${verdict_pair%%:*}"; expected="${verdict_pair##*:}"
-  UP_BIN="$TMPROOT/unpark-bin-$expected"; make_stubs "$UP_BIN" "$verdict"
-  UP_LOG="$TMPROOT/unpark-$expected.log"; UP_SD="$TMPROOT/unpark-state-$expected"
-  UP_OUT="$(run_driver "$UP_BIN" "$UP_LOG" --repo "$REPO" --classify-only "$ISSUE" --state-dir "$UP_SD")"
-  UP_ARGV="$(cat "$UP_LOG")"
-  has  "$expected: the outcome is what the gate said" "outcome  $expected" "$UP_OUT"
-  has_call "  removes the park label from the right issue, in one call" \
-           "$UP_LOG" "issue edit $ISSUE" "--remove-label $PARK_LABEL"
-  hasnt "  and never adds the park label again"        "--add-label $PARK_LABEL" "$UP_ARGV"
-done
+UP_BIN="$TMPROOT/unpark-bin-gate-eligible"; make_stubs "$UP_BIN" "eligible-for-auto-merge"
+UP_LOG="$TMPROOT/unpark-gate-eligible.log"; UP_SD="$TMPROOT/unpark-state-gate-eligible"
+UP_OUT="$(run_driver "$UP_BIN" "$UP_LOG" --repo "$REPO" --classify-only "$ISSUE" --state-dir "$UP_SD")"
+UP_ARGV="$(cat "$UP_LOG")"
+has  "gate-eligible: the outcome is what the gate said" "outcome  gate-eligible" "$UP_OUT"
+has_call "  removes the park label from the right issue, in one call" \
+         "$UP_LOG" "issue edit $ISSUE" "--remove-label $PARK_LABEL"
+hasnt "  and never adds the park label again"        "--add-label $PARK_LABEL" "$UP_ARGV"
+
+UP_BIN="$TMPROOT/unpark-bin-gate-human"; make_stubs "$UP_BIN" "human-merge-required"
+UP_LOG="$TMPROOT/unpark-gate-human.log"; UP_SD="$TMPROOT/unpark-state-gate-human"
+UP_OUT="$(run_driver "$UP_BIN" "$UP_LOG" --repo "$REPO" --classify-only "$ISSUE" --state-dir "$UP_SD")"
+UP_ARGV="$(cat "$UP_LOG")"
+has  "gate-human: the outcome is what the gate said" "outcome  gate-human" "$UP_OUT"
+has_call "  parks the issue for human review, in one call" \
+         "$UP_LOG" "issue edit $ISSUE" "--add-label $PARK_LABEL"
 
 # --- C4: durability, and --retry still overrides ---------------------------
 #
