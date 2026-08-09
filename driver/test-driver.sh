@@ -2258,24 +2258,12 @@ mkdir -p "$LN159_SD/runs/159-20260808T000000Z"
 echo "This is the final narrative." > "$LN159_SD/runs/159-20260808T000000Z/final.txt"
 
 STUB_DIR="$LN159_TMP" PATH="$LN159_TMP/bin:$PATH" \
-  bash -c '
-run_stub() {
-  local REPO="stub/repo"
-  local url="https://github.com/stub/repo/issues/159"
-  local rundir="$1/state/runs/159-20260808T000000Z"
-  local n=159
-  local phase="execute"
-  local MAX_BUDGET=10
-  local outcome="gate-eligible"
-  local cost="1.25"
-  local session="sess-123"
-  local prurl="https://github.com/stub/repo/pull/1"
-  local reason="all green"
-  eval "$(sed -n "/# --- lab notebook start-of-work/,/^   fi/p" "$2")"
-  eval "$(sed -n "/# --- lab notebook /,/^   fi/p" "$2")"
-}
-run_stub "$1" "$2"
-' _ "$LN159_TMP" "$DRIVER" 2>&1
+  "$PYTHON_BIN" "$(cd "$(dirname "$DRIVER")" && pwd)/discussion_manager.py" post-start \
+  --repo "stub/repo" --issue "159" --phase "execute" --budget "10" --rundir "$LN159_SD/runs/159-20260808T000000Z" >/dev/null 2>&1
+
+STUB_DIR="$LN159_TMP" PATH="$LN159_TMP/bin:$PATH" \
+  "$PYTHON_BIN" "$(cd "$(dirname "$DRIVER")" && pwd)/discussion_manager.py" post-finish \
+  --repo "stub/repo" --issue "159" --phase "execute" --outcome "gate-eligible" --cost "1.25" --session "sess-123" --prurl "https://github.com/stub/repo/pull/1" --reason "all green" --rundir "$LN159_SD/runs/159-20260808T000000Z" >/dev/null 2>&1
 
 case "$(cat "$LN159_TMP/gh_disc_comments.txt" 2>/dev/null)" in
   *"Starting Work: Issue #159"*|*"https://github.com/stub/repo/discussions/1"*)

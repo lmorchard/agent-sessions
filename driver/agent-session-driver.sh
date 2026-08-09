@@ -853,6 +853,7 @@ INNER_EOF
 # Rule: bash for orchestration, Python for parsing and classification.
 GATE_PY="$(cd "$(dirname "$0")" && pwd)/gate.py"
 AGENT_RUNNER_PY="$(cd "$(dirname "$0")" && pwd)/agent_runner.py"
+DISCUSSION_MANAGER_PY="$(cd "$(dirname "$0")" && pwd)/discussion_manager.py"
 LABEL_MANAGER_PY="${LABEL_MANAGER_PY:-$(cd "$(dirname "$0")"/../scripts && pwd)/label_manager.py}"
 
 GATE_JSON=""
@@ -996,22 +997,8 @@ run_issue() { # $1 = issue number
 
   # --- lab notebook start-of-work (GitHub Discussion) ---
   if [ -n "${REPO:-}" ]; then
-    local date_str="$(date -u +%Y-%m-%d)"
-    local disc_title="Lab Notebook: $date_str"
-    local disc_body="Agent run log and narratives for $date_str."
-    local existing_disc_url=""
-    existing_disc_url="$(gh discussion list --repo "$REPO" --category "Lab Notebook" --json title,url 2>/dev/null | jq -r --arg title "$disc_title" '.[]? | select(.title == $title) | .url // empty' 2>/dev/null || true)"
-    if [ -z "$existing_disc_url" ]; then
-      existing_disc_url="$(gh discussion create --repo "$REPO" --category "Lab Notebook" --title "$disc_title" --body "$disc_body" 2>/dev/null || true)"
-    fi
-    if [ -n "$existing_disc_url" ]; then
-      local start_body="### Starting Work: Issue #$n ($phase)
-- **Issue**: $url
-- **Phase**: $phase
-- **Budget**: \$$MAX_BUDGET
-- **Run Dir**: \`$rundir\`"
-      gh discussion comment "$existing_disc_url" --repo "$REPO" --body "$start_body" >/dev/null 2>&1 || true
-    fi
+    "$PYTHON_BIN" "$DISCUSSION_MANAGER_PY" post-start \
+      --repo "$REPO" --issue "$n" --phase "$phase" --budget "$MAX_BUDGET" --rundir "$rundir" >/dev/null 2>&1 || true
   fi
 
   # In-flight marker, written BEFORE the invocation and removed after the
@@ -1291,35 +1278,10 @@ run_issue() { # $1 = issue number
    # Post run narrative and metadata to a daily GitHub Discussion thread under "Lab Notebook".
    # Gracefully skip if discussions are disabled or gh discussion fails.
    if [ -n "${REPO:-}" ]; then
-     local date_str="$(date -u +%Y-%m-%d)"
-     local disc_title="Lab Notebook: $date_str"
-     local disc_body="Agent run log and narratives for $date_str."
-     
-     # 1. Check if discussion already exists for today
-     local existing_disc_url=""
-     existing_disc_url="$(gh discussion list --repo "$REPO" --category "Lab Notebook" --json title,url 2>/dev/null | jq -r --arg title "$disc_title" '.[]? | select(.title == $title) | .url // empty' 2>/dev/null || true)"
-     
-     if [ -z "$existing_disc_url" ]; then
-       # Create discussion
-       existing_disc_url="$(gh discussion create --repo "$REPO" --category "Lab Notebook" --title "$disc_title" --body "$disc_body" 2>/dev/null || true)"
-     fi
- 
-     if [ -n "$existing_disc_url" ]; then
-       local final_content=""
-       [ -s "$rundir/final.txt" ] && final_content="$(cat "$rundir/final.txt")"
-       local comment_body="### Run: Issue #$n ($phase)
- - **Outcome**: $outcome
- - **Cost**: \$$cost
- - **Session**: ${session:-none}
- - **PR**: ${prurl:-none}
- - **Reason**: $reason
- 
- #### Agent Narrative (\`final.txt\`)
- \`\`\`
- ${final_content:-"(no narrative)"}
- \`\`\`"
-       gh discussion comment "$existing_disc_url" --repo "$REPO" --body "$comment_body" >/dev/null 2>&1 || true
-     fi
+     "$PYTHON_BIN" "$DISCUSSION_MANAGER_PY" post-finish \
+       --repo "$REPO" --issue "$n" --phase "$phase" --outcome "$outcome" \
+       --cost "${cost:-0}" --session "${session:-none}" --prurl "${prurl:-none}" \
+       --reason "${reason:-}" --rundir "$rundir" >/dev/null 2>&1 || true
    fi
 
   case "$outcome" in
