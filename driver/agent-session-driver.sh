@@ -1185,10 +1185,21 @@ run_issue() { # $1 = issue number
       prline="$(printf '%s' "$prs_json" | "$PYTHON_BIN" "$GH_QUERY_PY" pr-for-issue "$n")"
     fi
     if [ -z "$prline" ]; then
-      outcome="parked"
-      if [ "$pr_query_failed" -eq 1 ]; then
+      if [ "${phase:-}" = "triage" ] || [ "${phase:-}" = "refine" ]; then
+        local current_labels
+        current_labels="$(gh issue view "$n" --repo "$REPO" --json labels --jq '.labels[].name' 2>/dev/null || echo '')"
+        if printf '%s\n' "$current_labels" | grep -qx "$PARK_LABEL"; then
+          outcome="parked"
+          reason="parked by agent during ${phase}: $(printf '%s' "$final" | tr '\n' ' ' | cut -c1-400)"
+        else
+          outcome="incomplete"
+          reason="${phase} completed; issue unparked for re-evaluation: $(printf '%s' "$final" | tr '\n' ' ' | cut -c1-400)"
+        fi
+      elif [ "$pr_query_failed" -eq 1 ]; then
+        outcome="parked"
         reason="open-PR query failed; cannot tell whether a PR was opened. run's own account: $(printf '%s' "$final" | tr '\n' ' ' | cut -c1-400)"
       else
+        outcome="parked"
         reason="no PR opened; run's own account: $(printf '%s' "$final" | tr '\n' ' ' | cut -c1-400)"
       fi
     else

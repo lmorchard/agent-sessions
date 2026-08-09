@@ -2212,6 +2212,19 @@ case "$(cat "$A155_TMP/gh_edit_calls.txt" 2>/dev/null)" in
     bad "#155 C3 park_label_remove strips residual attempt labels" "remove-label agent-session:attempt" "$(cat "$A155_TMP/gh_edit_calls.txt" 2>/dev/null)" ;;
 esac
 
+jq -n -c '[{number:786, title:"triaged issue", body:"## Tier: `auto-ok`\n", labels:[{"name":"agent-session:spec"}]}]' > "$A155_TMP/issues.json"
+: > "$A155_TMP/gh_edit_calls.txt"
+
+A155_TRIAGE_OUT="$(STUB_DIR="$A155_TMP" PATH="$A155_TMP/bin:$PATH" \
+  bash "$DRIVER" --repo stub/repo --dry-run --state-dir "$A155_SD" --skill-dir "$A155_SKILL" --repo-path "$A155_TMP" 2>&1)"
+
+case "$A155_TRIAGE_OUT" in
+  *"ELIGIBLE #786  tier: auto-ok (Priority 2: Execute - execute)"*)
+    ok "#155 C1 triaged issue with spec label is selected for Priority 2 Execute" ;;
+  *)
+    bad "#155 C1 triaged issue with spec label is selected for Priority 2 Execute" "Priority 2: Execute" "$A155_TRIAGE_OUT" "$A155_TRIAGE_OUT" ;;
+esac
+
 rm -rf "$A155_TMP"
 
 # --- syntax ----------------------------------------------------------------
