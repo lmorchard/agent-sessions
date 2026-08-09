@@ -23,14 +23,17 @@ def mock_run_gh():
 def test_cmd_spec(mock_run_gh):
     ret = lm.main(["--repo", "owner/repo", "--current-labels", "", "spec", "--issue", "42"])
     assert ret == 0
-    assert mock_run_gh.call_count == 2
+    assert mock_run_gh.call_count == 3
     mock_run_gh.assert_has_calls([
         call(["label", "create", "agent-session:spec", "--color", "0E8A16", "--description", "Verifiable EARS criteria & tier applied"], repo="owner/repo"),
+        call(["label", "create", "agent-session:auto-ok", "--color", "0E8A16", "--description", "Tier label"], repo="owner/repo"),
         call([
             "issue", "edit", "42",
             "--add-label", "agent-session:spec",
+            "--add-label", "agent-session:auto-ok",
             "--remove-label", "agent-session:needs-human",
             "--remove-label", "agent-session:needs-human-interactive",
+            "--remove-label", "agent-session:needs-review",
             "--remove-label", "agent-session:attempt-1",
             "--remove-label", "agent-session:attempt-2",
             "--remove-label", "agent-session:attempt-3"
@@ -153,4 +156,4 @@ def test_invalid_transition_attempt_when_parked(capsys, mock_run_gh):
 def test_force_flag_bypasses_validation(mock_run_gh):
     ret = lm.main(["--repo", "owner/repo", "--current-labels", "agent-session:needs-human", "--force", "spec", "--issue", "42"])
     assert ret == 0
-    assert mock_run_gh.call_count == 2
+    assert mock_run_gh.call_count == 3

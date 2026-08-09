@@ -11,6 +11,8 @@ import sys
 
 # Standard label vocabulary
 SPEC_LABEL = "agent-session:spec"
+AUTO_OK_LABEL = "agent-session:auto-ok"
+NEEDS_REVIEW_LABEL = "agent-session:needs-review"
 PARK_LABEL = "agent-session:needs-human"
 INTERACTIVE_LABEL = "agent-session:needs-human-interactive"
 MERGE_READY_LABEL = "agent-session:merge-ready"
@@ -92,9 +94,24 @@ def validate_transition(command: str, current_labels: list[str], args: argparse.
 
 def cmd_spec(args: argparse.Namespace) -> None:
     ensure_label_exists(SPEC_LABEL, "0E8A16", "Verifiable EARS criteria & tier applied", repo=args.repo)
-    to_remove = [PARK_LABEL, INTERACTIVE_LABEL] + ATTEMPT_LABELS
-    edit_issue_labels(args.issue, add=[SPEC_LABEL], remove=to_remove, repo=args.repo)
-    print(f"Applied {SPEC_LABEL} to #{args.issue} and cleared parking/attempt labels.")
+    tier_label = AUTO_OK_LABEL if getattr(args, "tier", "auto-ok") == "auto-ok" else NEEDS_REVIEW_LABEL
+    other_tier = NEEDS_REVIEW_LABEL if getattr(args, "tier", "auto-ok") == "auto-ok" else AUTO_OK_LABEL
+    ensure_label_exists(tier_label, "0E8A16" if getattr(args, "tier", "auto-ok") == "auto-ok" else "FBCA04", "Tier label", repo=args.repo)
+    to_remove = [PARK_LABEL, INTERACTIVE_LABEL, other_tier] + ATTEMPT_LABELS
+    edit_issue_labels(args.issue, add=[SPEC_LABEL, tier_label], remove=to_remove, repo=args.repo)
+    print(f"Applied {SPEC_LABEL} ({tier_label}) to #{args.issue} and cleared parking/attempt labels.")
+
+
+def cmd_auto_ok(args: argparse.Namespace) -> None:
+    ensure_label_exists(AUTO_OK_LABEL, "0E8A16", "Verifiable criteria satisfied and ready for execution", repo=args.repo)
+    edit_issue_labels(args.issue, add=[AUTO_OK_LABEL], remove=[NEEDS_REVIEW_LABEL], repo=args.repo)
+    print(f"Applied {AUTO_OK_LABEL} to #{args.issue}.")
+
+
+def cmd_needs_review(args: argparse.Namespace) -> None:
+    ensure_label_exists(NEEDS_REVIEW_LABEL, "FBCA04", "Requires human review", repo=args.repo)
+    edit_issue_labels(args.issue, add=[NEEDS_REVIEW_LABEL], remove=[AUTO_OK_LABEL], repo=args.repo)
+    print(f"Applied {NEEDS_REVIEW_LABEL} to #{args.issue}.")
 
 
 def cmd_park(args: argparse.Namespace) -> None:
@@ -150,6 +167,15 @@ def main(argv: list[str] | None = None) -> int:
     # spec
     p_spec = subparsers.add_parser("spec", help="Mark issue as specified (spec)")
     p_spec.add_argument("--issue", type=int, required=True, help="Issue number")
+    p_spec.add_argument("--tier", choices=["auto-ok", "needs-review"], default="auto-ok", help="Tier label")
+
+    # auto-ok
+    p_aok = subparsers.add_parser("auto-ok", help="Set auto-ok tier label")
+    p_aok.add_argument("--issue", type=int, required=True, help="Issue number")
+
+    # needs-review
+    p_nr = subparsers.add_parser("needs-review", help="Set needs-review tier label")
+    p_nr.add_argument("--issue", type=int, required=True, help="Issue number")
 
     # park
     p_park = subparsers.add_parser("park", help="Park issue (needs-human)")
@@ -184,6 +210,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "spec":
             cmd_spec(args)
+        elif args.command == "auto-ok":
+            cmd_auto_ok(args)
+        elif args.command == "needs-review":
+            cmd_needs_review(args)
         elif args.command == "park":
             cmd_park(args)
         elif args.command == "unpark":
