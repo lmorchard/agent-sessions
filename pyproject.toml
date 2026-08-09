@@ -1,18 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
-name = "agent-sessions-driver"
+name = "agent-sessions"
 version = "0.1.0"
-description = "Gate-block parsing and classification for the agent-session board driver"
+description = "Autonomous agent session board driver and reconciliation loop"
+readme = "README.md"
 requires-python = ">=3.11"
-# Deliberately empty. driver/gate.py imports only the standard library so the
-# driver stays portable to a GHA runner, as its header claims. pytest is a *dev*
-# dependency of the tests, never of the shipped parser -- enforced by C5
-# (`python3 -I -S -c "import gate"`, which sees no site-packages).
 dependencies = []
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-xdist>=3"]
+dev = [
+    "pytest>=8",
+    "pytest-xdist>=3",
+    "ruff>=0.8.0",
+    "mypy>=1.10.0",
+]
+
+[project.scripts]
+agent-session-driver = "agent_sessions.driver.agent_session_driver:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_sessions"]
 
 [tool.pytest.ini_options]
 testpaths = ["driver", "scripts"]
 python_files = ["test_*.py"]
 addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = ["docs/dev-sessions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501", "E741"]
+
+[tool.ruff.lint.per-file-ignores]
+"driver/*.py" = ["E402", "F403"]
+"scripts/*.py" = ["E402", "F403"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true

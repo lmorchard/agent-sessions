@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
-import docs_check  # noqa: E402
+from agent_sessions.scripts import docs_check
 
 
 @pytest.fixture(autouse=True)

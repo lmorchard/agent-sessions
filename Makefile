@@ -4,10 +4,12 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help check board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly
+.PHONY: help check board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly lint typecheck
 
 help:
 	@echo "check            run every check -- the targets listed below, in one go"
+	@echo "lint             run ruff linter"
+	@echo "typecheck        run mypy type checker"
 	@echo "board-audit      audit this repo's live GitHub project (read-only)"
 	@echo "driver-check     assert the driver has no executable merge path"
 	@echo "driver-test      bash fixture tests (runs gate-test first)"
@@ -35,7 +37,13 @@ check: driver-check
 
 .PHONY: check-parallel driver-test-sh
 
-check-parallel: gate-test skill-readonly docs-check assertion-lint commit-lint
+check-parallel: gate-test skill-readonly docs-check assertion-lint commit-lint lint typecheck
+
+lint:
+	@uv run ruff check .
+
+typecheck:
+	@uv run mypy src
 
 board-audit:
 	@python3 scripts/board_audit.py --owner lmorchard --project 9 --repo lmorchard/agent-sessions
