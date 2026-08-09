@@ -64,8 +64,9 @@ criteria), and you do the part that does (ratify). See
    - In your comment, explicitly ask the human to reply with 'Approved' or to provide corrections. Tell them NOT to manually apply the `agent-session:spec` label themselves, as you need to formally update the issue body first on your next pass.
 
 4. **Follow-up pass (Reading human replies).** If you are triaging an issue that already has a proposed spec comment from you, read the subsequent comments from the human.
-   - If they approved it, proceed to Step 5.
+   - If the human explicitly approved the spec (e.g., "Approved", "Looks good", "Dependencies are fine"), proceed to Step 5.
    - If they provided corrections, synthesize them into an updated spec and confirm if it is now complete. Proceed to Step 5 if complete, otherwise post a follow-up comment and stop.
+   - IMPORTANT: If you proceed to Step 5, you MUST explicitly remove the `agent-session:needs-human` label (`gh issue edit <n> --remove-label agent-session:needs-human`) so the background driver stops viewing the issue as parked.
 
 5. **Write back (augment in place).** For each ratified issue, run `intake`'s file-or-update step.
    First ensure the label exists (`gh label create "agent-session:spec" --color 0E8A16 || true`).
