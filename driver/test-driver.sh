@@ -2242,7 +2242,7 @@ chmod +x "$T788_TMP/bin/gh"
 
 T788_OUT="$(PATH="$T788_TMP/bin:$PATH" PARK_LABEL="agent-session:needs-human" INTERACTIVE_LABEL="agent-session:needs-human-interactive" phase="triage" n="788" REPO="stub/repo" final="interactive collaboration required" pr_query_failed=0 bash -c "
 test_fn() {
-$(sed -n '1190,1206p' "$DRIVER")
+$(sed -n '1216,1270p' "$DRIVER")
   echo \"outcome:\$outcome\"
 }
 test_fn
@@ -2300,6 +2300,44 @@ case "$(cat "$LN159_TMP/gh_disc_comments.txt" 2>/dev/null)" in
 esac
 
 rm -rf "$LN159_TMP"
+
+echo "#166: issue selection filters by P0/P1 by default, and --all-issues disables filter"
+I166_TMP="$(mktemp -d)"
+mkdir -p "$I166_TMP/bin"
+cat > "$I166_TMP/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
+  echo "$@" >> "$STUB_DIR/gh_calls.txt"
+  echo '[]'
+  exit 0
+fi
+exit 0
+STUB
+chmod +x "$I166_TMP/bin/gh"
+: > "$I166_TMP/gh_calls.txt"
+
+STUB_DIR="$I166_TMP" PATH="$I166_TMP/bin:$PATH" \
+  bash "$DRIVER" --repo stub/repo --dry-run --state-dir "$I166_TMP/state" >/dev/null 2>&1
+
+case "$(cat "$I166_TMP/gh_calls.txt")" in
+  *"label:P0 OR label:P1"*)
+    ok "#166 default selection filters by P0/P1" ;;
+  *)
+    bad "#166 default selection filters by P0/P1" "search query with label:P0 OR label:P1" "$(cat "$I166_TMP/gh_calls.txt")" ;;
+esac
+
+: > "$I166_TMP/gh_calls.txt"
+STUB_DIR="$I166_TMP" PATH="$I166_TMP/bin:$PATH" \
+  bash "$DRIVER" --repo stub/repo --dry-run --all-issues --state-dir "$I166_TMP/state2" >/dev/null 2>&1
+
+case "$(cat "$I166_TMP/gh_calls.txt")" in
+  *"label:P0 OR label:P1"*)
+    bad "#166 --all-issues disables P0/P1 filter" "no label:P0 OR label:P1" "$(cat "$I166_TMP/gh_calls.txt")" ;;
+  *)
+    ok "#166 --all-issues disables P0/P1 filter" ;;
+esac
+
+rm -rf "$I166_TMP"
 
 # --- syntax ----------------------------------------------------------------
 
