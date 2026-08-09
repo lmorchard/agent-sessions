@@ -39,6 +39,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.xdist_group(name="gate_wiring")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: Set only on the `make gate-test` subprocess C2 spawns. Nothing else in the repo
