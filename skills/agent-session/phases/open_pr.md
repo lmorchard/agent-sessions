@@ -74,7 +74,7 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
    the recorded verdict becomes a claim the run made about itself rather than a command a reviewer can
    check. Leave history alone and let the merge button decide its shape.
 
-6. **Open the PR** using `references/pr-body-template.md`. Title under 70 chars. Fill the
+6. **Open the PR** using `references/pr-body-template.md`. Apply the `agent-session:gate` label (`gh pr edit <n> --add-label "agent-session:gate"`). Title under 70 chars. Fill the
    **Acceptance criteria** table from the *independent verifier's* report — never from the
    implementer's own run. Include `Closes #N`, links to `spec.md` / `checks.md` / `plan.md`, and
    the gate block.
