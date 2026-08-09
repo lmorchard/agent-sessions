@@ -147,9 +147,8 @@ def post_finish(
 - **Reason**: {reason}
 
 #### Agent Narrative (`final.txt`)
-```
-{final_text or '(no narrative)'}
-```"""
+
+{final_text or '(no narrative)'}"""
 
     rc, _, _ = run_gh(["discussion", "comment", disc_url, "--repo", repo, "--body", comment_body])
     return rc == 0
