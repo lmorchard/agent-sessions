@@ -59,6 +59,7 @@ def extract_gate(body: str) -> str:
     """Return the YAML block following `## Merge gate`, or "" if absent.
 
     Finds the first ```yaml or ``` block after the `## Merge gate` heading.
+    If unfenced key-value lines exist without code blocks, extracts those.
     """
     if not body:
         return ""
@@ -74,18 +75,11 @@ def extract_gate(body: str) -> str:
         return ""
 
     remaining = lines[found_idx + 1:]
-    first_non_empty_idx = -1
-    for i, line in enumerate(remaining):
-        if line.strip():
-            first_non_empty_idx = i
-            break
 
-    if first_non_empty_idx == -1:
-        return ""
-
+    # First pass: look for a fenced block under ## Merge gate
     out: list[str] = []
     opened = False
-    for line in remaining[first_non_empty_idx:]:
+    for line in remaining:
         sline = line.strip()
         if sline.startswith("```"):
             if not opened:
@@ -94,14 +88,20 @@ def extract_gate(body: str) -> str:
             break
         if opened:
             out.append(line)
-        elif sline and not sline.startswith("<!--"):
-            # If we hit non-empty text before a fence, we might be unfenced.
-            # But the new spec says "extract the YAML block using standard markdown codeblock extractors"
-            # We can allow unfenced if it's key-value like before, but inside the fence is preferred.
-            if ":" in sline:
-                out.append(line)
-            else:
-                break
+
+    if opened or out:
+        return "\n".join(out)
+
+    # Fallback pass: if no fenced block, collect unfenced key-value lines
+    out = []
+    for line in remaining:
+        sline = line.strip()
+        if sline.startswith("#") or sline.startswith("```"):
+            break
+        if ":" in sline:
+            out.append(line)
+        elif not sline and out:
+            break
     return "\n".join(out)
 
 
@@ -487,13 +487,10 @@ def tier_of(body: str) -> str:
 
 
 def tier_batch(issues: list) -> list[tuple[str, str, str]]:
-    """(number, tier, title) for every issue passed in. Others are dropped.
+    """(number, tier, title) for every issue passed in.
 
-    Replaces the driver's inline `TIER_JQ` jq program. Dropping a unlabelled
-    issue is deliberate and is *not* the same as `missing`: an issue without the
-    marker is not a candidate at all (nothing has specced it), whereas `missing`
-    means specced but carrying no `## Tier:` line, which is a real defect worth
-    reporting. Collapsing the two would hide the second.
+    Replaces the driver's inline `TIER_JQ` jq program to extract tier headings
+    from the issue bodies in batch.
     """
     rows: list[tuple[str, str, str]] = []
     for issue in issues or []:
@@ -532,8 +529,7 @@ def _main(argv: list[str] | None = None) -> int:
 
     tb = sub.add_parser(
         "tier-batch",
-        help="gh issue list JSON array on stdin -> TSV of number/tier/title for "
-             "marker-carrying issues only",
+        help="gh issue list JSON array on stdin -> TSV of number/tier/title",
     )
 
     b = sub.add_parser("budget-reclass", help="reclassify an outcome by spend")

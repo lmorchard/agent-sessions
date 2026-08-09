@@ -30,41 +30,23 @@ case "$REPO" in
     ;;
 esac
 
+create_label() { # $1 = name, $2 = color, $3 = description
+  local err
+  if err="$(gh label create "$1" --repo "$REPO" --color "$2" --description "$3" 2>&1)"; then
+    echo "    Created label '$1'"
+  elif echo "$err" | grep -qi "already exists"; then
+    echo "    (Label '$1' already exists)"
+  else
+    echo "    WARNING: could not create label '$1': $err" >&2
+  fi
+}
+
 echo "==> Bootstrapping repository: $REPO"
 
-echo "--> Creating 'agent-session:spec' label..."
-gh label create "agent-session:spec" \
-  --repo "$REPO" \
-  --color 0E8A16 \
-  --description "Issue is fully specified and ready for execution" \
-  2>/dev/null || echo "    (Label already exists)"
-
-echo "--> Creating 'agent-session:needs-human' label..."
-gh label create "agent-session:needs-human" \
-  --repo "$REPO" \
-  --color FBCA04 \
-  --description "The agent-session driver parked this issue for human ratification" \
-  2>/dev/null || echo "    (Label already exists)"
-
-echo "--> Creating 'agent-session:needs-human-interactive' label..."
-gh label create "agent-session:needs-human-interactive" \
-  --repo "$REPO" \
-  --color D93F0B \
-  --description "Issue requires an interactive terminal session for visual/aesthetic iteration" \
-  2>/dev/null || echo "    (Label already exists)"
-
-echo "--> Creating 'agent-session:gate' label..."
-gh label create "agent-session:gate" \
-  --repo "$REPO" \
-  --color 0E8A16 \
-  --description "PR has a merge gate block and is ready for grading" \
-  2>/dev/null || echo "    (Label already exists)"
-
-echo "--> Creating 'agent-session:merge-ready' label..."
-gh label create "agent-session:merge-ready" \
-  --repo "$REPO" \
-  --color 2E8A16 \
-  --description "Issue is eligible for auto-merge, waiting for human or auto-merge script" \
-  2>/dev/null || echo "    (Label already exists)"
+create_label "agent-session:spec" "0E8A16" "Issue is fully specified and ready for execution"
+create_label "agent-session:needs-human" "FBCA04" "The agent-session driver parked this issue for human ratification"
+create_label "agent-session:needs-human-interactive" "D93F0B" "Issue requires an interactive terminal session for visual/aesthetic iteration"
+create_label "agent-session:gate" "0E8A16" "PR has a merge gate block and is ready for grading"
+create_label "agent-session:merge-ready" "2E8A16" "Issue is eligible for auto-merge, waiting for human or auto-merge script"
 
 echo "==> Done. $REPO is ready for agent-sessions."

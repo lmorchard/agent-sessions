@@ -76,6 +76,14 @@ def test_extract_gate_handles_unfenced_block():
     assert "## References" not in got
 
 
+def test_extract_gate_handles_introductory_prose_before_fence():
+    body = "## Merge gate\n\nHere are the results:\n\n```yaml\nverdict: eligible-for-auto-merge\nreason: pass\n```\n"
+    got = gate.extract_gate(body)
+    assert "verdict: eligible-for-auto-merge" in got
+    assert "reason: pass" in got
+    assert "Here are the results" not in got
+
+
 def test_gate_field_missing_is_empty_string():
     assert gate.gate_field(gate.extract_gate(body_with("2/2 pass")), "nope") == ""
 
