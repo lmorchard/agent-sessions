@@ -31,7 +31,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 import commit_lint  # noqa: E402
 
-
 # --- defect 1: a doubled backtick run was not recognised as quoting ----------
 
 def test_a_double_backtick_span_is_reported():

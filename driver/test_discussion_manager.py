@@ -1,13 +1,14 @@
 import json
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-from discussion_manager import (
+from agent_sessions.driver.discussion_manager import (
     ensure_category,
     get_or_create_daily_discussion,
-    post_start,
     post_finish,
+    post_start,
 )
+
+MODULE_PATH = "agent_sessions.driver.discussion_manager"
 
 
 def test_ensure_category_success():
@@ -18,7 +19,7 @@ def test_ensure_category_success():
             return 0, json.dumps({"data": {"createDiscussionCategory": {"discussionCategory": {"id": "DC_1"}}}}), ""
         return 1, "", "error"
 
-    with patch("discussion_manager.run_gh", side_effect=mock_run_gh):
+    with patch(f"{MODULE_PATH}.run_gh", side_effect=mock_run_gh):
         assert ensure_category("owner/repo") is True
 
 
@@ -30,7 +31,7 @@ def test_ensure_category_already_exists():
             return 1, "", "Name already exists"
         return 1, "", "error"
 
-    with patch("discussion_manager.run_gh", side_effect=mock_run_gh):
+    with patch(f"{MODULE_PATH}.run_gh", side_effect=mock_run_gh):
         assert ensure_category("owner/repo") is True
 
 
@@ -42,7 +43,7 @@ def test_get_or_create_daily_discussion_finds_existing():
             return 0, sample_json, ""
         return 1, "", "error"
 
-    with patch("discussion_manager.run_gh", side_effect=mock_run_gh):
+    with patch(f"{MODULE_PATH}.run_gh", side_effect=mock_run_gh):
         url = get_or_create_daily_discussion("owner/repo")
         assert url == "https://github.com/owner/repo/discussions/10"
 
@@ -55,7 +56,7 @@ def test_get_or_create_daily_discussion_creates_new():
             return 0, "https://github.com/owner/repo/discussions/11\n", ""
         return 1, "", "error"
 
-    with patch("discussion_manager.run_gh", side_effect=mock_run_gh):
+    with patch(f"{MODULE_PATH}.run_gh", side_effect=mock_run_gh):
         url = get_or_create_daily_discussion("owner/repo")
         assert url == "https://github.com/owner/repo/discussions/11"
 
@@ -71,7 +72,7 @@ def test_post_start():
             return 0, "commented", ""
         return 1, "", "error"
 
-    with patch("discussion_manager.run_gh", side_effect=mock_run_gh):
+    with patch(f"{MODULE_PATH}.run_gh", side_effect=mock_run_gh):
         ok = post_start("owner/repo", "123", "execute", "10", "/tmp/rundir")
         assert ok is True
         comment_calls = [c for c in calls if "comment" in c]
@@ -95,7 +96,7 @@ def test_post_finish(tmp_path):
             return 0, "commented", ""
         return 1, "", "error"
 
-    with patch("discussion_manager.run_gh", side_effect=mock_run_gh):
+    with patch(f"{MODULE_PATH}.run_gh", side_effect=mock_run_gh):
         ok = post_finish("owner/repo", "123", "execute", "gate-eligible", "1.25", "sess-123", "https://github.com/pr", "all good", str(rundir))
         assert ok is True
         comment_calls = [c for c in calls if "comment" in c]

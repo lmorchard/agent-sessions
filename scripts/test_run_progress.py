@@ -18,12 +18,10 @@ run on disk changed.
 
 import json
 import sys
-import pytest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import run_progress  # noqa: E402
-
 
 # --- fixture builders ------------------------------------------------------
 #
@@ -178,14 +176,14 @@ def test_missing_state_dir_is_configuration_error(tmp_path, capsys, monkeypatch)
     """C2 — a non-existent state directory is a configuration error, not a wait."""
     import run_progress
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
-    
+
     # State dir does not exist -> configuration error
     args = ["--repo", "lmorchard/missing"]
-    
+
     # Check that main returns 2
     exit_code = run_progress.main(args)
     assert exit_code == 2
-    
+
     captured = capsys.readouterr()
     assert "waiting --" not in captured.err
     assert "waiting --" not in captured.out
@@ -203,11 +201,11 @@ def test_missing_state_dir_is_configuration_error(tmp_path, capsys, monkeypatch)
     # Create the state directory but leave it empty of runs -> wait
     state_dir = run_progress.default_state_dir("lmorchard/empty")
     state_dir.mkdir(parents=True)
-    
+
     # One-shot mode fails with 2 but doesn't complain about misconfiguration
     exit_code = run_progress.main(["--repo", "lmorchard/empty"])
     assert exit_code == 2
-    
+
     captured = capsys.readouterr()
     assert "error: state directory" not in captured.err
     assert "no run directories" in captured.err
@@ -238,7 +236,7 @@ def test_opencode_stream_progress(tmp_path):
 def test_find_latest_overall_run(tmp_path, monkeypatch):
     """find_latest_overall_run finds the newest run directory across repos."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
-    
+
     # Create two repo directories with runs
     repo_a = tmp_path / "agent-session" / "repo-a" / "runs" / "1-20260101T000000Z"
     repo_b = tmp_path / "agent-session" / "repo-b" / "runs" / "2-20260101T000001Z"

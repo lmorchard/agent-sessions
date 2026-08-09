@@ -5,8 +5,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent))
 import guard_lint  # noqa: E402
 
@@ -29,7 +27,7 @@ def test_json_scanning(monkeypatch, capsys):
     guard_lint.failures.clear()
     json_data = '[{"body": "## Regression guards\\n- 34 passed\\n"}]'
     monkeypatch.setattr("sys.stdin", type("Stdin", (), {"isatty": lambda *a, **kw: False, "read": lambda *a, **kw: json_data})())
-    
+
     ret = guard_lint.main()
     assert ret == 1
     captured = capsys.readouterr()

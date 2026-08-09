@@ -1,11 +1,12 @@
-import json
 import subprocess
 import sys
 from pathlib import Path
+
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 import gh_query
+
 
 def test_module_imports_without_site_packages():
     """Verify the module relies only on the stdlib."""
@@ -46,9 +47,9 @@ def test_pr_for_issue():
     ]
     assert gh_query.pr_for_issue("7", prs) == "42\thttps://url/42"
     assert gh_query.pr_for_issue("8", prs) is None
-    
+
     prs_title = [{"number": 45, "url": "url", "title": "Fix #7"}]
     assert gh_query.pr_for_issue("7", prs_title) == "45\turl"
-    
+
     prs_head = [{"number": 46, "url": "url", "headRefName": "issue-7-fix"}]
     assert gh_query.pr_for_issue("7", prs_head) == "46\turl"

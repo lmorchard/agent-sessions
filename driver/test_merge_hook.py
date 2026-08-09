@@ -1,7 +1,6 @@
 import json
 import subprocess
-import pytest
-from pathlib import Path
+
 
 def test_hook_gh_pr_merge():
     payload = {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 12 --squash"}}

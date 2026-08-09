@@ -2,14 +2,15 @@
 
 import sys
 from pathlib import Path
-from unittest.mock import patch, call
+from unittest.mock import call, patch
+
 import pytest
 
 SYS_PATH_PARENT = str(Path(__file__).resolve().parent)
 if SYS_PATH_PARENT not in sys.path:
     sys.path.insert(0, SYS_PATH_PARENT)
 
-import label_manager as lm  # noqa: E402
+from agent_sessions.scripts import label_manager as lm  # noqa: E402
 
 
 @pytest.fixture
