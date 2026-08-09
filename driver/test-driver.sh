@@ -897,6 +897,10 @@ cat > "$M_TMP/bin/gh" <<'STUB'
 fields=""; prev=""
 for a in "$@"; do [ "$prev" = "--json" ] && fields="$a"; prev="$a"; done
 case "$*" in
+  "issue list"*"--search"*"label:agent-session:spec -label:agent-session:merge-ready"*)
+       jq --arg f "$fields" \
+       '[.[] | select((.labels // []) | any(.name == "agent-session:spec") and all(.name != "agent-session:merge-ready")) | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' \
+       "$STUB_DIR/issues.json" ;;
   "issue list"*"--search"*)
        jq --arg f "$fields" \
        '[.[] | select((.labels // []) | all(.name != "agent-session:spec")) | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' \
@@ -1055,7 +1059,11 @@ for a in "$@"; do [ "$prev" = "--json" ] && fields="$a"; prev="$a"; done
 _serve() { jq --arg f "$fields" \
              '[.[] | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' "$1"; }
 case "$*" in
-    "issue list"*"--search"*)
+    "issue list"*"--search"*"label:agent-session:spec -label:agent-session:merge-ready"*)
+       jq --arg f "$fields" \
+       '[.[] | select((.labels // []) | any(.name == "agent-session:spec") and all(.name != "agent-session:merge-ready")) | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' \
+       "$STUB_DIR/issues.json" ;;
+  "issue list"*"--search"*)
        jq --arg f "$fields" \
        '[.[] | select((.labels // []) | all(.name != "agent-session:spec")) | with_entries(select(.key as $k | ($f | split(",")) | index($k)))]' \
        "$STUB_DIR/issues.json" ;;
@@ -1735,7 +1743,9 @@ cat > "$S74_TMP/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 echo "$@" >> "$STUB_DIR/gh_calls.log"
 case "$*" in
-    "issue list"*"--search"*)
+    "issue list"*"--search"*"label:agent-session:spec -label:agent-session:merge-ready"*)
+       jq '[.[] | select((.labels // []) | any(.name == "agent-session:spec") and all(.name != "agent-session:merge-ready"))]' "$STUB_DIR/issues.json" ;;
+  "issue list"*"--search"*)
        jq '[.[] | select((.labels // []) | all(.name != "agent-session:spec"))]' "$STUB_DIR/issues.json" ;;
   "issue list"*"--label"*)
        jq '[.[] | select((.labels // []) | any(.name == "agent-session:spec"))]' "$STUB_DIR/issues.json" ;;
@@ -1789,7 +1799,9 @@ cat > "$S74_G2_TMP/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 echo "$@" >> "$STUB_DIR/gh_calls.log"
 case "$*" in
-    "issue list"*"--search"*)
+    "issue list"*"--search"*"label:agent-session:spec -label:agent-session:merge-ready"*)
+       jq '[.[] | select((.labels // []) | any(.name == "agent-session:spec") and all(.name != "agent-session:merge-ready"))]' "$STUB_DIR/issues.json" ;;
+  "issue list"*"--search"*)
        jq '[.[] | select((.labels // []) | all(.name != "agent-session:spec"))]' "$STUB_DIR/issues.json" ;;
   "issue list"*"--label"*)
        jq '[.[] | select((.labels // []) | any(.name == "agent-session:spec"))]' "$STUB_DIR/issues.json" ;;
@@ -1836,7 +1848,9 @@ JSON
 cat > "$S87_TMP/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
-    "issue list"*"--search"*)
+    "issue list"*"--search"*"label:agent-session:spec -label:agent-session:merge-ready"*)
+       jq '[.[] | select((.labels // []) | any(.name == "agent-session:spec") and all(.name != "agent-session:merge-ready"))]' "$STUB_DIR/issues.json" ;;
+  "issue list"*"--search"*)
        jq '[.[] | select((.labels // []) | all(.name != "agent-session:spec"))]' "$STUB_DIR/issues.json" ;;
   "issue list"*"--label"*)
        jq '[.[] | select((.labels // []) | any(.name == "agent-session:spec"))]' "$STUB_DIR/issues.json" ;;

@@ -40,6 +40,7 @@ fi
 # no repo at all -- and visible on the issue, where a human decides whether to
 # --retry. See issue #5, decision D2.
 PARK_LABEL='agent-session:needs-human'
+MERGE_READY_LABEL='agent-session:merge-ready'
 
 # --- defaults --------------------------------------------------------------
 
@@ -530,13 +531,17 @@ apply_park_state() { # $1 = issue, $2 = outcome, $3 = ts, $4 = reason
       say "  incomplete -- leaving unparked so the loop can re-evaluate later"
       park_label_remove "$1"
       ;;
-    gate-eligible|gate-human)
+    gate-eligible)
       # A verdict means the run got somewhere, so an earlier park no longer holds.
-      # These are exactly the outcomes the driver already declines to park.
       park_label_remove "$1"
-      if [ "$2" = "gate-human" ]; then
-        notify_human "$1" "gate-human: $4"
-      fi
+      # Apply merge-ready label to prevent infinite grade_gate loops
+      gh label create "$MERGE_READY_LABEL" --repo "$REPO" --color 2E8A16 --description "Issue is eligible for auto-merge, waiting for human or auto-merge script" >/dev/null 2>&1 || true
+      gh issue edit "$1" --repo "$REPO" --add-label "$MERGE_READY_LABEL" >/dev/null 2>&1 || true
+      notify_human "$1" "gate-eligible: $4"
+      ;;
+    gate-human)
+      park_label_remove "$1"
+      notify_human "$1" "gate-human: $4"
       ;;
   esac
   # budget-exhausted, driver-fault and ci-stale deliberately match neither arm.
@@ -613,7 +618,7 @@ select_issues() {
   say "== select =="
   local candidates_json markerless_json total
   candidates_json="$(gh issue list --repo "$REPO" --state open --limit 500 \
-                   --label "agent-session:spec" \
+                   --search "label:agent-session:spec -label:agent-session:merge-ready type:issue state:open" \
                    --json number,title,body,labels 2>/dev/null || echo '[]')"
   markerless_json="$(gh issue list --repo "$REPO" --state open --limit 500 \
                    --search "-label:agent-session:spec type:issue state:open" \
