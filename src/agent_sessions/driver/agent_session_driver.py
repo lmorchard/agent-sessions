@@ -668,34 +668,37 @@ def main(argv: list[str] | None = None) -> int:
             if isinstance(content, dict) and "number" in content:
                 board_nums.add(str(content["number"]))
 
-    issue_filter = ""
+    try:
+        cmd = ["gh", "issue", "list", "--repo", repo, "--state", "open", "--limit", "500", "--json", "number,title,body,labels,url"]
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        open_issues = json.loads(res.stdout)
+    except Exception as e:
+        log(f"failed to list open issues: {e}")
+        open_issues = []
+
+    total_issues = len(open_issues)
+
     if not args.all_issues:
-        board_search = " ".join(f"issue:{bn}" for bn in board_nums)
-        issue_filter = f"(label:P0 OR label:P1 OR label:P2 OR label:P3 OR label:P4 OR label:P5 {board_search})".strip()
+        filtered_issues = []
+        for iss in open_issues:
+            num_str = str(iss.get("number"))
+            labels = [l.get("name", "") for l in iss.get("labels", []) if isinstance(l, dict)]
+            has_priority_label = any(p_lbl in labels for p_lbl in ("P0", "P1", "P2", "P3", "P4", "P5"))
+            if num_str in board_nums or has_priority_label:
+                filtered_issues.append(iss)
+    else:
+        filtered_issues = open_issues
 
-    cand_search = "label:agent-session:spec -label:agent-session:merge-ready type:issue state:open"
-    markerless_search = "-label:agent-session:spec type:issue state:open"
-    if issue_filter:
-        cand_search += f" {issue_filter}"
-        markerless_search += f" {issue_filter}"
-
-    try:
-        cmd1 = ["gh", "issue", "list", "--repo", repo, "--state", "open", "--limit", "500", "--search", cand_search, "--json", "number,title,body,labels,url"]
-        res1 = subprocess.run(cmd1, capture_output=True, text=True, check=True)
-        candidates_json = json.loads(res1.stdout)
-    except Exception as e:
-        log(f"failed to list candidates: {e}")
-        candidates_json = []
-
-    try:
-        cmd2 = ["gh", "issue", "list", "--repo", repo, "--state", "open", "--limit", "500", "--search", markerless_search, "--json", "number,title,body,labels,url"]
-        res2 = subprocess.run(cmd2, capture_output=True, text=True, check=True)
-        markerless_json = json.loads(res2.stdout)
-    except Exception as e:
-        log(f"failed to list markerless issues: {e}")
-        markerless_json = []
-
-    total_issues = len(candidates_json) + len(markerless_json)
+    candidates_json = [
+        iss
+        for iss in filtered_issues
+        if MARKER in iss.get("body", "")
+        and not any(
+            isinstance(l, dict) and l.get("name") == "agent-session:merge-ready"
+            for l in iss.get("labels", [])
+        )
+    ]
+    markerless_json = [iss for iss in filtered_issues if MARKER not in iss.get("body", "")]
     all_issues_json = candidates_json + markerless_json
     parked = parked_numbers(all_issues_json)
 
