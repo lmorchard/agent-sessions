@@ -2227,6 +2227,53 @@ esac
 
 rm -rf "$A155_TMP"
 
+echo "#159: Agent Lab Notebook via GitHub Discussions"
+
+LN159_TMP="$(mktemp -d)"
+mkdir -p "$LN159_TMP/bin"
+cat > "$LN159_TMP/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+echo "GH: $*" >> "$STUB_DIR/gh.log"
+case "$*" in
+  *"discussion list"*)
+    echo '[{"title":"Lab Notebook: 2026-08-08", "url":"https://github.com/stub/repo/discussions/1"}]'
+    ;;
+  *"discussion create"*)
+    echo "https://github.com/stub/repo/discussions/1"
+    ;;
+  *"discussion comment"*)
+    echo "$*" >> "$STUB_DIR/gh_disc_comments.txt"
+    echo "commented"
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+STUB
+chmod +x "$LN159_TMP/bin/gh"
+: > "$LN159_TMP/gh_disc_comments.txt"
+
+LN159_SD="$LN159_TMP/state"
+mkdir -p "$LN159_SD/runs/159-20260808T000000Z"
+echo "This is the final narrative." > "$LN159_SD/runs/159-20260808T000000Z/final.txt"
+
+STUB_DIR="$LN159_TMP" PATH="$LN159_TMP/bin:$PATH" \
+  "$PYTHON_BIN" "$(cd "$(dirname "$DRIVER")" && pwd)/discussion_manager.py" post-start \
+  --repo "stub/repo" --issue "159" --phase "execute" --budget "10" --rundir "$LN159_SD/runs/159-20260808T000000Z" >/dev/null 2>&1
+
+STUB_DIR="$LN159_TMP" PATH="$LN159_TMP/bin:$PATH" \
+  "$PYTHON_BIN" "$(cd "$(dirname "$DRIVER")" && pwd)/discussion_manager.py" post-finish \
+  --repo "stub/repo" --issue "159" --phase "execute" --outcome "gate-eligible" --cost "1.25" --session "sess-123" --prurl "https://github.com/stub/repo/pull/1" --reason "all green" --rundir "$LN159_SD/runs/159-20260808T000000Z" >/dev/null 2>&1
+
+case "$(cat "$LN159_TMP/gh_disc_comments.txt" 2>/dev/null)" in
+  *"Starting Work: Issue #159"*|*"https://github.com/stub/repo/discussions/1"*)
+    ok "#159 C1 lab notebook posts start-of-work and conclusion comments to discussion" ;;
+  *)
+    bad "#159 C1 lab notebook posts start-of-work and conclusion comments to discussion" "discussion comments" "$(cat "$LN159_TMP/gh_disc_comments.txt" 2>/dev/null)" ;;
+esac
+
+rm -rf "$LN159_TMP"
+
 # --- syntax ----------------------------------------------------------------
 
 

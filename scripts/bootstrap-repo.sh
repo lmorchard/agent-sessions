@@ -49,4 +49,10 @@ create_label "agent-session:needs-human-interactive" "D93F0B" "Issue requires an
 create_label "agent-session:gate" "0E8A16" "PR has a merge gate block and is ready for grading"
 create_label "agent-session:merge-ready" "2E8A16" "Issue is eligible for auto-merge, waiting for human or auto-merge script"
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DISCUSSION_MANAGER_PY="${DISCUSSION_MANAGER_PY:-$SCRIPT_DIR/../driver/discussion_manager.py}"
+
+echo "==> Ensuring 'Lab Notebook' discussion category exists..."
+"${PYTHON_BIN:-python3}" "$DISCUSSION_MANAGER_PY" ensure-category --repo "$REPO" || true
+
 echo "==> Done. $REPO is ready for agent-sessions."

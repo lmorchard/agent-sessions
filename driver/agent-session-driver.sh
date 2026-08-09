@@ -853,6 +853,7 @@ INNER_EOF
 # Rule: bash for orchestration, Python for parsing and classification.
 GATE_PY="$(cd "$(dirname "$0")" && pwd)/gate.py"
 AGENT_RUNNER_PY="$(cd "$(dirname "$0")" && pwd)/agent_runner.py"
+DISCUSSION_MANAGER_PY="$(cd "$(dirname "$0")" && pwd)/discussion_manager.py"
 LABEL_MANAGER_PY="${LABEL_MANAGER_PY:-$(cd "$(dirname "$0")"/../scripts && pwd)/label_manager.py}"
 
 GATE_JSON=""
@@ -993,6 +994,12 @@ run_issue() { # $1 = issue number
   say "  cwd      $REPO_PATH"
   say "  budget   \$$MAX_BUDGET   timeout ${RUN_TIMEOUT}s"
   say "  run dir  $rundir"
+
+  # --- lab notebook start-of-work (GitHub Discussion) ---
+  if [ -n "${REPO:-}" ]; then
+    "$PYTHON_BIN" "$DISCUSSION_MANAGER_PY" post-start \
+      --repo "$REPO" --issue "$n" --phase "$phase" --budget "$MAX_BUDGET" --rundir "$rundir" >/dev/null 2>&1 || true
+  fi
 
   # In-flight marker, written BEFORE the invocation and removed after the
   # outcome is recorded. If the driver itself dies mid-run -- killed, laptop
@@ -1254,18 +1261,28 @@ run_issue() { # $1 = issue number
   fi
   [ -n "${provenance:-}" ] || provenance='{}'
 
-  jq -n -c \
-    --arg issue "$n" --arg repo "$REPO" --arg ts "$ts" \
-    --arg outcome "$outcome" --arg reason "$reason" \
-    --arg pr "${prurl:-}" --arg session "$session" \
-    --arg rundir "$rundir" --argjson rc "$rc" --argjson cost "${cost:-0}" \
-    --arg board_column "${pre_run_col:-}" \
-    --argjson provenance "$provenance" \
-    '{issue:($issue|tonumber), repo:$repo, started:$ts, exit:$rc, cost_usd:$cost,
-      session_id:$session, outcome:$outcome, reason:$reason, pr:$pr, run_dir:$rundir, board_column:$board_column, provenance:$provenance}' \
-    >> "$RUNS_LOG"
-
-  apply_park_state "$n" "$outcome" "$ts" "$reason"
+   jq -n -c \
+     --arg issue "$n" --arg repo "$REPO" --arg ts "$ts" \
+     --arg outcome "$outcome" --arg reason "$reason" \
+     --arg pr "${prurl:-}" --arg session "$session" \
+     --arg rundir "$rundir" --argjson rc "$rc" --argjson cost "${cost:-0}" \
+     --arg board_column "${pre_run_col:-}" \
+     --argjson provenance "$provenance" \
+     '{issue:($issue|tonumber), repo:$repo, started:$ts, exit:$rc, cost_usd:$cost,
+       session_id:$session, outcome:$outcome, reason:$reason, pr:$pr, run_dir:$rundir, board_column:$board_column, provenance:$provenance}' \
+     >> "$RUNS_LOG"
+ 
+   apply_park_state "$n" "$outcome" "$ts" "$reason"
+ 
+   # --- lab notebook (GitHub Discussion) ---
+   # Post run narrative and metadata to a daily GitHub Discussion thread under "Lab Notebook".
+   # Gracefully skip if discussions are disabled or gh discussion fails.
+   if [ -n "${REPO:-}" ]; then
+     "$PYTHON_BIN" "$DISCUSSION_MANAGER_PY" post-finish \
+       --repo "$REPO" --issue "$n" --phase "$phase" --outcome "$outcome" \
+       --cost "${cost:-0}" --session "${session:-none}" --prurl "${prurl:-none}" \
+       --reason "${reason:-}" --rundir "$rundir" >/dev/null 2>&1 || true
+   fi
 
   case "$outcome" in
     parked|failed|incomplete|no-gate|budget-exhausted|driver-fault)
@@ -1578,9 +1595,7 @@ if [ -n "$CLASSIFY_ONLY" ]; then
        recovered:true, provenance:\$provenance} + $_extra" \
     >> "$RUNS_LOG"
 
-  if [ -n "$prline" ]; then
-    apply_park_state "$n" "$outcome" "$ts" "$reason"
-  fi
+  apply_park_state "$n" "$outcome" "$ts" "$reason"
 
   rm -f "$STATE_DIR/inflight.json"
   say ""
