@@ -2242,7 +2242,7 @@ chmod +x "$T788_TMP/bin/gh"
 
 T788_OUT="$(PATH="$T788_TMP/bin:$PATH" PARK_LABEL="agent-session:needs-human" INTERACTIVE_LABEL="agent-session:needs-human-interactive" phase="triage" n="788" REPO="stub/repo" final="interactive collaboration required" pr_query_failed=0 bash -c "
 test_fn() {
-$(sed -n '1190,1206p' "$DRIVER")
+$(sed -n '1216,1270p' "$DRIVER")
   echo \"outcome:\$outcome\"
 }
 test_fn
