@@ -19,8 +19,10 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from agent_sessions.driver import agent_runner, discussion_manager, gate, gh_query
+src_dir = str(Path(__file__).resolve().parents[2])
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
+from agent_sessions.driver import agent_runner, discussion_manager, gate, gh_query  # noqa: E402
 
 SPEC_LABEL = "agent-session:spec"
 PARK_LABEL = "agent-session:needs-human"
@@ -381,19 +383,26 @@ your own judgment for the decision just because nobody is here to answer: a park
 issue is a normal, expected outcome for this driver, and an unattended guess is not."""
 
 
-def fetch_board_json(board: str) -> list[dict]:
+def fetch_board_json(board: str) -> tuple[list[dict], bool]:
     if not board or "/" not in board:
-        return []
+        return [], True
     owner, num = board.split("/", 1)
-    try:
-        cmd = ["gh", "project", "item-list", num, "--owner", owner, "--format", "json", "--limit", "500"]
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        data = json.loads(res.stdout)
-        items = data.get("items", [])
-        say(f"board {board}: read {len(items)} items (advisory only; does not gate)")
-        return items if isinstance(items, list) else []
-    except Exception:
-        return []
+    for owner_arg in (owner, "@me"):
+        cmd = ["gh", "project", "item-list", num, "--owner", owner_arg, "--format", "json", "--limit", "500"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            try:
+                data = json.loads(res.stdout)
+                items = data.get("items", [])
+                say(f"board {board}: read {len(items)} items (advisory only; does not gate)")
+                return (items if isinstance(items, list) else []), True
+            except Exception as e:
+                log(f"board json parse error for {board}: {e}")
+                return [], False
+        if "unknown owner type" not in res.stderr:
+            log(f"board query failed for {board} (exit {res.returncode}): {res.stderr.strip()}")
+            return [], False
+    return [], False
 
 
 def check_pr_unresolved_threads(repo: str, pr_num: str | int) -> int:
@@ -667,7 +676,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Dry run or selection
     say("== select ==")
-    board_items = fetch_board_json(args.board) if args.board and not args.all_issues else []
+    board_items, board_ok = fetch_board_json(args.board) if args.board and not args.all_issues else ([], True)
 
     board_nums = set()
     for item in board_items:
@@ -696,6 +705,10 @@ def main(argv: list[str] | None = None) -> int:
             has_priority_label = any(p_lbl in labels for p_lbl in ("P0", "P1", "P2", "P3", "P4", "P5"))
             if num_str in board_nums or has_priority_label:
                 filtered_issues.append(iss)
+
+        if not filtered_issues and not board_ok:
+            log("WARNING: board query failed and no issues carried priority labels; falling back to all open issues.")
+            filtered_issues = open_issues
     else:
         filtered_issues = open_issues
 
