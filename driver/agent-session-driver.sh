@@ -994,6 +994,26 @@ run_issue() { # $1 = issue number
   say "  budget   \$$MAX_BUDGET   timeout ${RUN_TIMEOUT}s"
   say "  run dir  $rundir"
 
+  # --- lab notebook start-of-work (GitHub Discussion) ---
+  if [ -n "${REPO:-}" ]; then
+    local date_str="$(date -u +%Y-%m-%d)"
+    local disc_title="Lab Notebook: $date_str"
+    local disc_body="Agent run log and narratives for $date_str."
+    local existing_disc_url=""
+    existing_disc_url="$(gh discussion list --repo "$REPO" --category "Lab Notebook" --json title,url 2>/dev/null | jq -r --arg title "$disc_title" '.[]? | select(.title == $title) | .url // empty' 2>/dev/null || true)"
+    if [ -z "$existing_disc_url" ]; then
+      existing_disc_url="$(gh discussion create --repo "$REPO" --category "Lab Notebook" --title "$disc_title" --body "$disc_body" 2>/dev/null || true)"
+    fi
+    if [ -n "$existing_disc_url" ]; then
+      local start_body="### Starting Work: Issue #$n ($phase)
+- **Issue**: $url
+- **Phase**: $phase
+- **Budget**: \$$MAX_BUDGET
+- **Run Dir**: \`$rundir\`"
+      gh discussion comment "$existing_disc_url" --repo "$REPO" --body "$start_body" >/dev/null 2>&1 || true
+    fi
+  fi
+
   # In-flight marker, written BEFORE the invocation and removed after the
   # outcome is recorded. If the driver itself dies mid-run -- killed, laptop
   # slept, SIGTERM -- this file is the only evidence the run happened, because

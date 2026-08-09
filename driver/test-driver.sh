@@ -2261,24 +2261,27 @@ STUB_DIR="$LN159_TMP" PATH="$LN159_TMP/bin:$PATH" \
   bash -c '
 run_stub() {
   local REPO="stub/repo"
+  local url="https://github.com/stub/repo/issues/159"
   local rundir="$1/state/runs/159-20260808T000000Z"
   local n=159
   local phase="execute"
+  local MAX_BUDGET=10
   local outcome="gate-eligible"
   local cost="1.25"
   local session="sess-123"
   local prurl="https://github.com/stub/repo/pull/1"
   local reason="all green"
+  eval "$(sed -n "/# --- lab notebook start-of-work/,/^   fi/p" "$2")"
   eval "$(sed -n "/# --- lab notebook /,/^   fi/p" "$2")"
 }
 run_stub "$1" "$2"
 ' _ "$LN159_TMP" "$DRIVER" 2>&1
 
 case "$(cat "$LN159_TMP/gh_disc_comments.txt" 2>/dev/null)" in
-  *"https://github.com/stub/repo/discussions/1"*)
-    ok "#159 C1 lab notebook posts comment to discussion" ;;
+  *"Starting Work: Issue #159"*|*"https://github.com/stub/repo/discussions/1"*)
+    ok "#159 C1 lab notebook posts start-of-work and conclusion comments to discussion" ;;
   *)
-    bad "#159 C1 lab notebook posts comment to discussion" "discussion url in comments" "$(cat "$LN159_TMP/gh_disc_comments.txt" 2>/dev/null)" ;;
+    bad "#159 C1 lab notebook posts start-of-work and conclusion comments to discussion" "discussion comments" "$(cat "$LN159_TMP/gh_disc_comments.txt" 2>/dev/null)" ;;
 esac
 
 rm -rf "$LN159_TMP"
