@@ -1254,18 +1254,53 @@ run_issue() { # $1 = issue number
   fi
   [ -n "${provenance:-}" ] || provenance='{}'
 
-  jq -n -c \
-    --arg issue "$n" --arg repo "$REPO" --arg ts "$ts" \
-    --arg outcome "$outcome" --arg reason "$reason" \
-    --arg pr "${prurl:-}" --arg session "$session" \
-    --arg rundir "$rundir" --argjson rc "$rc" --argjson cost "${cost:-0}" \
-    --arg board_column "${pre_run_col:-}" \
-    --argjson provenance "$provenance" \
-    '{issue:($issue|tonumber), repo:$repo, started:$ts, exit:$rc, cost_usd:$cost,
-      session_id:$session, outcome:$outcome, reason:$reason, pr:$pr, run_dir:$rundir, board_column:$board_column, provenance:$provenance}' \
-    >> "$RUNS_LOG"
-
-  apply_park_state "$n" "$outcome" "$ts" "$reason"
+   jq -n -c \
+     --arg issue "$n" --arg repo "$REPO" --arg ts "$ts" \
+     --arg outcome "$outcome" --arg reason "$reason" \
+     --arg pr "${prurl:-}" --arg session "$session" \
+     --arg rundir "$rundir" --argjson rc "$rc" --argjson cost "${cost:-0}" \
+     --arg board_column "${pre_run_col:-}" \
+     --argjson provenance "$provenance" \
+     '{issue:($issue|tonumber), repo:$repo, started:$ts, exit:$rc, cost_usd:$cost,
+       session_id:$session, outcome:$outcome, reason:$reason, pr:$pr, run_dir:$rundir, board_column:$board_column, provenance:$provenance}' \
+     >> "$RUNS_LOG"
+ 
+   apply_park_state "$n" "$outcome" "$ts" "$reason"
+ 
+   # --- lab notebook (GitHub Discussion) ---
+   # Post run narrative and metadata to a daily GitHub Discussion thread under "Lab Notebook".
+   # Gracefully skip if discussions are disabled or gh discussion fails.
+   if [ -n "${REPO:-}" ]; then
+     local date_str="$(date -u +%Y-%m-%d)"
+     local disc_title="Lab Notebook: $date_str"
+     local disc_body="Agent run log and narratives for $date_str."
+     
+     # 1. Check if discussion already exists for today
+     local existing_disc_url=""
+     existing_disc_url="$(gh discussion list --repo "$REPO" --category "Lab Notebook" --json title,url 2>/dev/null | jq -r --arg title "$disc_title" '.[]? | select(.title == $title) | .url // empty' 2>/dev/null || true)"
+     
+     if [ -z "$existing_disc_url" ]; then
+       # Create discussion
+       existing_disc_url="$(gh discussion create --repo "$REPO" --category "Lab Notebook" --title "$disc_title" --body "$disc_body" 2>/dev/null || true)"
+     fi
+ 
+     if [ -n "$existing_disc_url" ]; then
+       local final_content=""
+       [ -s "$rundir/final.txt" ] && final_content="$(cat "$rundir/final.txt")"
+       local comment_body="### Run: Issue #$n ($phase)
+ - **Outcome**: $outcome
+ - **Cost**: \$$cost
+ - **Session**: ${session:-none}
+ - **PR**: ${prurl:-none}
+ - **Reason**: $reason
+ 
+ #### Agent Narrative (\`final.txt\`)
+ \`\`\`
+ ${final_content:-"(no narrative)"}
+ \`\`\`"
+       gh discussion comment "$existing_disc_url" --repo "$REPO" --body "$comment_body" >/dev/null 2>&1 || true
+     fi
+   fi
 
   case "$outcome" in
     parked|failed|incomplete|no-gate|budget-exhausted|driver-fault)
@@ -1578,9 +1613,7 @@ if [ -n "$CLASSIFY_ONLY" ]; then
        recovered:true, provenance:\$provenance} + $_extra" \
     >> "$RUNS_LOG"
 
-  if [ -n "$prline" ]; then
-    apply_park_state "$n" "$outcome" "$ts" "$reason"
-  fi
+  apply_park_state "$n" "$outcome" "$ts" "$reason"
 
   rm -f "$STATE_DIR/inflight.json"
   say ""

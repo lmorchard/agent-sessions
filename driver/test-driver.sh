@@ -2227,6 +2227,62 @@ esac
 
 rm -rf "$A155_TMP"
 
+echo "#159: Agent Lab Notebook via GitHub Discussions"
+
+LN159_TMP="$(mktemp -d)"
+mkdir -p "$LN159_TMP/bin"
+cat > "$LN159_TMP/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+echo "GH: $*" >> "$STUB_DIR/gh.log"
+case "$*" in
+  *"discussion list"*)
+    echo '[{"title":"Lab Notebook: 2026-08-08", "url":"https://github.com/stub/repo/discussions/1"}]'
+    ;;
+  *"discussion create"*)
+    echo "https://github.com/stub/repo/discussions/1"
+    ;;
+  *"discussion comment"*)
+    echo "$*" >> "$STUB_DIR/gh_disc_comments.txt"
+    echo "commented"
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+STUB
+chmod +x "$LN159_TMP/bin/gh"
+: > "$LN159_TMP/gh_disc_comments.txt"
+
+LN159_SD="$LN159_TMP/state"
+mkdir -p "$LN159_SD/runs/159-20260808T000000Z"
+echo "This is the final narrative." > "$LN159_SD/runs/159-20260808T000000Z/final.txt"
+
+STUB_DIR="$LN159_TMP" PATH="$LN159_TMP/bin:$PATH" \
+  bash -c '
+run_stub() {
+  local REPO="stub/repo"
+  local rundir="$1/state/runs/159-20260808T000000Z"
+  local n=159
+  local phase="execute"
+  local outcome="gate-eligible"
+  local cost="1.25"
+  local session="sess-123"
+  local prurl="https://github.com/stub/repo/pull/1"
+  local reason="all green"
+  eval "$(sed -n "/# --- lab notebook /,/^   fi/p" "$2")"
+}
+run_stub "$1" "$2"
+' _ "$LN159_TMP" "$DRIVER" 2>&1
+
+case "$(cat "$LN159_TMP/gh_disc_comments.txt" 2>/dev/null)" in
+  *"https://github.com/stub/repo/discussions/1"*)
+    ok "#159 C1 lab notebook posts comment to discussion" ;;
+  *)
+    bad "#159 C1 lab notebook posts comment to discussion" "discussion url in comments" "$(cat "$LN159_TMP/gh_disc_comments.txt" 2>/dev/null)" ;;
+esac
+
+rm -rf "$LN159_TMP"
+
 # --- syntax ----------------------------------------------------------------
 
 
