@@ -793,6 +793,7 @@ INNER_EOF
 
   ELIGIBLE=""
   local all_candidates=""
+  # Preserve priority order: p1_unblock, p2_execute, p3_groom, p4_escalate
   [ -n "$p1_unblock" ] && all_candidates="${all_candidates}${p1_unblock} "
   [ -n "$p2_execute" ] && all_candidates="${all_candidates}${p2_execute} "
   [ -n "$p3_groom" ]    && all_candidates="${all_candidates}${p3_groom} "
@@ -810,16 +811,6 @@ INNER_EOF
       say "  SKIP    #$n  lock contention (another agent holds or held lock)"
     fi
   done
-
-  # If all candidates failed to lock (or none were found), but candidates did exist,
-  # ensure we print eligible: 0 correctly. But if no candidates existed, test asserts eligible: 0.
-  # Wait, why did test fail? Because in the test, git remote is not configured for the stubs,
-  # so `acquire_lock` returns 1 (false) because `git push` fails or `git remote get-url origin` fails!
-  # Look at acquire_lock:
-  #   if ! git -C "$REPO_PATH" remote get-url origin >/dev/null 2>&1; then return 0; fi
-  # But in test stubs, REPO_PATH is a temp directory with NO remote origin!
-  # So `git remote get-url origin` fails and `acquire_lock` returns 0 (success) IF it reaches that check.
-  # Let's check why acquire_lock failed in the test!
 
   local c=0
   if [ -n "$ELIGIBLE" ]; then
@@ -1313,6 +1304,10 @@ acquire_lock() { # $1 = issue number, $2 = phase
   local issue="$1"
   local phase="$2"
 
+  # When running in dry-run mode or test harnesses without an active repo path or git repo, bypass locking.
+  if [ -z "${REPO_PATH:-}" ]; then
+    return 0
+  fi
   if ! git -C "$REPO_PATH" rev-parse --git-dir >/dev/null 2>&1; then
     return 0
   fi
