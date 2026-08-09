@@ -27,6 +27,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DRIVER="$HERE/agent-session-driver.sh"
 PARK_LABEL="agent-session:needs-human"
+INTERACTIVE_LABEL="agent-session:needs-human-interactive"
 REPO="stub/repo"
 ISSUE=7
 
@@ -113,8 +114,10 @@ case "$*" in
   "pr list"*)            cat "$STUB_DIR/pr-list.json" ;;
   *"--json headRefOid"*) printf 'deadbeefcafe\n' ;;
   *"--json body"*)       cat "$STUB_DIR/pr-body.txt" ;;
-  "issue list"*"--search"*)
+  "issue list"*"-label:agent-session:spec"*)
        jq '[.[] | select((.labels // []) | all(.name != "agent-session:spec"))]' "$STUB_DIR/issue-list.json" ;;
+  "issue list"*"label:agent-session:spec"*)
+       jq '[.[] | select((.labels // []) | any(.name == "agent-session:spec"))]' "$STUB_DIR/issue-list.json" ;;
   "issue list"*"--label"*)
        jq '[.[] | select((.labels // []) | any(.name == "agent-session:spec"))]' "$STUB_DIR/issue-list.json" ;;
   "issue list"*)         cat "$STUB_DIR/issue-list.json" ;;
@@ -249,7 +252,7 @@ for verdict_pair in "eligible-for-auto-merge:gate-eligible" "human-merge-require
   has  "$expected: the outcome is what the gate said" "outcome  $expected" "$UP_OUT"
   has_call "  removes the park label from the right issue, in one call" \
            "$UP_LOG" "issue edit $ISSUE" "--remove-label $PARK_LABEL"
-  hasnt "  and never adds it"                         "--add-label"        "$UP_ARGV"
+  hasnt "  and never adds the park label again"        "--add-label $PARK_LABEL" "$UP_ARGV"
 done
 
 # --- C4: durability, and --retry still overrides ---------------------------

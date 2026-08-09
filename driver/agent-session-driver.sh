@@ -99,35 +99,44 @@ DENIED_TOOLS='Bash(gh pr merge:*),Bash(gh pr merge *),Bash(git push --force:*),B
 
 # --- plumbing --------------------------------------------------------------
 
-get_attempts() {
+get_attempts() { # $1 = issue number
   local issue="$1"
-  local phase="$2"
-  local attempts_file="$STATE_DIR/attempts.tsv"
-  if [ -f "$attempts_file" ]; then
-    local c=$(awk -F '\t' -v key="$issue:$phase" '$1 == key {print $2; exit}' "$attempts_file")
-    echo "${c:-0}"
+  local labels_json=""
+  if [ -n "${issues_json:-}" ]; then
+    labels_json="$(printf '%s' "$issues_json" | jq -c --arg n "$issue" '.[] | select(.number == ($n|tonumber)) | .labels // []' 2>/dev/null || echo '[]')"
+  fi
+  if [ -z "$labels_json" ] || [ "$labels_json" = "[]" ]; then
+    labels_json="$(gh issue view "$issue" --repo "$REPO" --json labels --jq '.labels' 2>/dev/null || echo '[]')"
+  fi
+  
+  if printf '%s' "$labels_json" | grep -q 'agent-session:attempt-3'; then
+    echo "3"
+  elif printf '%s' "$labels_json" | grep -q 'agent-session:attempt-2'; then
+    echo "2"
+  elif printf '%s' "$labels_json" | grep -q 'agent-session:attempt-1'; then
+    echo "1"
   else
     echo "0"
   fi
 }
 
-increment_attempts() {
+clear_attempt_labels() { # $1 = issue number
+  gh issue edit "$1" --repo "$REPO" \
+     --remove-label "agent-session:attempt-1" \
+     --remove-label "agent-session:attempt-2" \
+     --remove-label "agent-session:attempt-3" >/dev/null 2>&1 || true
+}
+
+increment_attempts() { # $1 = issue number
   local issue="$1"
-  local phase="$2"
-  local attempts_file="$STATE_DIR/attempts.tsv"
-  local count=$(get_attempts "$issue" "$phase")
+  local count=$(get_attempts "$issue")
   count=$((count + 1))
-  if [ -f "$attempts_file" ]; then
-    awk -F '\t' -v key="$issue:$phase" -v count="$count" '
-      BEGIN { found=0 }
-      $1 == key { print $1 "\t" count; found=1; next }
-      { print $0 }
-      END { if (!found) print key "\t" count }
-    ' "$attempts_file" > "$attempts_file.tmp"
-    mv "$attempts_file.tmp" "$attempts_file"
-  else
-    printf '%s\t%s\n' "$issue:$phase" "$count" > "$attempts_file"
-  fi
+  
+  gh label create "agent-session:attempt-$count" --repo "$REPO" --color "D93F0B" \
+     --description "Execution attempt counter for agent-session driver" >/dev/null 2>&1 || true
+
+  clear_attempt_labels "$issue"
+  gh issue edit "$issue" --repo "$REPO" --add-label "agent-session:attempt-$count" >/dev/null 2>&1 || true
 }
 
 log()  { printf '%s  %s\n' "$(date -u +%H:%M:%SZ)" "$*" >&2; }
@@ -492,6 +501,7 @@ park_label_remove() { # $1 = issue number
   # nothing.
   gh issue edit "$1" --repo "$REPO" --remove-label "$PARK_LABEL" >/dev/null 2>&1 \
     || say "  WARNING: could not remove the $PARK_LABEL label from #$1 -- it stays parked"
+  clear_attempt_labels "$1"
 }
 
 
@@ -521,6 +531,7 @@ apply_park_state() { # $1 = issue, $2 = outcome, $3 = ts, $4 = reason
         '{issue:($issue|tonumber), repo:$repo, parked_at:$ts, outcome:$outcome, reason:$reason}' \
         >> "$PARKED_LOG"
       park_label_add "$1"
+      clear_attempt_labels "$1"
       say "  parked -- excluded from future selection unless --retry $1"
       notify_human "$1" "$2: $4"
       ;;
@@ -636,6 +647,11 @@ select_issues() {
   local specced_nums markerless_nums markerless_list n_markerless m
   markerless_nums="$(printf '%s' "$markerless_json" | jq -r '.[].number')"
 
+  local issues_json
+  issues_json="$(jq -s '.[0] + .[1]' <(printf '%s' "$candidates_json") <(printf '%s' "$markerless_json") 2>/dev/null || echo '[]')"
+  local parked
+  parked="$(printf '%s' "$issues_json" | parked_numbers || true)"
+
   local p1_unblock=""
   local p2_execute=""
   local p3_groom=""
@@ -655,18 +671,16 @@ select_issues() {
     fi
 
     if [ "$is_parked" -eq 1 ]; then
-      p4_escalate="${p4_escalate}${m}:escalate "
+      # We just skip it; it is parked and needs human attention.
+      # Escalate queue is currently just re-running it (which gets stuck in loop breaker).
       say "  SKIP    #$m  $parked_reason"
-      say "  ELIGIBLE #$m  escalate (Priority 4: Escalate)"
     else
       local phase="triage"
-      local attempts=$(get_attempts "$m" "$phase")
+      local attempts=$(get_attempts "$m")
       if [ "${attempts:-0}" -ge "${MAX_PHASE_ATTEMPTS:-3}" ]; then
         local reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
         apply_park_state "$m" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
-        p4_escalate="${p4_escalate}${m}:escalate "
         say "  SKIP    #$m  $reason"
-        say "  ELIGIBLE #$m  escalate (Priority 4: Escalate)"
       else
         p3_groom="${p3_groom}${m}:triage "
         say "  ELIGIBLE #$m  triage (Priority 3: Groom)"
@@ -685,11 +699,8 @@ select_issues() {
   rm -f "$STATE_DIR/columns.tsv"
   touch "$STATE_DIR/columns.tsv"
   load_board
-  local prs parked
+  local prs
   prs="$("$PYTHON_BIN" "$GH_QUERY_PY" fetch-open-prs --repo "$REPO")" || die "open-PR query failed -- cannot tell which issues already have open PRs, so selection would be a guess. Refusing to select. (gh's own error is above.)"
-  # Fetch all issues for park lookup
-  local issues_json="$(gh issue list --repo "$REPO" --state open --limit 500 --json number,title,body,labels 2>/dev/null || echo '[]')"
-  parked="$(printf '%s' "$issues_json" | parked_numbers || true)"
 
   local n tier title col prline mention reason
   if [ -n "$candidates" ]; then
@@ -757,17 +768,13 @@ select_issues() {
         else
           if [ "$is_parked" -eq 1 ] && [ "$phase" = "grade_gate" ]; then
             reason="$parked_reason"
-            p4_escalate="${p4_escalate}${n}:escalate "
             say "  SKIP    #$n  $reason"
-            say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
           else
-            local attempts=$(get_attempts "$n" "$phase")
+            local attempts=$(get_attempts "$n")
             if [ "$attempts" -ge "$MAX_PHASE_ATTEMPTS" ]; then
               reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
               apply_park_state "$n" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
-              p4_escalate="${p4_escalate}${n}:escalate "
               say "  SKIP    #$n  $reason"
-              say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
             else
               p1_unblock="${p1_unblock}${n}:${phase} "
               say "  ELIGIBLE #$n  tier: auto-ok (Priority 1: Unblock - $phase)"
@@ -778,36 +785,28 @@ select_issues() {
       else
         if [ "$is_parked" -eq 1 ]; then
           reason="$parked_reason"
-          p4_escalate="${p4_escalate}${n}:escalate "
           say "  SKIP    #$n  $reason"
-          say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
         elif [ "$is_invalid_tier" -eq 1 ]; then
           reason="$tier_reason"
-          p4_escalate="${p4_escalate}${n}:escalate "
           say "  SKIP    #$n  $reason"
-          say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
         elif [ "$tier" = "needs-review" ]; then
           phase="refine"
-          local attempts=$(get_attempts "$n" "$phase")
+          local attempts=$(get_attempts "$n")
           if [ "$attempts" -ge "$MAX_PHASE_ATTEMPTS" ]; then
             reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
             apply_park_state "$n" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
-            p4_escalate="${p4_escalate}${n}:escalate "
             say "  SKIP    #$n  $reason"
-            say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
           else
             p3_groom="${p3_groom}${n}:${phase} "
             say "  ELIGIBLE #$n  tier: needs-review (Priority 3: Groom - $phase)"
           fi
         elif [ "$tier" = "auto-ok" ]; then
           phase="execute"
-          local attempts=$(get_attempts "$n" "$phase")
+          local attempts=$(get_attempts "$n")
           if [ "$attempts" -ge "$MAX_PHASE_ATTEMPTS" ]; then
             reason="MAX_PHASE_ATTEMPTS ($MAX_PHASE_ATTEMPTS) reached for phase $phase"
             apply_park_state "$n" "parked" "$(date -u +%Y%m%dT%H%M%SZ)" "parked by loop breaker: $reason"
-            p4_escalate="${p4_escalate}${n}:escalate "
             say "  SKIP    #$n  $reason"
-            say "  ELIGIBLE #$n  escalate (Priority 4: Escalate)"
           else
             p2_execute="${p2_execute}${n}:${phase} "
             say "  ELIGIBLE #$n  tier: auto-ok (Priority 2: Execute - $phase)"
@@ -954,6 +953,10 @@ build_prompt() { # $1 = issue url, $2 = phase
   if [ "$phase" != "execute" ]; then
     phase_file="phases/$phase.md"
   fi
+  local comments_note=""
+  if [ "$phase" = "triage" ]; then
+    comments_note="When viewing the issue using gh issue view, pass --comments so you read the full comment thread."
+  fi
   cat <<EOF
 You are running unattended, invoked by the agent-session board-driver.
 
@@ -962,7 +965,9 @@ exactly for this issue:
 
   $1
 
-The skill is not installed as a registered skill. Its files live at $SKILL_DIR and
+${comments_note:+$comments_note
+
+}The skill is not installed as a registered skill. Its files live at $SKILL_DIR and
 you must read them from there by absolute path.
 
 Stop at the merge gate and report the verdict. Do not merge the PR and do not enable

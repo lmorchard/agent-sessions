@@ -264,7 +264,7 @@ boundary, mitigated by explicit mode arguments + an ask-don't-guess dispatcher. 
 fan out to subagents; the board-driver stays *above* the skill as orchestration.
 
 Built (orchestration), in `driver/`:
-- `agent-session-driver.sh` — The **Wiggum Architecture reconciliation loop**. A stateless state machine that evaluates GitHub repository state (issues, PRs, review comments, CI status) and dispatches tightly-scoped, short-lived LLM agents. Tracks attempt counts locally to break infinite loops.
+- `agent-session-driver.sh` — The **Wiggum Architecture reconciliation loop**. A stateless state machine that evaluates GitHub repository state (issues, PRs, review comments, CI status) and dispatches tightly-scoped, short-lived LLM agents. Uses GitHub labels (`agent-session:attempt-1..3`) and comments for zero-local-state queue control and async human-in-the-loop ratification.
 
 Built (front-of-funnel), in `skills/agent-session/`:
 - `SKILL.md` — dispatcher, context-management notes, conventions.
@@ -304,6 +304,40 @@ Built (back half, move 1), in `skills/agent-session/`:
   judging complexity by feel; a missing marker routes to `intake`. Tier decides only *where the
   run surfaces to a human*, not whether it runs.
 - `references/session-setup.md`, `references/plan-template.md`, `references/github-projects.md`.
+
+## Asynchronous GitHub-Native Interaction Model
+
+The driver and skills operate as a stateless reconciliation loop over native GitHub primitives (labels, comments, PRs). Zero control state is stored in local runner files; all execution history and queue routing derive from live GitHub issue metadata.
+
+### Label Vocabulary & Queue Control
+
+- `agent-session:spec`: Issue carries verifiable EARS criteria & `## Tier`. Eligible for **P2: Execute**.
+- `agent-session:needs-human`: Async human input required. The agent posted a comment on the issue/PR and parked. Excluded from headless selection.
+- `agent-session:needs-human-interactive`: Requires an interactive CLI session (e.g. subjective aesthetic, layout, game feel). Excluded from headless selection.
+- `agent-session:merge-ready`: PR passed `grade_gate`. Awaiting human merge or auto-merger. Excluded from driver loop.
+- `agent-session:attempt-1` .. `attempt-3`: Stateless attempt counters on the issue. Replaces local `attempts.tsv`.
+
+### Current-State Control Loop
+
+The driver evaluates live GitHub state on every pass without historical diffing or local state files:
+
+1. **Selection & Priority Ladder**:
+   - **P1: Unblock**: Issues referencing open PRs needing comment resolution, CI fixes, or gate grading.
+   - **P2: Execute**: Issues carrying `agent-session:spec` AND `auto-ok` tier AND no open PR AND no `needs-human`.
+   - **P3: Groom**: Open issues lacking `agent-session:spec` AND lacking `needs-human`.
+   - **P4: Escalate**: Issues reaching `agent-session:attempt-3`.
+
+2. **Async Q&A via Issue Comments**:
+   - When an agent needs input or spec ratification, it appends a top-level comment detailing its proposal or question.
+   - The agent applies `agent-session:needs-human` and clears any `attempt-*` labels.
+   - The human reviews asynchronously and appends a reply comment (e.g. "Approved" or feedback).
+   - The human **removes `agent-session:needs-human`**.
+
+3. **Stateless Resumption**:
+   - When `agent-session:needs-human` is removed, the issue naturally becomes visible to the driver under **P3: Groom**.
+   - The agent reads the full comment thread (`gh issue view <n> --comments`).
+   - If approved: Applies `agent-session:spec` and updates the issue body.
+   - If feedback given: Appends a new comment with updated criteria and re-applies `agent-session:needs-human`.
 
 ## Criteria vs. regression guards
 

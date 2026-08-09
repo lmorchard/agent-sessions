@@ -56,7 +56,7 @@ criteria), and you do the part that does (ratify). See
    scanner has no business editing the repo it's scoring.
 
 3. **Headless proposal (Async ratify pass).** Because you are running autonomously, there is no user to pick from a table interactively. Instead, for the issue you scanned:
-   - **Post your proposed EARS criteria, checks, and tier as a comment on the GitHub issue** using `gh issue comment <n> --body <text>`.
+   - **Post your proposed EARS criteria, checks, and tier as a new top-level comment on the GitHub issue** using `gh issue comment <n> --body <text>` (never edit past comments in place).
    - Apply the `agent-session:needs-human` label so the human knows they need to review it.
    - Do NOT apply the `agent-session:spec` label yet, because the human hasn't ratified the criteria.
    - Stop execution here. Do not edit the issue body yet.
@@ -66,7 +66,7 @@ criteria), and you do the part that does (ratify). See
 4. **Follow-up pass (Reading human replies).** The human has explicitly removed the `agent-session:needs-human` parking label, signaling that they have left feedback in the issue comments. **Explicitly fetch and read the comments** using `gh issue view <n> --comments`.
    - If they explicitly approved the spec (e.g., "Approved", "Looks good", "Dependencies are fine"), proceed to Step 5.
    - If they provided corrections, synthesize them into an updated spec. If the spec is now complete, proceed to Step 5. 
-   - If the spec STILL needs human input after synthesizing their corrections, post a follow-up comment asking for further clarification, RE-APPLY the `agent-session:needs-human` label, and stop.
+   - If the spec STILL needs human input after synthesizing their corrections, post a new top-level comment asking for further clarification (never edit past comments in place), RE-APPLY the `agent-session:needs-human` label, and stop.
 
 5. **Write back (augment in place).** For each ratified issue, run `intake`'s file-or-update step.
    First ensure the label exists (`gh label create "agent-session:spec" --color 0E8A16 || true`).
@@ -91,7 +91,7 @@ criteria), and you do the part that does (ratify). See
 
 ## Escalation — stop and surface when
 
-- An issue's intent is genuinely unclear (not just under-specified) → leave a GitHub comment explaining the ambiguity, apply the `agent-session:needs-human` label, and stop.
-- The scan surfaces duplicate/obsolete issues → comment suggesting closure, apply `agent-session:needs-human`, and stop.
+- An issue's intent is genuinely unclear (not just under-specified) → post a new top-level comment explaining the ambiguity (never edit past comments in place), apply the `agent-session:needs-human` label, and stop.
+- The scan surfaces duplicate/obsolete issues → post a new top-level comment suggesting closure (never edit past comments in place), apply `agent-session:needs-human`, and stop.
 - An issue requires subjective visual/aesthetic iteration (like layout density, game feel, or UI design) → apply the `agent-session:needs-human-interactive` label instead. These cannot be handled asynchronously; they require an interactive prototype session in the CLI.
-- A subagent can't tell what "done" would mean → comment asking the human for direction, apply `agent-session:needs-human`, and stop.
+- A subagent can't tell what "done" would mean → post a new top-level comment asking the human for direction (never edit past comments in place), apply `agent-session:needs-human`, and stop.

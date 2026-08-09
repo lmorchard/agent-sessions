@@ -1627,7 +1627,6 @@ X27_G1B_OUT="$(_x27_dry_run "$X27_G1B_CWD" "$X27_G1B_XDG" \
                  --repo lmorchard/decafclaw \
                  --skill-dir "$(dirname "$(dirname "$DRIVER")")/skills/agent-session" \
                  --repo-path "$X27_G1B_REPO")"
-echo "X27_G1B_OUT is: $X27_G1B_OUT" > /tmp/g1b_out.txt
 check "#27 G1b a real run STILL refuses while a same-repo orphan is live" \
   "refuse=yes orphan=yes" "$(_x27_orphan "$X27_G1B_OUT")"
 
@@ -2131,14 +2130,13 @@ STUB
 chmod +x "$E_TMP/bin/gh"
 
 jq -n -c --arg m "$MARKER" \
-  '[{number:999, title:"loop breaker test", body:("## Tier: `auto-ok`\n"), labels:[{"name":"agent-session:spec"}]}]' \
+  '[{number:999, title:"loop breaker test", body:("## Tier: `auto-ok`\n"), labels:[{"name":"agent-session:spec"},{"name":"agent-session:attempt-3"}]}]' \
   > "$E_TMP/issues.json"
 
 _escalate_run() {
   local state; state="$(mktemp -d "$E_TMP/state.XXXXXX")"
-  # Force loop breaker by writing max attempts
+  # Force loop breaker via attempt-3 label
   mkdir -p "$state"
-  printf "999:execute\t4\n" > "$state/attempts.tsv"
   STUB_DIR="$E_TMP" PATH="$E_TMP/bin:$PATH" \
     bash "$DRIVER" --repo stub/repo --dry-run --state-dir "$state" 2>/dev/null
   cat "$state/inbox.md" 2>/dev/null || echo "MISSING"
@@ -2153,6 +2151,68 @@ case "$E_OUT" in
 esac
 
 rm -rf "$E_TMP"
+
+
+echo "#155: async github-native interaction model & label attempts"
+
+A155_TMP="$(mktemp -d)"
+mkdir -p "$A155_TMP/bin"
+cat > "$A155_TMP/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "issue list"*) cat "$STUB_DIR/issues.json" ;;
+  "pr list"*)    printf '%s' '[]' ;;
+  "issue edit"*) echo "$*" >> "$STUB_DIR/gh_edit_calls.txt"; echo "edited" ;;
+  "label create"*) echo "created" ;;
+  *)             exit 0 ;;
+esac
+STUB
+chmod +x "$A155_TMP/bin/gh"
+
+jq -n -c '[{number:155, title:"markerless issue", body:"Needs criteria", labels:[]}]' > "$A155_TMP/issues.json"
+: > "$A155_TMP/gh_edit_calls.txt"
+
+A155_SD="$A155_TMP/state"
+mkdir -p "$A155_SD"
+A155_SKILL="$A155_TMP/skill"
+mkdir -p "$A155_SKILL/phases"
+: > "$A155_SKILL/phases/triage.md"
+: > "$A155_SKILL/phases/express.md"
+
+A155_OUT="$(STUB_DIR="$A155_TMP" PATH="$A155_TMP/bin:$PATH" \
+  bash "$DRIVER" --repo stub/repo --dry-run --state-dir "$A155_SD" --skill-dir "$A155_SKILL" --repo-path "$A155_TMP" 2>&1)"
+
+case "$A155_OUT" in
+  *"ELIGIBLE #155  triage (Priority 3: Groom)"*) ok "#155 C1 markerless issue selected for Priority 3 Grooming" ;;
+  *) bad "#155 C1 markerless issue selected for Priority 3 Grooming" "ELIGIBLE #155 triage" "$A155_OUT" ;;
+esac
+
+A155_PROMPT_TEXT="$(SKILL_DIR="$A155_SKILL" bash -c "
+$(sed -n '/^build_prompt()/,/^}$/p' "$DRIVER")
+build_prompt https://github.com/stub/repo/issues/155 triage
+")"
+
+case "$A155_PROMPT_TEXT" in
+  *"--comments"*) ok "#155 C1 build_prompt for triage instructs agent to pass --comments" ;;
+  *) bad "#155 C1 build_prompt for triage instructs agent to pass --comments" "--comments" "$A155_PROMPT_TEXT" ;;
+esac
+
+: > "$A155_TMP/gh_edit_calls.txt"
+STUB_DIR="$A155_TMP" PATH="$A155_TMP/bin:$PATH" \
+  bash -c "
+$(sed -n '/^park_label_remove()/,/^}$/p' "$DRIVER")
+$(sed -n '/^clear_attempt_labels()/,/^}$/p' "$DRIVER")
+PARK_LABEL='agent-session:needs-human'; REPO='stub/repo'; park_label_remove 155
+" 2>&1
+
+case "$(cat "$A155_TMP/gh_edit_calls.txt" 2>/dev/null)" in
+  *"--remove-label agent-session:attempt"*)
+    ok "#155 C3 park_label_remove strips residual attempt labels" ;;
+  *)
+    bad "#155 C3 park_label_remove strips residual attempt labels" "remove-label agent-session:attempt" "$(cat "$A155_TMP/gh_edit_calls.txt" 2>/dev/null)" ;;
+esac
+
+rm -rf "$A155_TMP"
 
 # --- syntax ----------------------------------------------------------------
 
