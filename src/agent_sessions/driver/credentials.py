@@ -300,17 +300,25 @@ def remote_warning(remote_url: str) -> str:
     )
 
 
-def exposure_error(loaded_keys: set[str], env_file: Path | str, repo_path: Path | str) -> str:
-    """Non-empty when a write credential was read from a file inside the agent's tree.
+def exposure_error(
+    loaded_keys: set[str], env_file: Path | str, repo_path: Path | str, git_ignored: bool = True
+) -> str:
+    """Non-empty when a write credential sits in a file that could be committed.
 
-    **This is hygiene, not a boundary.** The agent runs as the same user with a real
-    shell, so it can read `~/.zshrc`, `~/.config/**`, or anything else this user can;
-    moving the token out of the repo does not hide it. What the refusal actually buys
-    is narrower and still worth having: a token in the repo is one `git add -A` from
-    being published, one `tar` from being in a backup, and sitting in the directory
-    the agent is already working in. The boundary that would hide it is a separate
-    uid or a container, and this project does not have one -- see `docs/usage.md`.
+    **Not a containment check.** Decided 2026-08-10: the agent runs as the same uid
+    with a shell, so anything the driver can read non-interactively it can read too,
+    and a keychain command is one it can simply replay. Where the token lives is a
+    hygiene question, not a security one, and this function was briefly written as
+    though it were the latter -- refusing any write credential in a file inside the
+    agent's tree, which forbade the convenient configuration while buying nothing.
+
+    What survives is the part that was always real: a token in a *tracked* file is
+    one `git add -A` from being published, and that is recoverable-from but not
+    undoable. So the refusal now fires on exactly that case, and a `.gitignore`d
+    `.env` beside the driver is fine.
     """
+    if git_ignored:
+        return ""
     exposed = sorted(loaded_keys & set(TOKEN_VARS))
     if not exposed:
         return ""
@@ -321,8 +329,8 @@ def exposure_error(loaded_keys: set[str], env_file: Path | str, repo_path: Path 
     except (ValueError, OSError):
         return ""
     return (
-        f"{', '.join(exposed)} loaded from {resolved_env}, which is inside the "
-        f"agent's repo path ({resolved_repo}). The agent can read that file, so the "
-        "write credential is not contained. Export these in the driver's environment "
-        f"instead, and keep only {READ_TOKEN_VAR} in .env."
+        f"{', '.join(exposed)} loaded from {resolved_env}, which is inside "
+        f"{resolved_repo} "
+        "and is not git-ignored -- one `git add -A` from being published. Add the file "
+        "to .gitignore, or move these out of it."
     )

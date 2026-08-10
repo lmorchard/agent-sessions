@@ -578,6 +578,13 @@ Closed, but the *reasoning* is still load-bearing.
   `/proc/<pid>/environ` is readable by the same uid and this does not hold, which is exactly why it
   is not load-bearing.
 
+  **Decided 2026-08-10: deferred rather than solved.** Both tokens live in a git-ignored `.env`,
+  and the driver refuses only a credential in a file git would actually add — a token one
+  `git add -A` from publication is recoverable-from but not undoable, and that is the part that was
+  ever real. An earlier revision refused any write credential inside the agent's tree; it was
+  removed because it forbade the working configuration while buying nothing, which is the shape of
+  a control that measures away rather than protects (findings.md defect class 4).
+
   So the honest statement is two claims, only one of them enforced: *the agent cannot act on GitHub
   as anyone but its own read-only self* — mechanism — and *a determined agent on this host could
   still find the driver's write token* — true, unmitigated. Closing the second needs a separate

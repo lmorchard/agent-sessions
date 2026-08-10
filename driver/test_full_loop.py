@@ -199,7 +199,8 @@ class FakeGitHub:
     over the same instance sees the first pass's effects.
     """
 
-    def __init__(self, *, issues=(), prs=(), board_items=(), viewer_login=DRIVER_LOGIN, held_locks=None, logins=None):
+    def __init__(self, *, issues=(), prs=(), board_items=(), viewer_login=DRIVER_LOGIN, held_locks=None,
+                 logins=None, committable=()):
         self.issues = [dict(i) for i in issues]
         self.prs = [dict(p) for p in prs]
         self.board_items = list(board_items)
@@ -208,6 +209,9 @@ class FakeGitHub:
         #: presented. Without this the identity assertion cannot be tested at all:
         #: a fake that returns one login regardless proves only that a call happened.
         self.logins = dict(logins or {READ_TOKEN: viewer_login, WRITE_TOKEN: viewer_login})
+        #: Paths `git check-ignore` reports as NOT ignored, i.e. committable. Empty by
+        #: default: a `.env` beside the driver is git-ignored in every real checkout.
+        self.committable = {str(c) for c in committable}
         #: ref -> (sha, unix time). A ref present here makes `ls-remote` report a lock.
         self.held_locks = dict(held_locks or {})
 
@@ -502,6 +506,9 @@ class FakeGitHub:
             return _Result(0, "0\n")
         if rest[:1] == ["push"]:
             return _Result(0, "")
+        if rest[:1] == ["check-ignore"]:
+            target = rest[-1]
+            return _Result(1 if target in self.committable else 0, "")
 
         self.unhandled.append(argv)
         return _Result(1, "", f"fake: unhandled git command {rest}")
@@ -1230,19 +1237,6 @@ def test_a_human_comment_still_unparks(loop):
 
 
 
-def test_a_write_token_in_a_dotenv_the_agent_can_read_stops_the_run(loop):
-    """The split collapses if the write credential sits in a file inside the tree the
-    agent holds Read over. Fail closed rather than ship theatre."""
-    (loop.repo_path / ".env").write_text(f"{credentials.WRITE_TOKEN_VAR}=whatever\n", encoding="utf-8")
-    loop.monkeypatch.chdir(loop.repo_path)
-    gh = FakeGitHub(issues=[issue(110, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(110)])
-
-    with pytest.raises(SystemExit) as excinfo:
-        loop.run(gh, argv=["--dry-run"])
-
-    assert excinfo.value.code == 2
-
-
 def test_build_prompt_no_longer_instructs_a_github_write(loop):
     """Issue #191's named check for criterion 2: the prompt used to tell the agent to
     run `gh issue comment` and `label_manager.py park`, both of which its token now
@@ -1312,3 +1306,56 @@ def test_a_project_env_still_wins_over_the_user_file(loop):
 
     assert code == 0
     assert f"identity: acting as {DRIVER_LOGIN}" in out
+
+
+def test_a_write_token_in_a_committable_file_stops_the_run(loop):
+    """The surviving hygiene check. Where the token lives is not containment -- the
+    agent runs as the same uid and can read any file the driver can -- but a token in
+    a file git would happily add is one `git add -A` from being published, and that
+    does not un-happen."""
+    env_file = loop.repo_path / ".env"
+    env_file.write_text(f"{credentials.WRITE_TOKEN_VAR}={WRITE_TOKEN}\n", encoding="utf-8")
+    loop.monkeypatch.chdir(loop.repo_path)
+
+    gh = FakeGitHub(
+        issues=[issue(113, body=spec_body("auto-ok"), labels=["P1"])],
+        board_items=[board_item(113)],
+        committable=[str(env_file.resolve())],
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        loop.run(gh, argv=["--dry-run"])
+    assert excinfo.value.code == 2
+
+
+def test_a_write_token_in_a_gitignored_env_beside_the_driver_is_allowed(loop):
+    """The configuration Les actually keeps: both tokens in a git-ignored `.env`.
+    Decided 2026-08-10 -- refusing it forbade the convenient setup and bought nothing,
+    because no storage location on this host is out of the agent's reach anyway."""
+    env_file = loop.repo_path / ".env"
+    env_file.write_text(f"{credentials.WRITE_TOKEN_VAR}={WRITE_TOKEN}\n", encoding="utf-8")
+    loop.monkeypatch.chdir(loop.repo_path)
+    loop.monkeypatch.delenv(credentials.WRITE_TOKEN_VAR, raising=False)
+
+    gh = FakeGitHub(issues=[issue(113, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(113)])
+    code, out = loop.run(gh, argv=["--dry-run"])
+
+    assert code == 0
+    assert f"identity: acting as {DRIVER_LOGIN}" in out
+
+
+def test_the_agent_still_never_gets_the_write_token_from_that_env(loop):
+    """The split is what survives the relaxation: the token being readable *on disk*
+    is not the same as it being handed over. The child's environment stays read-only,
+    so every cooperative path is still contained."""
+    env_file = loop.repo_path / ".env"
+    env_file.write_text(f"{credentials.WRITE_TOKEN_VAR}={WRITE_TOKEN}\n", encoding="utf-8")
+    loop.monkeypatch.chdir(loop.repo_path)
+    loop.monkeypatch.delenv(credentials.WRITE_TOKEN_VAR, raising=False)
+
+    gh = FakeGitHub(issues=[issue(114, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(114)])
+    agent = StubAgent()
+    loop.run(gh, agent=agent)
+
+    child = credentials.agent_env(agent.env_at_call, credentials.resolve(agent.env_at_call))
+    assert child["GH_TOKEN"] == READ_TOKEN
+    assert WRITE_TOKEN not in child.values()

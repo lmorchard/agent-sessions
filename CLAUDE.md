@@ -140,6 +140,15 @@ failure mode of forgetting must be inconvenient, not silent.* A fallback is reac
 and its result is a commit or comment attributed to a person who did not make it. **Re-introducing
 a fallback is a decision to put to the human**, on the same terms as widening `KINDS`.
 
+**What is deliberately *not* contained, decided 2026-08-10.** Both tokens live in a git-ignored
+`.env`, and the driver only refuses a credential in a file git would actually add. Hiding it better
+buys nothing: the agent runs as the same uid with a shell, so it can read any file the driver can
+and replay any command the driver runs. The split contains every ordinary path — the agent's
+environment holds only the read token — and an agent that deliberately goes hunting for a second
+credential is accepted risk, not a solved problem. **Do not re-tighten this by analogy**; the
+answer is uid separation or a remote driver host (#3), and until one exists the mitigation is
+GitHub-side: a narrowly scoped PAT with no `Workflows` permission, and branch protection on `main`.
+
 That account's login is also load-bearing for #183: a PAT-backed machine user carries no `[bot]`
 suffix, so `has_new_human_comment` cannot tell it from a person by inspection. It is told, via
 `credentials.bot_logins`. **A future identity change — a GitHub App, a rename — must go through

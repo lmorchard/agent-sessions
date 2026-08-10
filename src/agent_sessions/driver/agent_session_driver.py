@@ -450,6 +450,24 @@ nobody is here to answer: a parked issue is a normal, expected outcome for this
 driver, and an unattended guess is not."""
 
 
+def is_git_ignored(path: Path | str, repo_path: Path | str) -> bool:
+    """Whether git would refuse to add `path`. Absent files count as ignored: there
+    is nothing there to commit, and treating "no file" as exposed would refuse every
+    run that configures the driver entirely from the environment."""
+    p = Path(path)
+    if not p.exists():
+        return True
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_path), "check-ignore", "-q", str(p.resolve())],
+            capture_output=True,
+        )
+        return res.returncode == 0
+    except Exception:
+        # Not a repo, or no git. Nothing here can be committed by this driver.
+        return True
+
+
 def whoami(env: dict[str, str]) -> str:
     """The GitHub login a token authenticates as, or "" if it cannot be resolved."""
     try:
@@ -688,7 +706,7 @@ def main(argv: list[str] | None = None) -> int:
 
     creds = credentials.resolve()
     for keys, path in ((env_file_keys, env_file), (user_config_keys, user_config)):
-        exposure = credentials.exposure_error(keys, path, repo_path)
+        exposure = credentials.exposure_error(keys, path, repo_path, git_ignored=is_git_ignored(path, repo_path))
         if exposure:
             die(exposure)
     config_problem = credentials.config_error(creds)

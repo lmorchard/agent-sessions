@@ -176,69 +176,81 @@ Two failure modes that check catches, both of which are silent otherwise:
 - **The wrong token in a slot** — a personal PAT pasted into the read variable. Invisible without
   asking GitHub whose token it is.
 
-### Where to keep the write token
+### Where to keep the tokens
 
-Three ways, best first. The driver reads a **user-level credentials file** at
-`${XDG_CONFIG_HOME:-~/.config}/agent-session/credentials.env` (override with
-`DRIVER_CREDENTIALS_FILE`), loaded after `.env` so project settings still win. It must be mode
-`0600` or the driver refuses to start.
+**Both go in `.env`, which is git-ignored.** Decided 2026-08-10, after an earlier revision of this
+change refused a write credential in any file inside the agent's working tree. That refusal bought
+nothing — see the next section — while forbidding the one configuration anybody would keep using.
 
-**1. A command, with the secret in your keychain.** Any credential variable can be supplied as
-`<VAR>_CMD` instead — the driver runs it and takes stdout. The command is not a secret, so it can
-live in either config file:
+The driver refuses only the case that is still real: a credential in a file **git would happily
+add**. A token in a tracked file is one `git add -A` from being published, and that does not
+un-happen. A `.gitignore`d `.env` beside the driver is fine.
 
-```bash
-# once, interactively — the value never reaches your shell history if you let it prompt
-security add-generic-password -s agent-session-write -a "$USER" -w
+Two optional routes, if a deployment ever wants them:
 
-# ~/.config/agent-session/credentials.env  (chmod 0600)
-DRIVER_GH_WRITE_TOKEN_CMD=security find-generic-password -s agent-session-write -w
-```
+- **A user-level file** at `${XDG_CONFIG_HOME:-~/.config}/agent-session/credentials.env` (override
+  with `DRIVER_CREDENTIALS_FILE`), loaded after `.env` so project settings win. Must be mode `0600`.
+- **A command instead of a value.** Any credential variable accepts a `<VAR>_CMD` form; the driver
+  runs it and takes stdout, so the secret can sit in a keychain:
+  `DRIVER_GH_WRITE_TOKEN_CMD=security find-generic-password -s agent-session-write -w`. Works with
+  `op read`, `pass show`, anything that prints a token. Run without a shell, so a config file is
+  not a code-execution surface.
 
-Works the same with `op read op://vault/item/field`, `pass show ...`, or anything else that prints
-a token. Run without a shell, so a config file is not a code-execution surface.
-
-**2. The credentials file, holding the token directly.** Durable, out of shell history, outside any
-repo, `chmod 0600`. Plaintext on disk.
-
-**3. `export DRIVER_GH_WRITE_TOKEN=...`** — fine for one-off runs; it ends up in `~/.zsh_history`
-or a dotfile.
-
-The driver **refuses to start if it finds any write-capable variable** (`GH_TOKEN`, `GITHUB_TOKEN`,
-`GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, `DRIVER_GH_WRITE_TOKEN`) in a config file inside
-the repo the agent works in. A `.env` from before #191 usually holds `GITHUB_TOKEN`; move it out.
+Neither hides anything from the agent. They keep the secret out of shell history and out of
+plaintext on disk, which is worth something on a shared or backed-up machine and nothing here.
 
 ### What the credential split does and does not contain
 
-Worth being exact, because the refusal above is easy to over-read.
-
 **It does contain the GitHub API.** The agent's token is read-only, so `gh issue comment`, `gh pr
-merge` and `git push` over HTTPS are refused by GitHub regardless of what the agent decides to run,
-how it phrases it, or whether it is being cooperative. That is the property a tool allowlist could
-not give, and it holds.
+merge` and `git push` over HTTPS are refused by GitHub regardless of what the agent runs, how it
+phrases it, or whether it is cooperating. That is the property a tool allowlist could not give, and
+it holds.
 
-**It does not contain the local machine.** The agent runs as your user with a shell. It can read
-`~/.zshrc`, `~/.config/agent-session/credentials.env`, your `gh` keyring — anything you can read.
-No storage location on this host hides the write token from it. There is exactly one asymmetry, and
-it is small: on macOS a process's environment is not visible through `ps`, even to its owner, so a
-token that exists only in the driver's environment is not readable that way. That is a side effect
-of the platform, not a design.
+**It does not contain the local machine, and on one uid it cannot.** The agent runs as your user
+with a shell. It can read `.env`, `~/.zshrc`, the credentials file — and *replay* a keychain
+command: `security find-generic-password -w` returns the secret to any process running as you,
+without a prompt, because the ACL trusts the binary rather than the caller (verified 2026-08-10).
+Generalised:
 
-So the `.env`-inside-the-repo refusal, and the `0600` check, are **hygiene**: they stop the token
-being committed, backed up, or left in the directory the agent is already working in. They are not
-a wall.
+> **Anything the driver can obtain with no human present, the agent can obtain the same way.**
 
-The wall would be a separate uid, a container, or a different machine — none of which this project
-has. Until then the honest statement is: *the agent cannot act on GitHub as anyone but its own
-read-only self, and a determined agent on this host could still find the driver's token.* Those are
-different claims and only the first one is enforced.
+The driver runs unattended, so every route to the token is non-interactive, so every route is open
+to a process with the same uid. Keychain, `0600` file, dotfile and environment variable differ in
+hygiene — history, backups, accidental commits — and not at all in who can reach them. There is one
+incidental exception: macOS does not expose a process's environment through `ps` even to its owner
+(verified against `ps eww` and `ps -E`; Linux `/proc/<pid>/environ` does), so a token reaching the
+driver's environment by a route the agent could not replay would be safe. No such route exists
+without a human at the keyboard.
 
-**`git push` is only covered on HTTPS remotes.** `GH_TOKEN` reaches git through the `gh` credential
-helper, which fires for HTTPS only; on an SSH origin the host key authenticates and the agent can
-push regardless. The driver says so at startup when it sees one.
+**So this is the accepted risk, stated plainly.** The agent is handed a read-only credential and
+every ordinary path — cooperative, careless, or confused — is contained by mechanism. An agent that
+deliberately goes looking for a second credential is not, and would find one. That has never been
+this project's observed failure mode ([findings.md](findings.md) defect class 1 is self-graded work,
+not exfiltration), and the alternative costs an architecture change. Revisit if a run ever actually
+does it.
 
-The manifest vocabulary has no entry that merges a PR or enables auto-merge, so "nothing merges by
-machine" holds even if a run decides to try.
+### Bounding what a found token is worth
+
+Since it cannot be hidden, make holding it worth less. This is the part that actually reduces risk,
+and all of it is GitHub-side configuration:
+
+- **Scope the write PAT to exactly the repos it drives.** Fine-grained, Contents + Issues + Pull
+  requests at Write. Nothing else, nothing on your other repos.
+- **Do not grant it `Workflows`.** With it, anything holding the token can rewrite `.github/**` and
+  get arbitrary CI execution — a much larger prize than the token.
+- **Protect `main`.** Require a pull request and a review. Then a found token still cannot merge,
+  which keeps the system's central promise mechanical rather than procedural.
+- **Short expiry**, and rotate.
+
+### The boundary, if it is ever wanted
+
+The write token should not be on the machine the agent runs on. None of these is built:
+
+1. **Driver on a different host** — a GitHub Actions runner
+   ([#3](https://github.com/lmorchard/agent-sessions/issues/3)). The agent's machine never holds a
+   write credential at all, and it fits the architecture, since the driver already does every write.
+2. **Agent in a container or VM**, with only the read token and the working tree mounted.
+3. **Agent under a separate uid**, with the driver's credential unreadable by it.
 
 ### What "eligible" means
 

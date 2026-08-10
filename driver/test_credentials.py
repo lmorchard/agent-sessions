@@ -230,13 +230,27 @@ def test_a_human_login_is_not_in_the_set():
 # -- the .env exposure check ------------------------------------------------
 
 
-def test_write_token_in_a_dotenv_the_agent_can_read_is_an_error(tmp_path: Path):
+def test_a_write_token_in_a_tracked_file_is_an_error(tmp_path: Path):
+    """The surviving hygiene property: one `git add -A` from publication."""
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
-    msg = credentials.exposure_error({credentials.WRITE_TOKEN_VAR}, repo_path / ".env", repo_path)
-    assert msg, "the write token sat in a file the agent has Read access to and nobody objected"
+    msg = credentials.exposure_error(
+        {credentials.WRITE_TOKEN_VAR}, repo_path / ".env", repo_path, git_ignored=False
+    )
+    assert msg, "a committable write token drew no objection"
     assert not msg.startswith("error: "), "die() adds the prefix; two reads as a stutter"
     assert credentials.WRITE_TOKEN_VAR in msg
+
+
+def test_a_write_token_in_a_gitignored_file_is_fine(tmp_path: Path):
+    """Decided 2026-08-10. Refusing this bought nothing -- the agent runs as the same
+    uid and can read any file the driver can, wherever it is -- while forbidding the
+    one configuration an operator will actually keep using."""
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    assert credentials.exposure_error(
+        {credentials.WRITE_TOKEN_VAR}, repo_path / ".env", repo_path, git_ignored=True
+    ) == ""
 
 
 def test_any_write_capable_variable_in_a_readable_dotenv_is_an_error(tmp_path: Path):
@@ -246,7 +260,7 @@ def test_any_write_capable_variable_in_a_readable_dotenv_is_an_error(tmp_path: P
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
     for var in credentials.TOKEN_VARS:
-        msg = credentials.exposure_error({var}, repo_path / ".env", repo_path)
+        msg = credentials.exposure_error({var}, repo_path / ".env", repo_path, git_ignored=False)
         assert msg, f"{var} in a readable .env was not flagged"
         assert var in msg
 
@@ -258,6 +272,7 @@ def test_exposure_error_names_every_offending_variable(tmp_path: Path):
         {"GITHUB_TOKEN", credentials.WRITE_TOKEN_VAR, credentials.READ_TOKEN_VAR, "REPO"},
         repo_path / ".env",
         repo_path,
+        git_ignored=False,
     )
     assert "GITHUB_TOKEN" in msg and credentials.WRITE_TOKEN_VAR in msg
     assert "REPO," not in msg and credentials.READ_TOKEN_VAR not in msg.split("keep only")[0]
@@ -266,20 +281,20 @@ def test_exposure_error_names_every_offending_variable(tmp_path: Path):
 def test_read_token_in_a_dotenv_the_agent_can_read_is_fine(tmp_path: Path):
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
-    assert credentials.exposure_error({credentials.READ_TOKEN_VAR}, repo_path / ".env", repo_path) == ""
+    assert credentials.exposure_error({credentials.READ_TOKEN_VAR}, repo_path / ".env", repo_path, git_ignored=False) == ""
 
 
 def test_write_token_in_a_dotenv_outside_the_repo_is_fine(tmp_path: Path):
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
     elsewhere = tmp_path / "driver-home" / ".env"
-    assert credentials.exposure_error({credentials.WRITE_TOKEN_VAR}, elsewhere, repo_path) == ""
+    assert credentials.exposure_error({credentials.WRITE_TOKEN_VAR}, elsewhere, repo_path, git_ignored=False) == ""
 
 
 def test_exposure_error_does_not_print_the_token(tmp_path: Path):
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
-    msg = credentials.exposure_error({credentials.WRITE_TOKEN_VAR}, repo_path / ".env", repo_path)
+    msg = credentials.exposure_error({credentials.WRITE_TOKEN_VAR}, repo_path / ".env", repo_path, git_ignored=False)
     assert WRITE not in msg
 
 
@@ -393,7 +408,7 @@ def test_a_cmd_variable_is_not_a_credential_for_the_exposure_check(tmp_path: Pat
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
     keys = {WRITE_CMD_VAR, credentials.READ_TOKEN_VAR, credentials.LOGIN_VAR}
-    assert credentials.exposure_error(keys, repo_path / ".env", repo_path) == ""
+    assert credentials.exposure_error(keys, repo_path / ".env", repo_path, git_ignored=False) == ""
 
 
 # -- the user-level credentials file -----------------------------------------
