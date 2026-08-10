@@ -606,7 +606,9 @@ _DRIVER_ENV = (
     "HIGH_TIER_MODEL", "LOW_TIER_MODEL", "RETRY", "XDG_STATE_HOME",
     "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
     credentials.READ_TOKEN_VAR, credentials.WRITE_TOKEN_VAR, credentials.LOGIN_VAR,
-    credentials.BOT_LOGINS_VAR,
+    credentials.BOT_LOGINS_VAR, credentials.CONFIG_FILE_VAR,
+    credentials.READ_TOKEN_VAR + credentials.CMD_SUFFIX,
+    credentials.WRITE_TOKEN_VAR + credentials.CMD_SUFFIX,
 )
 
 #: The contained configuration, which every pass runs under unless it says otherwise.
@@ -1265,3 +1267,48 @@ def test_an_ssh_remote_is_called_out_at_startup(loop):
     assert "SSH remote" in out
     assert "git push" in out
 
+
+
+def test_the_write_token_can_live_in_a_user_credentials_file(loop):
+    """So it is neither typed at a prompt nor kept in the agent's working tree."""
+    creds_file = loop.tmp_path / "user-config" / "credentials.env"
+    creds_file.parent.mkdir(parents=True)
+    creds_file.write_text(f"{credentials.WRITE_TOKEN_VAR}={WRITE_TOKEN}\n", encoding="utf-8")
+    creds_file.chmod(0o600)
+    loop.monkeypatch.delenv(credentials.WRITE_TOKEN_VAR, raising=False)
+    loop.monkeypatch.setenv(credentials.CONFIG_FILE_VAR, str(creds_file))
+
+    gh = FakeGitHub(issues=[issue(112, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(112)])
+    code, out = loop.run(gh, argv=["--dry-run"])
+
+    assert code == 0
+    assert f"identity: acting as {DRIVER_LOGIN}" in out
+
+
+def test_a_group_readable_credentials_file_stops_the_run(loop):
+    creds_file = loop.tmp_path / "user-config" / "credentials.env"
+    creds_file.parent.mkdir(parents=True)
+    creds_file.write_text(f"{credentials.WRITE_TOKEN_VAR}={WRITE_TOKEN}\n", encoding="utf-8")
+    creds_file.chmod(0o644)
+    loop.monkeypatch.setenv(credentials.CONFIG_FILE_VAR, str(creds_file))
+
+    gh = FakeGitHub(issues=[issue(112, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(112)])
+    with pytest.raises(SystemExit) as excinfo:
+        loop.run(gh, argv=["--dry-run"])
+    assert excinfo.value.code == 2
+
+
+def test_a_project_env_still_wins_over_the_user_file(loop):
+    """Project configuration is the more specific of the two, and an operator
+    overriding for one repo should not have to edit their global file."""
+    creds_file = loop.tmp_path / "user-config" / "credentials.env"
+    creds_file.parent.mkdir(parents=True)
+    creds_file.write_text(f"{credentials.LOGIN_VAR}=some-other-account\n", encoding="utf-8")
+    creds_file.chmod(0o600)
+    loop.monkeypatch.setenv(credentials.CONFIG_FILE_VAR, str(creds_file))
+
+    gh = FakeGitHub(issues=[issue(112, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(112)])
+    code, out = loop.run(gh, argv=["--dry-run"])
+
+    assert code == 0
+    assert f"identity: acting as {DRIVER_LOGIN}" in out

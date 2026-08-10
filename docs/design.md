@@ -565,10 +565,25 @@ Closed, but the *reasoning* is still load-bearing.
   time) and 4 (attempt counters surviving an unpark) are untouched and the issue stays open.
 
   **What #191 did not settle**, and is still the spike's open question: the *local* half. The agent
-  still has a shell and still writes files in the working tree, so `Bash(python3:*)` is still a
-  write primitive against the repo it is working in. Credentials contain what leaves the machine.
-  The spike's proposal — give the verifier no `Bash` at all and have the parent run the manifest's
-  named commands — remains the candidate answer there, and remains unbuilt.
+  runs as the same uid as the driver, with a shell. So `Bash(python3:*)` is still a write primitive
+  against the working tree, and — the sharper point — **every file the driver's operator can read,
+  the agent can read too**: `~/.zshrc`, the user credentials file, the `gh` keyring. The driver's
+  refusal to load a raw write token from a `.env` inside the agent's tree is hygiene against
+  accidental commit and backup, not a wall; it is documented as such in `usage.md` rather than left
+  to be inferred.
+
+  The single asymmetry that does hold is incidental: macOS does not expose a process's environment
+  through `ps`, even to its owner, so a token living only in the driver's environment is not
+  readable that way. Verified 2026-08-10 against `ps eww` and `ps -E`. On Linux
+  `/proc/<pid>/environ` is readable by the same uid and this does not hold, which is exactly why it
+  is not load-bearing.
+
+  So the honest statement is two claims, only one of them enforced: *the agent cannot act on GitHub
+  as anyone but its own read-only self* — mechanism — and *a determined agent on this host could
+  still find the driver's write token* — true, unmitigated. Closing the second needs a separate
+  uid, a container, or a different machine (#3's GHA host would do it). The spike's proposal — give
+  the verifier no `Bash` at all and have the parent run the manifest's named commands — narrows the
+  verifier case specifically, and remains unbuilt.
 - **Where park state lives** → **decided 2026-07-29 (#5): a `driver-parked` label on the issue.**
   This **revises D1 in part**, and the revision is the interesting half. Triage had settled D1 —
   derive the park list from the latest outcome per issue in `runs.jsonl` — and the handoff said not

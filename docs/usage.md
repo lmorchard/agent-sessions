@@ -176,10 +176,62 @@ Two failure modes that check catches, both of which are silent otherwise:
 - **The wrong token in a slot** — a personal PAT pasted into the read variable. Invisible without
   asking GitHub whose token it is.
 
-The driver also **refuses to start if it finds any write-capable variable** (`GH_TOKEN`,
-`GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, `DRIVER_GH_WRITE_TOKEN`) in a
-`.env` inside the repo the agent works in, because the agent can read that file. A `.env` from
-before #191 usually holds `GITHUB_TOKEN`; move it to your shell.
+### Where to keep the write token
+
+Three ways, best first. The driver reads a **user-level credentials file** at
+`${XDG_CONFIG_HOME:-~/.config}/agent-session/credentials.env` (override with
+`DRIVER_CREDENTIALS_FILE`), loaded after `.env` so project settings still win. It must be mode
+`0600` or the driver refuses to start.
+
+**1. A command, with the secret in your keychain.** Any credential variable can be supplied as
+`<VAR>_CMD` instead — the driver runs it and takes stdout. The command is not a secret, so it can
+live in either config file:
+
+```bash
+# once, interactively — the value never reaches your shell history if you let it prompt
+security add-generic-password -s agent-session-write -a "$USER" -w
+
+# ~/.config/agent-session/credentials.env  (chmod 0600)
+DRIVER_GH_WRITE_TOKEN_CMD=security find-generic-password -s agent-session-write -w
+```
+
+Works the same with `op read op://vault/item/field`, `pass show ...`, or anything else that prints
+a token. Run without a shell, so a config file is not a code-execution surface.
+
+**2. The credentials file, holding the token directly.** Durable, out of shell history, outside any
+repo, `chmod 0600`. Plaintext on disk.
+
+**3. `export DRIVER_GH_WRITE_TOKEN=...`** — fine for one-off runs; it ends up in `~/.zsh_history`
+or a dotfile.
+
+The driver **refuses to start if it finds any write-capable variable** (`GH_TOKEN`, `GITHUB_TOKEN`,
+`GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, `DRIVER_GH_WRITE_TOKEN`) in a config file inside
+the repo the agent works in. A `.env` from before #191 usually holds `GITHUB_TOKEN`; move it out.
+
+### What the credential split does and does not contain
+
+Worth being exact, because the refusal above is easy to over-read.
+
+**It does contain the GitHub API.** The agent's token is read-only, so `gh issue comment`, `gh pr
+merge` and `git push` over HTTPS are refused by GitHub regardless of what the agent decides to run,
+how it phrases it, or whether it is being cooperative. That is the property a tool allowlist could
+not give, and it holds.
+
+**It does not contain the local machine.** The agent runs as your user with a shell. It can read
+`~/.zshrc`, `~/.config/agent-session/credentials.env`, your `gh` keyring — anything you can read.
+No storage location on this host hides the write token from it. There is exactly one asymmetry, and
+it is small: on macOS a process's environment is not visible through `ps`, even to its owner, so a
+token that exists only in the driver's environment is not readable that way. That is a side effect
+of the platform, not a design.
+
+So the `.env`-inside-the-repo refusal, and the `0600` check, are **hygiene**: they stop the token
+being committed, backed up, or left in the directory the agent is already working in. They are not
+a wall.
+
+The wall would be a separate uid, a container, or a different machine — none of which this project
+has. Until then the honest statement is: *the agent cannot act on GitHub as anyone but its own
+read-only self, and a determined agent on this host could still find the driver's token.* Those are
+different claims and only the first one is enforced.
 
 **`git push` is only covered on HTTPS remotes.** `GH_TOKEN` reaches git through the `gh` credential
 helper, which fires for HTTPS only; on an SSH origin the host key authenticates and the agent can

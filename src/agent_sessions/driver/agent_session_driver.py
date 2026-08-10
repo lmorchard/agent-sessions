@@ -676,10 +676,21 @@ def main(argv: list[str] | None = None) -> int:
 
     # The credential split, before anything spends either credential. There is no
     # degraded mode: the driver runs under its own GitHub account or it does not run.
+    #
+    # The user-level file loads second, so a project `.env` still wins. It exists so
+    # the write credential has somewhere durable to live that is neither shell
+    # history nor a file inside the agent's working tree.
+    user_config = credentials.user_config_path()
+    mode_problem = credentials.file_mode_error(user_config)
+    if mode_problem:
+        die(mode_problem)
+    user_config_keys = load_env_file(user_config)
+
     creds = credentials.resolve()
-    exposure = credentials.exposure_error(env_file_keys, env_file, repo_path)
-    if exposure:
-        die(exposure)
+    for keys, path in ((env_file_keys, env_file), (user_config_keys, user_config)):
+        exposure = credentials.exposure_error(keys, path, repo_path)
+        if exposure:
+            die(exposure)
     config_problem = credentials.config_error(creds)
     if config_problem:
         die(config_problem)
@@ -690,6 +701,9 @@ def main(argv: list[str] | None = None) -> int:
     if identity_problem:
         die(identity_problem)
     say(f"identity: acting as {creds.login} (agent reads, driver writes)")
+    # Resolved once. If the read token came from a `_CMD`, this is what stops
+    # `agent_runner` re-running the keychain lookup for the child.
+    os.environ[credentials.READ_TOKEN_VAR] = creds.read_token
 
     driver_bots = credentials.bot_logins(creds)
     try:

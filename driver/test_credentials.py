@@ -303,3 +303,127 @@ def test_an_unknown_remote_is_not_claimed_to_be_covered():
 
 def test_no_remote_is_silent():
     assert credentials.remote_warning("") == ""
+
+
+# -- where the write token comes from ----------------------------------------
+#
+# The operator's problem is durability and shell history, NOT containment: an agent
+# running as the same user with a shell can read any file this user can, so no
+# storage choice here hides the token from it. See `docs/usage.md` -- the boundary
+# that would is a separate uid, and it is not built. What the indirection below buys
+# is real but narrower: the secret stops existing in plaintext on disk and in `~/.zsh_history`.
+
+
+class FakeCommandRunner:
+    def __init__(self, outputs=None, fail=()):
+        self.outputs = outputs or {}
+        self.fail = set(fail)
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv, **kwargs):
+        key = " ".join(argv)
+        self.calls.append(list(argv))
+
+        class R:
+            returncode = 1 if key in self.fail else 0
+            stdout = "" if key in self.fail else self.outputs.get(key, "") + "\n"
+            stderr = "keychain said no" if key in self.fail else ""
+
+        return R()
+
+
+CMD = "security find-generic-password -s agent-write -w"
+WRITE_CMD_VAR = credentials.WRITE_TOKEN_VAR + credentials.CMD_SUFFIX
+
+
+def test_a_token_can_come_from_a_command():
+    runner = FakeCommandRunner({CMD: WRITE})
+    creds = credentials.resolve(
+        {credentials.READ_TOKEN_VAR: READ, WRITE_CMD_VAR: CMD, credentials.LOGIN_VAR: BOT}, runner=runner
+    )
+    assert creds.write_token == WRITE
+    assert credentials.config_error(creds) == ""
+
+
+def test_the_command_is_not_run_through_a_shell():
+    """`shell=True` would make a config file a code-execution surface for anything
+    that can write to it, and the commands this is for need no shell."""
+    runner = FakeCommandRunner({CMD: WRITE})
+    credentials.resolve({WRITE_CMD_VAR: CMD}, runner=runner)
+    assert runner.calls == [["security", "find-generic-password", "-s", "agent-write", "-w"]]
+
+
+def test_command_output_is_stripped():
+    runner = FakeCommandRunner({CMD: "  " + WRITE + "  "})
+    assert credentials.resolve({WRITE_CMD_VAR: CMD}, runner=runner).write_token == WRITE
+
+
+def test_a_literal_token_wins_over_the_command():
+    """So one run can override the keychain without anybody editing a config file."""
+    runner = FakeCommandRunner({CMD: WRITE})
+    creds = credentials.resolve({credentials.WRITE_TOKEN_VAR: "literal", WRITE_CMD_VAR: CMD}, runner=runner)
+    assert creds.write_token == "literal"
+    assert runner.calls == [], "ran the keychain command for a value it already had"
+
+
+def test_a_failing_command_is_reported_not_swallowed():
+    runner = FakeCommandRunner(fail=[CMD])
+    creds = credentials.resolve(
+        {credentials.READ_TOKEN_VAR: READ, WRITE_CMD_VAR: CMD, credentials.LOGIN_VAR: BOT}, runner=runner
+    )
+    msg = credentials.config_error(creds)
+    assert msg and WRITE_CMD_VAR in msg
+
+
+def test_a_command_that_prints_nothing_is_a_failure():
+    runner = FakeCommandRunner({CMD: ""})
+    creds = credentials.resolve({WRITE_CMD_VAR: CMD, credentials.LOGIN_VAR: BOT}, runner=runner)
+    assert credentials.config_error(creds)
+
+
+def test_no_error_prints_the_command_output():
+    runner = FakeCommandRunner({CMD: WRITE})
+    creds = credentials.resolve({WRITE_CMD_VAR: CMD}, runner=runner)
+    assert WRITE not in credentials.config_error(creds)
+
+
+def test_a_cmd_variable_is_not_a_credential_for_the_exposure_check(tmp_path: Path):
+    """The command is not a secret, so a file holding it must not trip the refusal a
+    raw token would -- otherwise the recommended configuration is also the refused one."""
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    keys = {WRITE_CMD_VAR, credentials.READ_TOKEN_VAR, credentials.LOGIN_VAR}
+    assert credentials.exposure_error(keys, repo_path / ".env", repo_path) == ""
+
+
+# -- the user-level credentials file -----------------------------------------
+
+
+def test_the_default_user_config_path_follows_xdg():
+    assert credentials.user_config_path({"XDG_CONFIG_HOME": "/x/cfg"}) == Path("/x/cfg/agent-session/credentials.env")
+    assert credentials.user_config_path({"HOME": "/home/l"}) == Path("/home/l/.config/agent-session/credentials.env")
+
+
+def test_an_explicit_path_overrides_the_default():
+    env = {credentials.CONFIG_FILE_VAR: "/elsewhere/creds.env", "HOME": "/home/l"}
+    assert credentials.user_config_path(env) == Path("/elsewhere/creds.env")
+
+
+def test_a_group_or_world_readable_credentials_file_is_refused(tmp_path: Path):
+    path = tmp_path / "credentials.env"
+    path.write_text("x=1\n", encoding="utf-8")
+    for mode in (0o644, 0o640, 0o604):
+        path.chmod(mode)
+        msg = credentials.file_mode_error(path)
+        assert msg and "0600" in msg, f"mode {oct(mode)} was accepted"
+
+
+def test_an_owner_only_credentials_file_is_accepted(tmp_path: Path):
+    path = tmp_path / "credentials.env"
+    path.write_text("x=1\n", encoding="utf-8")
+    path.chmod(0o600)
+    assert credentials.file_mode_error(path) == ""
+
+
+def test_a_missing_credentials_file_is_not_an_error(tmp_path: Path):
+    assert credentials.file_mode_error(tmp_path / "nope.env") == ""

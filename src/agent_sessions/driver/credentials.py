@@ -13,6 +13,9 @@ Stdlib only, importable and testable with pytest.
 from __future__ import annotations
 
 import os
+import shlex
+import stat
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +30,15 @@ WRITE_TOKEN_VAR = "DRIVER_GH_WRITE_TOKEN"
 #: `gh api user`: without it the driver can only assume whose account it is spending,
 #: and "assumed" is exactly what this module exists to stop.
 LOGIN_VAR = "DRIVER_GH_LOGIN"
+
+#: Suffix for supplying a token by command rather than by value. `<VAR>_CMD` is run
+#: and its stdout used, so the secret can live in a keychain while only the command
+#: lives in configuration -- out of shell history, out of plaintext, and durable.
+CMD_SUFFIX = "_CMD"
+
+#: Where the operator's own credentials file lives, if they use one. Outside any
+#: repo, so it survives a clone and cannot be committed by accident.
+CONFIG_FILE_VAR = "DRIVER_CREDENTIALS_FILE"
 
 #: Comma-separated extra logins to treat as machines when deciding whether a comment
 #: is a human reply. Configuration rather than a constant, because the writing
@@ -57,6 +69,8 @@ class Credentials:
     write_token: str = ""
     login: str = ""
     extra_bot_logins: tuple[str, ...] = ()
+    #: Problems resolving a `<VAR>_CMD`. Surfaced by `config_error`; never the output.
+    errors: tuple[str, ...] = ()
 
     @property
     def split(self) -> bool:
@@ -64,15 +78,81 @@ class Credentials:
         return bool(self.read_token) and bool(self.write_token) and self.read_token != self.write_token
 
 
-def resolve(env: dict[str, str] | None = None) -> Credentials:
+def _from_command(spec: str, runner) -> tuple[str, str]:
+    """Run a `<VAR>_CMD` and return (token, error). Never both."""
+    try:
+        argv = shlex.split(spec)
+    except ValueError as e:
+        return "", f"could not parse the command: {e}"
+    if not argv:
+        return "", "the command is empty"
+    try:
+        # No shell: a config file is not a code-execution surface, and the commands
+        # this exists for (`security`, `op read`, `pass`) need none.
+        res = runner(argv, capture_output=True, text=True)
+    except Exception as e:  # noqa: BLE001 -- every failure has the same answer here
+        return "", f"the command could not be run: {type(e).__name__}"
+    if res.returncode != 0:
+        return "", f"the command exited {res.returncode}: {(res.stderr or '').strip()[:200]}"
+    token = (res.stdout or "").strip()
+    if not token:
+        return "", "the command printed nothing"
+    return token, ""
+
+
+def resolve(env: dict[str, str] | None = None, runner=None) -> Credentials:
     src = os.environ if env is None else env
+    if runner is None:
+        runner = subprocess.run
+
+    tokens = {}
+    errors = []
+    for var in (READ_TOKEN_VAR, WRITE_TOKEN_VAR):
+        literal = (src.get(var) or "").strip()
+        if literal:
+            # An explicit value wins, so one run can override the keychain without
+            # anybody editing a config file.
+            tokens[var] = literal
+            continue
+        spec = (src.get(var + CMD_SUFFIX) or "").strip()
+        if not spec:
+            tokens[var] = ""
+            continue
+        token, error = _from_command(spec, runner)
+        tokens[var] = token
+        if error:
+            errors.append(f"{var}{CMD_SUFFIX}: {error}")
+
     extras = [p.strip() for p in (src.get(BOT_LOGINS_VAR) or "").split(",")]
     return Credentials(
-        read_token=(src.get(READ_TOKEN_VAR) or "").strip(),
-        write_token=(src.get(WRITE_TOKEN_VAR) or "").strip(),
+        read_token=tokens[READ_TOKEN_VAR],
+        write_token=tokens[WRITE_TOKEN_VAR],
         login=(src.get(LOGIN_VAR) or "").strip(),
         extra_bot_logins=tuple(p for p in extras if p),
+        errors=tuple(errors),
     )
+
+
+def user_config_path(env: dict[str, str] | None = None) -> Path:
+    """The operator's credentials file: XDG first, then `~/.config`."""
+    src = os.environ if env is None else env
+    explicit = (src.get(CONFIG_FILE_VAR) or "").strip()
+    if explicit:
+        return Path(explicit)
+    base = (src.get("XDG_CONFIG_HOME") or "").strip() or str(Path(src.get("HOME") or "~") / ".config")
+    return Path(base) / "agent-session" / "credentials.env"
+
+
+def file_mode_error(path: Path | str) -> str:
+    """Non-empty when a credentials file is readable by anyone but its owner."""
+    p = Path(path)
+    try:
+        mode = p.stat().st_mode
+    except OSError:
+        return ""
+    if mode & (stat.S_IRWXG | stat.S_IRWXO):
+        return f"{p} is readable beyond its owner (mode {oct(stat.S_IMODE(mode))}). Run: chmod 0600 {p}"
+    return ""
 
 
 def agent_env(env: dict[str, str], creds: Credentials) -> dict[str, str]:
@@ -135,6 +215,9 @@ def config_error(creds: Credentials) -> str:
 
     Never includes a token value: this string goes to stderr and into run logs.
     """
+    if creds.errors:
+        return "could not resolve a credential. " + "; ".join(creds.errors)
+
     missing = []
     if not creds.read_token:
         missing.append(f"{READ_TOKEN_VAR} (the agent's read-scoped token)")
@@ -218,11 +301,15 @@ def remote_warning(remote_url: str) -> str:
 
 
 def exposure_error(loaded_keys: set[str], env_file: Path | str, repo_path: Path | str) -> str:
-    """Non-empty when the write token was read from a file the agent can read.
+    """Non-empty when a write credential was read from a file inside the agent's tree.
 
-    The whole split collapses if the write credential sits in a `.env` inside the
-    tree the agent holds `Read` and `Bash` over -- it just opens the file. Fail
-    closed rather than ship theatre.
+    **This is hygiene, not a boundary.** The agent runs as the same user with a real
+    shell, so it can read `~/.zshrc`, `~/.config/**`, or anything else this user can;
+    moving the token out of the repo does not hide it. What the refusal actually buys
+    is narrower and still worth having: a token in the repo is one `git add -A` from
+    being published, one `tar` from being in a backup, and sitting in the directory
+    the agent is already working in. The boundary that would hide it is a separate
+    uid or a container, and this project does not have one -- see `docs/usage.md`.
     """
     exposed = sorted(loaded_keys & set(TOKEN_VARS))
     if not exposed:
