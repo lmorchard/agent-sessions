@@ -538,18 +538,34 @@ def writes_summary(result: dict) -> str:
     return "write manifest did not fully apply"
 
 
+def board_command(board: str, limit: int = 500) -> list[str]:
+    """The one place the board read is spelled.
+
+    `make doctor` runs this too. It used to probe the board with a GraphQL query
+    instead, which succeeded while this failed -- `gh project` needs `read:org` to
+    resolve `--owner` and dies with `unknown owner type` without it. A check that
+    asks a different question than the code it is checking reported a configuration
+    that could not select an issue as healthy.
+    """
+    owner, num = board.split("/", 1)
+    return ["gh", "project", "item-list", num, "--owner", owner, "--format", "json", "--limit", str(limit)]
+
+
 def fetch_board_json(board: str) -> list[dict]:
     if not board or "/" not in board:
         return []
-    owner, num = board.split("/", 1)
     try:
-        cmd = ["gh", "project", "item-list", num, "--owner", owner, "--format", "json", "--limit", "500"]
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        res = subprocess.run(board_command(board), capture_output=True, text=True, check=True)
         data = json.loads(res.stdout)
         items = data.get("items", [])
         say(f"board {board}: read {len(items)} items (advisory only; does not gate)")
         return items if isinstance(items, list) else []
-    except Exception:
+    except Exception as e:
+        # Saying nothing here is how an unreadable board looks like an empty one.
+        # Selection then falls back to priority labels, and if no issue carries one
+        # the pass reports `eligible: 0` with no hint that a credential is at fault.
+        detail = getattr(e, "stderr", "") or str(e)
+        say(f"board {board}: UNREADABLE ({' '.join(str(detail).split())[:120]}) -- selection falls back to priority labels")
         return []
 
 

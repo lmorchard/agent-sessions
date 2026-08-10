@@ -31,10 +31,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from agent_sessions.driver import credentials  # noqa: E402
+from agent_sessions.driver import agent_session_driver, credentials  # noqa: E402
 
-#: ProjectsV2 has no REST representation; this is how the driver reads a board too.
-_PROJECT_QUERY = "query($o:String!,$n:Int!){user(login:$o){projectV2(number:$n){title}}}"
+#: Scopes a classic token needs, by what they unlock. `X-OAuth-Scopes` reports these
+#: definitively -- only fine-grained tokens have to be probed.
+#: `read:org` is the non-obvious one: `gh project` resolves `--owner` by asking for the
+#: organization *and* user id in one query, so the org branch fails the whole thing
+#: without it, even for a user-owned project. The surfaced error is `unknown owner type`.
+BOARD_SCOPES = ("project", "read:project")
+ORG_SCOPE = "read:org"
+WRITE_SCOPES = ("repo", "public_repo")
+
+#: Never grant this. It buys whoever holds the token the ability to rewrite
+#: `.github/**` and get arbitrary CI execution -- a far larger prize than the token.
+DANGEROUS_SCOPES = ("workflow",)
 
 #: Must match `discussion_manager`'s default. `test_the_notebook_category_name_matches`
 #: pins the two together rather than trusting this copy.
@@ -135,6 +145,51 @@ def _write_remedy(repo: str, login: str, token: str) -> str:
     )
 
 
+def _scopes_check(runner, token: str, board: str) -> Check:
+    """Read a classic token's scopes from `X-OAuth-Scopes` rather than probing.
+
+    The header is definitive and free. Only fine-grained tokens have no equivalent,
+    which is why every other check here has to try the operation instead.
+    """
+    res = _gh(runner, ["api", "-i", "user"], token)
+    header = ""
+    for line in (getattr(res, "stdout", "") or "").splitlines():
+        if line.lower().startswith("x-oauth-scopes:"):
+            header = line.split(":", 1)[1]
+            break
+    if not header.strip():
+        return Check("write token scopes", "skip", "no X-OAuth-Scopes header on the response")
+
+    scopes = {p.strip() for p in header.split(",") if p.strip()}
+    problems, remedies = [], []
+
+    if not scopes & set(WRITE_SCOPES):
+        problems.append("no write scope")
+        remedies.append(f"add `public_repo` (public repos) or `repo` (private): has {sorted(scopes)}")
+    if board:
+        if not scopes & set(BOARD_SCOPES):
+            problems.append("no project scope")
+            remedies.append("add `read:project`, or `project` if the driver moves cards")
+        if ORG_SCOPE not in scopes:
+            problems.append(f"no {ORG_SCOPE}")
+            remedies.append(
+                f"add `{ORG_SCOPE}` -- `gh project` resolves `--owner` by asking for the organization "
+                "and user id in one query, so it fails with `unknown owner type` without it, even for "
+                "a user-owned project"
+            )
+    dangerous = sorted(scopes & set(DANGEROUS_SCOPES))
+    if dangerous:
+        problems.append(f"has {', '.join(dangerous)}")
+        remedies.append(
+            f"drop `{dangerous[0]}` -- it allows rewriting .github/** and thus arbitrary CI execution, "
+            "which is a larger prize than the token itself"
+        )
+
+    if not problems:
+        return Check("write token scopes", "pass", ", ".join(sorted(scopes)))
+    return Check("write token scopes", "warn", f"{', '.join(sorted(scopes))} -- {'; '.join(problems)}", ". ".join(remedies))
+
+
 def _board_remedy(board: str, login: str, token: str, error: str) -> str:
     """Why a board is invisible. GraphQL already distinguishes the two causes and the
     first version of this check ignored it, blaming a missing scope for what was
@@ -145,21 +200,32 @@ def _board_remedy(board: str, login: str, token: str, error: str) -> str:
     unless it was added to the board as well.
     """
     owner = board.partition("/")[0]
+    cost = (
+        " Selection falls back to priority labels, and if no issue carries one, nothing is eligible "
+        "and the pass does nothing at all."
+    )
+    if "unknown owner type" in error.lower():
+        return (
+            "`gh project` could not classify the owner, which is what it reports when it lacks "
+            f"`{ORG_SCOPE}`: it resolves `--owner` by asking for the organization and user id in one "
+            "query, so the org branch fails the whole thing even for a user-owned project. Add "
+            f"`{ORG_SCOPE}` to the classic PAT." + cost
+        )
     if "scope" in error.lower():
         return (
             "The token is missing the projects scope: add `read:project` to a classic PAT, or "
-            "`project` if the driver moves cards. ProjectsV2 is not covered by `repo`."
+            "`project` if the driver moves cards. ProjectsV2 is not covered by `repo`." + cost
         )
     if token_kind(token) == "fine-grained" and owner.lower() != login.lower():
         return (
             f"A fine-grained PAT owned by {login} cannot reach a project owned by {owner} at all, "
-            "whatever its permissions say. Use a classic PAT with `project`."
+            "whatever its permissions say. Use a classic PAT with `project`." + cost
         )
     return (
         f"The scope is present -- a public project owned by {owner} would be readable -- so this "
         f"board is private and {login} is not on it. ProjectsV2 access is separate from repository "
         f"access: being a collaborator on the repo grants nothing here. Either make the project "
-        f"public, or add {login} under the project's Settings -> Manage access."
+        f"public, or add {login} under the project's Settings -> Manage access." + cost
     )
 
 
@@ -316,27 +382,30 @@ def check_all(environ: dict, runner, *, repo: str, repo_path: str, board: str = 
             )
 
     writer = next((p for p in visible if p.label == "write"), None)
-    if board and writer:
-        # ProjectsV2 is GraphQL-only -- there is no REST endpoint, and probing one
-        # returns a 404 that reads like a permissions problem. Ask the way the driver
-        # asks.
-        owner, _, number = board.partition("/")
-        res = _gh(
-            runner,
-            ["api", "graphql", "-f", f"query={_PROJECT_QUERY}", "-F", f"o={owner}", "-F", f"n={number}"],
-            writer.token,
+
+    if writer and token_kind(writer.token) == "classic":
+        checks.append(_scopes_check(runner, writer.token, board))
+    elif writer:
+        checks.append(
+            Check(
+                "write token scopes",
+                "skip",
+                f"{token_kind(writer.token)} tokens report no X-OAuth-Scopes header",
+            )
         )
+
+    if board and writer:
+        res = _gh(runner, agent_session_driver.board_command(board, limit=1)[1:], writer.token)
         text = _message(res)
-        if getattr(res, "returncode", 1) == 0 and "NOT_FOUND" not in text and '"errors"' not in text:
+        if getattr(res, "returncode", 1) == 0:
             checks.append(Check("board readable", "pass", board))
         else:
             checks.append(
                 Check(
                     "board readable",
                     "warn",
-                    f"{board}: not visible to the write token",
-                    "Selection falls back to labels without it. "
-                    + _board_remedy(board, writer.login, writer.token, text),
+                    f"{board}: {text}",
+                    _board_remedy(board, writer.login, writer.token, text),
                 )
             )
 
@@ -400,12 +469,21 @@ def render(checks: list[Check]) -> str:
             for para in check.remedy.split("\n"):
                 lines.append(f"           -> {para}")
     failed = sum(1 for c in checks if c.status == "fail")
+    warned = sum(1 for c in checks if c.status == "warn")
     skipped = sum(1 for c in checks if c.status == "skip")
     lines.append("")
     if failed:
         lines.append(f"doctor: {failed} check(s) failed. The driver will not run correctly.")
-    elif skipped:
-        lines.append(f"doctor: no failures, {skipped} check(s) could not be run (skip is not a pass).")
+    elif warned or skipped:
+        # "all checks passed" printed above two warnings once, which is the same
+        # shape as the worst bug this tool exists to catch: a report that reads as a
+        # pass while the thing it describes does not work.
+        parts = []
+        if warned:
+            parts.append(f"{warned} warning(s)")
+        if skipped:
+            parts.append(f"{skipped} check(s) could not be run (skip is not a pass)")
+        lines.append(f"doctor: no failures, but {' and '.join(parts)} -- read them.")
     else:
         lines.append("doctor: all checks passed.")
     return "\n".join(lines)
