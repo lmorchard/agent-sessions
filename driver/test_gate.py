@@ -516,5 +516,33 @@ def test_classify_substitute_downgrades_to_gate_human():
     assert "satisfied by substitute: project-gates" in r2["reason"]
 
 
+def test_malformed_gate_block_yields_no_gate():
+    """Issue 184: malformed/partial gate block yields no-gate with missing field in reason."""
+    malformed_body = "## Merge gate\n\n```yaml\ntier: auto-ok\nverdict: eligible-for-auto-merge\n```"
+    g = gate.extract_gate(malformed_body)
+    r = gate.classify(g)
+    assert r["outcome"] == "no-gate"
+    assert "missing required field" in r["reason"]
+
+
+def test_render_gate_block_golden():
+    """Issue 184: render_gate_block renders validated structure correctly."""
+    fields = {
+        "tier": "auto-ok",
+        "checks": "C1 pass",
+        "tamper": "clean",
+        "project-gates": "make check green",
+        "threads": "0 unresolved",
+        "risk-paths": "none",
+        "verdict": "eligible-for-auto-merge",
+    }
+    rendered = gate.render_gate_block(fields)
+    assert "## Merge gate" in rendered
+    assert "tier: auto-ok" in rendered
+    assert "verdict: eligible-for-auto-merge" in rendered
+    assert "```yaml" in rendered
+
+
+
 
 
