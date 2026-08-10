@@ -107,7 +107,9 @@ issues into autonomy tiers for free.
 3. **Agent SDK** (Python/TS) — full programmatic loop w/ hooks + subagents. **Overkill for
    decafclaw**: it's *already* an agent runtime with its own hooks/subagents/workflow
    engine. Building a second orchestrator to drive the first is redundant.
-4. **Hooks** — `PreToolUse` is the guardrail layer rather than the primary loop.
+4. **Hooks** — `PreToolUse` is the guardrail layer rather than the primary loop. Since #191 it is
+   explicitly *defence in depth*, not the containment layer: the read-scoped credential is, and the
+   hook stays so that a token which turns out to be over-scoped still meets a second refusal.
 
    **Unverified, flagged rather than fixed:** this entry used to assert a hook can hard-block *even
    under `bypassPermissions`*. That came from the same 2026-07-23 research pass whose own note below
@@ -531,15 +533,28 @@ Closed, but the *reasoning* is still load-bearing.
   rather than opening anything. What was actually missing was a *mechanism for the asymmetry* — one
   flat session-wide `--allowedTools` cannot say "implementers write, the verifier does not."
 
-  **D2 — how the verifier's read-only-ness is enforced — was spiked, not decided.** See
+  **D2 — how the verifier's read-only-ness is enforced — was spiked, then decided for GitHub
+  writes only (#191, 2026-08-10).** See
   [the spike](dev-sessions/2026-08-01-1932-verifier-containment/spike-verifier-containment.md).
   `--agents` honors an undocumented per-agent `tools` allowlist that yields an intersection rather
   than inheritance, which contains `Write`/`Edit` against a control. It does **not** contain a
   verifier that runs checks: `Bash(python3:*)` and `Bash(pytest:*)` are write primitives, and a
-  cooperative run *looks* contained because the subagent declines rather than being denied. The
-  proposed answer is to give the verifier no `Bash` at all and have the parent run the manifest's
-  named commands, which also moves command selection out of the verifier's judgment. Not yet
-  decided or built.
+  cooperative run *looks* contained because the subagent declines rather than being denied.
+
+  **What #191 settled: containment by credential, for the GitHub half.** A tool allowlist cannot
+  contain an agent that has a shell, and a compliant agent is indistinguishable from a contained
+  one — but a read-scoped token is refused by the API whatever the agent runs and however
+  cooperative it is being. `driver/credentials.py` builds the agent's child environment with the
+  read token and strips every write-capable one; `driver/writes.py` performs the run's comments,
+  labels, branch push and PR from a schema-validated manifest, under the driver's write token.
+  There is no manifest kind that merges. When only one credential is configured the loop runs as it
+  did before and says so loudly at startup, rather than handing the agent write access in silence.
+
+  **What #191 did not settle**, and is still the spike's open question: the *local* half. The agent
+  still has a shell and still writes files in the working tree, so `Bash(python3:*)` is still a
+  write primitive against the repo it is working in. Credentials contain what leaves the machine.
+  The spike's proposal — give the verifier no `Bash` at all and have the parent run the manifest's
+  named commands — remains the candidate answer there, and remains unbuilt.
 - **Where park state lives** → **decided 2026-07-29 (#5): a `driver-parked` label on the issue.**
   This **revises D1 in part**, and the revision is the interesting half. Triage had settled D1 —
   derive the park list from the latest outcome per issue in `runs.jsonl` — and the handoff said not

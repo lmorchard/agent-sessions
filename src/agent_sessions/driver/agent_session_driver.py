@@ -20,7 +20,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from agent_sessions.driver import agent_runner, discussion_manager, gate, gh_query, router
+from agent_sessions.driver import (
+    agent_runner,
+    credentials,
+    discussion_manager,
+    gate,
+    gh_query,
+    router,
+    writes,
+)
 
 PARK_LABEL = "agent-session:needs-human"
 INTERACTIVE_LABEL = "agent-session:needs-human-interactive"
@@ -387,7 +395,7 @@ def acquire_lock(issue_number: str | int, phase: str, repo_path: Path) -> bool:
             return False
 
 
-def build_prompt(url_or_number: str | int, phase: str, skill_dir: Path) -> str:
+def build_prompt(url_or_number: str | int, phase: str, skill_dir: Path, writes_file: Path | str = "") -> str:
     if str(url_or_number).startswith("http"):
         url = str(url_or_number)
     else:
@@ -400,6 +408,8 @@ def build_prompt(url_or_number: str | int, phase: str, skill_dir: Path) -> str:
             "\nWhen viewing the issue using gh issue view, pass --comments so you read the full comment thread.\n"
         )
 
+    manifest = str(writes_file) if writes_file else f"the path in ${agent_runner.WRITES_FILE_VAR}"
+
     return f"""You are running unattended, invoked by the agent-session board-driver.
 
 Read {skill_dir}/SKILL.md, then read {skill_dir}/{phase_file} and follow it
@@ -410,15 +420,81 @@ exactly for this issue:
 The skill is not installed as a registered skill. Its files live at {skill_dir} and
 you must read them from there by absolute path.
 
-Stop at the merge gate and report the verdict. Do not merge the PR and do not enable
-auto-merge.
+Your GitHub credential is read-scoped. Reads work normally -- gh issue view, gh pr
+view, gh pr checks, gh api graphql queries -- but every write will be refused, and
+no amount of retrying will change that. Record the writes you want instead, by
+appending one JSON object per line to the write manifest at:
+
+  {manifest}
+
+The driver validates that file and performs the writes for you after this run ends.
+Read {skill_dir}/references/write-manifest.md for the entry shapes. A write you do
+not record does not happen, so record it before you finish.
+
+Stop at the merge gate and report the verdict. There is no manifest entry that
+merges a PR or enables auto-merge, by design.
 
 There is no human watching this run. If the phase directs you to stop and surface
-something, post a top-level comment on the GitHub issue (using gh issue comment)
-explaining plainly what needs a decision, why, and what options exist. Apply the parking
-label using python3 scripts/label_manager.py park --issue <number>, and state the verdict.
-Do not substitute your own judgment for the decision just because nobody is here to answer:
-a parked issue is a normal, expected outcome for this driver, and an unattended guess is not."""
+something, record an issue_comment entry explaining plainly what needs a decision,
+why, and what options exist, plus a label entry applying the parking label, and
+state the verdict. Do not substitute your own judgment for the decision just because
+nobody is here to answer: a parked issue is a normal, expected outcome for this
+driver, and an unattended guess is not."""
+
+
+def perform_writes(writes_file: Path, repo: str, repo_path: Path, rundir: Path, board: str = "") -> dict:
+    """Run the agent's write manifest under the driver's write credential.
+
+    The agent could not perform these itself -- its token is read-scoped -- so this
+    is where the run's comments, labels, branch push and PR actually happen. The
+    driver validates first and applies nothing if any entry is malformed.
+    """
+    messages: list[str] = []
+    try:
+        entries = writes.load(writes_file)
+        result = writes.execute(
+            entries,
+            repo=repo,
+            repo_path=repo_path,
+            scratch=rundir / "writes",
+            env=dict(os.environ),
+            board=board,
+        )
+    except writes.ManifestError as e:
+        entries = []
+        result = {"ok": False, "errors": [str(e)], "results": []}
+
+    applied = sum(1 for r in result["results"] if r.get("status") == "ok")
+    (rundir / "writes-result.json").write_text(
+        json.dumps({"entries": entries, **result}, indent=2), encoding="utf-8"
+    )
+
+    if not entries and result["ok"]:
+        messages.append("  writes   none recorded")
+    else:
+        messages.append(f"  writes   {applied}/{len(entries)} applied by the driver")
+    for err in result["errors"]:
+        messages.append(f"  WRITE REJECTED  {err}")
+    for r in result["results"]:
+        if r.get("status") == "failed":
+            messages.append(f"  WRITE FAILED    {r.get('kind')}: {(r.get('stderr') or '').strip()[:200]}")
+
+    result["messages"] = messages
+    result["entries"] = entries
+    result["applied"] = applied
+    return result
+
+
+def writes_summary(result: dict) -> str:
+    """A one-line account of a manifest that did not fully apply, for `reason`."""
+    if result["ok"]:
+        return ""
+    if result["errors"]:
+        return f"write manifest rejected ({len(result['errors'])} error(s)): {result['errors'][0]}"
+    failed = [r for r in result["results"] if r.get("status") == "failed"]
+    if failed:
+        return f"write failed at {failed[0].get('kind')}: {(failed[0].get('stderr') or '').strip()[:200]}"
+    return "write manifest did not fully apply"
 
 
 def fetch_board_json(board: str) -> list[dict]:
@@ -504,18 +580,28 @@ def check_pr_reviews(repo: str, pr_num: str | int) -> tuple[int, int]:
         return 0, 0
 
 
-def load_env_file(env_file: Path | str = ".env") -> None:
+def load_env_file(env_file: Path | str = ".env") -> set[str]:
+    """Apply a `.env`, and report which keys it *contains*.
+
+    Containment, not application: a key already set in the environment is not
+    overwritten, but it is still sitting in a file on disk, which is what the write
+    token exposure check cares about.
+    """
     path = Path(env_file)
+    keys: set[str] = set()
     if path.is_file():
         for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 k, v = line.split("=", 1)
+                keys.add(k.strip())
                 os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    return keys
 
 
 def main(argv: list[str] | None = None) -> int:
-    load_env_file(".env")
+    env_file = Path(".env")
+    env_file_keys = load_env_file(env_file)
 
     parser = argparse.ArgumentParser(description="Agent session driver")
     parser.add_argument("--repo", default=os.environ.get("REPO") or os.environ.get("DRIVER_REPO") or "")
@@ -564,6 +650,29 @@ def main(argv: list[str] | None = None) -> int:
 
     skill_dir = abspath(args.skill_dir)
     repo_path = abspath(args.repo_path)
+
+    # The credential split, before anything spends either credential.
+    creds = credentials.resolve()
+    exposure = credentials.exposure_error(env_file_keys, env_file, repo_path)
+    if exposure:
+        die(exposure)
+    cred_warning = credentials.warning(creds)
+    if cred_warning:
+        say(cred_warning)
+    if creds.split:
+        try:
+            res = subprocess.run(
+                ["git", "-C", str(repo_path), "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            remote_warning = credentials.remote_warning(res.stdout)
+        except Exception:
+            remote_warning = ""
+        if remote_warning:
+            say(remote_warning)
+    credentials.apply_driver_env(creds)
 
     state_dir_str = args.state_dir
     if not state_dir_str:
@@ -863,7 +972,8 @@ def main(argv: list[str] | None = None) -> int:
         raw_output = rundir / "stream.jsonl"
         stderr_output = rundir / "stderr.txt"
 
-        prompt = build_prompt(url, phase, skill_dir)
+        writes_file = rundir / "writes.jsonl"
+        prompt = build_prompt(url, phase, skill_dir, writes_file)
         prompt_file = rundir / "prompt.txt"
         prompt_file.write_text(prompt, encoding="utf-8")
 
@@ -902,6 +1012,7 @@ def main(argv: list[str] | None = None) -> int:
             "--timeout", str(args.timeout),
             "--settings", str(hook_settings_file),
             "--tier", tier,
+            "--writes-file", str(writes_file),
         ]
         if args.model:
             runner_args.extend(["--model", args.model])
@@ -925,6 +1036,12 @@ def main(argv: list[str] | None = None) -> int:
         (rundir / "final.txt").write_text(final_text, encoding="utf-8")
 
         say(f"  exit {ret}   cost ${cost}   session {session_id or 'none'}")
+
+        # Perform the agent's GitHub writes, with the driver's credential. This has
+        # to happen before classification: the PR the gate reads is one of them.
+        writes_result = perform_writes(writes_file, repo, repo_path, rundir, args.board)
+        for line in writes_result["messages"]:
+            say(line)
 
         # Classify outcome
         prurl = ""
@@ -974,6 +1091,10 @@ def main(argv: list[str] | None = None) -> int:
                 reason = outcome_res["reason"]
                 (rundir / "gate.yaml").write_text(outcome_res.get("gate", ""), encoding="utf-8")
 
+        write_note = writes_summary(writes_result)
+        if write_note:
+            reason = f"{reason} [{write_note}]"
+
         if outcome in ("incomplete", "parked", "no-gate") and cost >= (args.max_budget_usd * 0.95):
             outcome = "budget-exhausted"
             reason = f"spent ${cost} of ${args.max_budget_usd} (>=95%) and never reached the gate"
@@ -995,6 +1116,11 @@ def main(argv: list[str] | None = None) -> int:
             "reason": reason,
             "pr": prurl,
             "run_dir": str(rundir),
+            "writes": {
+                "recorded": len(writes_result["entries"]),
+                "applied": writes_result["applied"],
+                "ok": writes_result["ok"],
+            },
             "provenance": {},
         }
         with open(runs_log, "a", encoding="utf-8") as f:

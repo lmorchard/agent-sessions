@@ -15,6 +15,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    from . import credentials
+except ImportError:  # invoked as a script rather than imported as a package
+    import credentials  # type: ignore[no-redef]
+
+#: Where the agent records the GitHub writes it wants the driver to perform.
+WRITES_FILE_VAR = "AGENT_SESSION_WRITES"
+
 
 def run_agent(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Run agent backend")
@@ -33,6 +41,11 @@ def run_agent(argv: list[str] | None = None) -> int:
     p.add_argument("--allowed-tools", default="")
     p.add_argument("--disallowed-tools", default="")
     p.add_argument("--settings", default="")
+    p.add_argument(
+        "--writes-file",
+        default="",
+        help="path the agent appends its intended GitHub writes to; exported as AGENT_SESSION_WRITES",
+    )
 
     args = p.parse_args(argv)
 
@@ -105,7 +118,12 @@ def run_agent(argv: list[str] | None = None) -> int:
     raw_output.parent.mkdir(parents=True, exist_ok=True)
     stderr_output.parent.mkdir(parents=True, exist_ok=True)
 
-    env = dict(os.environ)
+    # The agent's credential, not the driver's: `agent_env` installs the read-scoped
+    # token and strips every write-capable one. This is the containment layer --
+    # the prompt and the PreToolUse hook are defence in depth behind it.
+    env = credentials.agent_env(dict(os.environ), credentials.resolve())
+    if args.writes_file:
+        env[WRITES_FILE_VAR] = str(Path(args.writes_file).resolve())
     if args.high_tier_model:
         env["HIGH_TIER_MODEL"] = args.high_tier_model
     if args.low_tier_model:

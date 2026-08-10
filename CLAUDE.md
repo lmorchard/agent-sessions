@@ -66,6 +66,14 @@ For this repo, the gated paths worth calling out by name, because the *reason* i
 
 - **`driver/router.py` and `driver/reconciler.py` — the outcome routing and reactive reconciler**, extracted per issues #182 and #185 to replace the coarse gating of `driver/agent-session-driver.sh`. The modules hold the priority ladder, reactive event handlers, and skip/unpark decision logic, so gating them isolates the routing while freeing the rest of the driver orchestration.
 
+- **`driver/credentials.py` and `driver/writes.py` — the credential split and the write
+  manifest**, added per issue #191. These are not oracles; they are the *containment boundary*.
+  `credentials.py` decides which token the agent's subprocess gets, and `writes.py` decides which
+  GitHub writes the driver will spend its write token on. A run that edits either is editing the
+  code that decides what a run of its kind is allowed to do — which is the trigger-2 standing
+  default (auth/authorization, secrets) landing squarely on a named file. Gated for the same
+  reason `.github/**` is: it defines the capability the checks run under, not the checks.
+
 Plus the standing defaults trigger 2 already names: auth/authorization, secrets, data
 migration/deletion, deploy/infra/CI config, dependency changes.
 
@@ -91,7 +99,7 @@ check` in every PR, and a human at the merge gate. Revisit if a run ever actuall
 
 ### Drivable (the allowlist)
 
-- **`driver/`, except `driver/gate.py`, `driver/router.py`, and `driver/reconciler.py`** — its tests (`driver/test_*.py`), fixtures (`driver/test-*.sh`), and driver orchestration (`agent_session_driver.py`, etc.). Note what this leaves: `driver/gate.py` (oracle), `driver/router.py` (outcome routing), and `driver/reconciler.py` (reconciler) are off-limits, while the driver script and tests are drivable.
+- **`driver/`, except `driver/gate.py`, `driver/router.py`, `driver/reconciler.py`, `driver/credentials.py`, and `driver/writes.py`** — its tests (`driver/test_*.py`), fixtures (`driver/test-*.sh`), and driver orchestration (`agent_session_driver.py`, etc.). Note what this leaves: the oracle, the outcome routing, the reconciler and the containment boundary are off-limits, while the driver script and tests are drivable.
 - **`docs/`** — including `findings.md` and session notes.
 - **`Makefile`**.
 - **`scripts/`** — `docs_check.py` and its tests, per the narrow reading above. Added 2026-07-29; it
@@ -100,14 +108,34 @@ check` in every PR, and a human at the merge gate. Revisit if a run ever actuall
 That partition is the only reason this repo can dogfood itself at all: skill-wording and oracle work
 routes to a human, orchestration and doc work does not.
 
-**What the driver may write to a target repo: issue *metadata*, never issue or PR *content*.**
-Labels and project-board fields are in bounds; issue bodies, comments, PR bodies, reviews and thread
-resolutions are not, and merging never is. Recorded 2026-07-29, when #5 moved the park record from a
-local file to a `driver-parked` label and the driver became a GitHub writer for the first time — the
-tier stayed `auto-ok` on the grounds that a label is not auth, secrets, data migration/deletion,
-deploy/infra/CI config or a dependency. **Widening this line is a decision to put to the human, not
-a drift to discover in a diff**, which is the whole reason it is written down rather than inferred
-from what the driver happens to call today.
+**What the driver may write to a target repo: anything the agent recorded in a validated write
+manifest, and nothing else. Never a merge.** Amended 2026-08-10 by #191, from the original
+metadata-only rule, and the amendment was put to the human rather than discovered in a diff — as
+the rule itself demanded.
+
+The original line read *"issue **metadata**, never issue or PR **content**"*, recorded 2026-07-29
+when #5 turned the park record into a `driver-parked` label and the driver became a GitHub writer
+for the first time. #191 inverted the situation it was written for. The agent now holds a
+read-scoped credential and *cannot* write at all; every comment, label, issue body, branch push and
+PR the loop depends on is performed by the driver, from a manifest the agent recorded. Holding the
+metadata-only line would have meant the loop could no longer explain why it parked.
+
+So the boundary moved from *what kind of thing* to *where it came from*:
+
+- **The driver is a relay, not an author.** Content is still the agent's words — that trust model
+  is unchanged. What changed is the capability: the agent can no longer spend it, and the driver
+  will only spend it on a `kind` named in `writes.KINDS`, aimed at the configured repo and board.
+- **Unknown kinds are rejected, and one bad entry voids the whole manifest.** A validator, not a
+  pipe. `writes.py` is gated above for exactly this reason.
+- **There is no kind that merges**, with or without `--auto`. That is now a property of the
+  vocabulary rather than an instruction anybody has to follow.
+- **Widening `KINDS` is still a decision to put to the human**, on the same terms the original line
+  set: written down rather than inferred from what the driver happens to call today.
+
+One exception to "relay, not author", named so it is not mistaken for drift: `discussion_manager`
+posts the driver's own start/finish notes to a Lab Notebook discussion. That is the driver
+narrating its own run, not writing on the agent's behalf, and it predates #191. It stays outside
+the manifest for the same reason it is not gated — a run log about a run is not a verdict about it.
 
 **The residual risk this partition creates, named at the moment it was created.** Gating
 `agent-session-driver.sh` while leaving `driver/test-driver.sh` drivable means **the routing is

@@ -144,6 +144,25 @@ make run-self     # drive this repo (ISSUE=n to pin one)
 Override the target with `REPO=`, `REPO_PATH=`, `BOARD=`; the per-issue ceiling with `BUDGET=`;
 queue depth with `ISSUES=`.
 
+### Two GitHub credentials
+
+The agent runs with a **read-scoped** token and cannot write to GitHub at all. It records the
+writes it wants — comments, labels, the branch push, the PR — into `writes.jsonl` in the run
+directory, and the driver validates that file and performs them with a **write** token after the
+run ends. Copy `.env.example` to `.env` and read the credentials section there; the short version:
+
+- `AGENT_GH_READ_TOKEN` in `.env` — a fine-grained PAT, read-only on Contents, Issues, Pull
+  requests and Metadata.
+- `DRIVER_GH_WRITE_TOKEN` **exported in the driver's shell, never in `.env`** — or left unset, so
+  the driver uses your host `gh` login. The driver **refuses to start** if it finds the write token
+  in a `.env` inside the repo the agent works in, because the agent can read that file.
+- Configure neither and the loop runs as it did before: the agent inherits your host's
+  write-capable `gh` auth, and the driver says so loudly at startup. That is a supported way to
+  run, not a broken one — it is just not contained.
+
+The manifest vocabulary has no entry that merges a PR or enables auto-merge, so "nothing merges by
+machine" holds even if a run decides to try.
+
 ### What "eligible" means
 
 Open **and** carries the marker **and** its anchored `## Tier:` line says `auto-ok` **and** no
@@ -236,8 +255,15 @@ Under `<state-dir>/runs/<issue>-<timestamp>/`:
 | `final.txt` | the run's closing summary |
 | `gate.yaml` | the gate block as parsed |
 | `prompt.txt` | exactly what the run was asked |
+| `writes.jsonl` | the GitHub writes the agent recorded, one JSON object per line |
+| `writes-result.json` | what the driver made of them — validation errors, per-entry status, output |
 | `denials.txt` | permission denials, if any |
 | `child.pid` | for orphan detection |
+
+`writes-result.json` is the first thing to read when a run "did nothing": a manifest with one
+malformed entry applies **none** of them, so a park comment can go missing while the run itself
+looks fine. The driver prints `WRITE REJECTED` and folds the reason into the `runs.jsonl` row, but
+the per-entry detail is here.
 
 Plus two append-only logs in the state dir, both **history rather than state**:
 

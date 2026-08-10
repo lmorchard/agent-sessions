@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import agent_runner  # noqa: E402
+import credentials  # noqa: E402
 
 
 def test_parse_result_stream_claude(tmp_path: Path):
@@ -121,3 +122,62 @@ def test_run_agent_model_tiers(tmp_path: Path, monkeypatch):
     assert "--model" in captured_cmds[-1]
     assert captured_cmds[-1][captured_cmds[-1].index("--model") + 1] == "claude-3-5-haiku"
 
+
+
+def _run_and_capture_env(tmp_path: Path, monkeypatch, extra_argv=()):
+    """Invoke `run_agent` against a stubbed `subprocess.run` and return the child env."""
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("Hello", encoding="utf-8")
+    captured = {}
+
+    class MockResult:
+        returncode = 0
+
+    def mock_run(cmd, *args, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return MockResult()
+
+    monkeypatch.setattr("subprocess.run", mock_run)
+    agent_runner.run_agent([
+        "--backend", "claude",
+        "--repo-path", str(tmp_path),
+        "--skill-dir", str(tmp_path),
+        "--prompt-file", str(prompt),
+        "--raw-output", str(tmp_path / "stream.jsonl"),
+        "--stderr-output", str(tmp_path / "stderr.txt"),
+        *extra_argv,
+    ])
+    return captured["env"]
+
+
+def test_agent_child_env_carries_the_read_token_only(tmp_path: Path, monkeypatch):
+    """The containment property, at the one place it is actually applied (#191)."""
+    monkeypatch.setenv(credentials.READ_TOKEN_VAR, "read-token")
+    monkeypatch.setenv(credentials.WRITE_TOKEN_VAR, "write-token")
+    monkeypatch.setenv("GH_TOKEN", "write-token")
+
+    env = _run_and_capture_env(tmp_path, monkeypatch)
+
+    assert env["GH_TOKEN"] == "read-token"
+    assert env["GITHUB_TOKEN"] == "read-token"
+    assert "write-token" not in env.values(), f"the agent got a write-capable credential: {env}"
+    assert credentials.WRITE_TOKEN_VAR not in env
+
+
+def test_agent_child_env_is_unchanged_when_no_read_token_is_configured(tmp_path: Path, monkeypatch):
+    """Degraded mode still has to run; the driver warns about it at startup."""
+    monkeypatch.delenv(credentials.READ_TOKEN_VAR, raising=False)
+    monkeypatch.setenv("GH_TOKEN", "host-token")
+
+    env = _run_and_capture_env(tmp_path, monkeypatch)
+
+    assert env["GH_TOKEN"] == "host-token"
+
+
+def test_writes_file_is_exported_to_the_agent(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv(credentials.READ_TOKEN_VAR, raising=False)
+    writes_file = tmp_path / "runs" / "writes.jsonl"
+
+    env = _run_and_capture_env(tmp_path, monkeypatch, ["--writes-file", str(writes_file)])
+
+    assert env[agent_runner.WRITES_FILE_VAR] == str(writes_file.resolve())
