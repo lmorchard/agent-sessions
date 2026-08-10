@@ -220,10 +220,72 @@ def check_counts() -> None:
         print(f"  (no assertion-count claims found to check; suite reports {actual})")
 
 
+# --- check 4: partition path integrity ---------------------------------------
+
+def is_shim(p: Path) -> bool:
+    """True if `p` is a re-export shim (e.g. < 30 lines re-exporting from src/)."""
+    if not p.is_file():
+        return False
+    try:
+        content = p.read_text()
+        if "Shim re-exporting" in content or (len(content.splitlines()) < 30 and "from agent_sessions" in content):
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def check_partition() -> None:
+    """Assert every path named as a risk-gated or drivable partition item exists and is not a re-export shim."""
+    claudemd = ROOT / "CLAUDE.md"
+    if not claudemd.exists():
+        return
+    text = claudemd.read_text()
+    lines = text.split("\n")
+    in_target = False
+    section_lines = []
+    for line in lines:
+        if line.startswith("## Risk-gated paths") or line.startswith("### Drivable"):
+            in_target = True
+            continue
+        elif line.startswith("## ") and in_target:
+            in_target = False
+        if in_target:
+            section_lines.append(line)
+
+    for line in section_lines:
+        stripped = line.strip()
+        if stripped.startswith(("-", "*")):
+            subject_part = re.split(r"\s+[—–-]+\s+", stripped)[0]
+            backticks = re.findall(r"`([^`]+?)`", subject_part)
+            if backticks:
+                bt = backticks[0]
+                bt_clean = bt.split(":")[0].strip()
+                if not bt_clean or " " in bt_clean or bt_clean.startswith("--") or bt_clean.startswith("http"):
+                    continue
+                if bt_clean in ("Makefile", "docs/", ".github/**", "skills/**", "driver/", "scripts/"):
+                    p = ROOT / bt_clean.replace("/**", "")
+                    if not p.exists():
+                        failures.append(f"CLAUDE.md partition path does not exist -> {bt_clean}")
+                    continue
+
+                if "/" in bt_clean or bt_clean.endswith((".py", ".sh", ".md")):
+                    resolved = ROOT / bt_clean
+                    if not resolved.exists() and not list(ROOT.glob(bt_clean)):
+                        failures.append(f"CLAUDE.md partition path does not exist -> {bt_clean}")
+                        continue
+                    if resolved.is_file() and is_shim(resolved):
+                        failures.append(
+                            f"CLAUDE.md risk partition names a re-export shim path ({bt_clean}). "
+                            f"Name the underlying implementation in src/agent_sessions/ instead."
+                        )
+
+
 def main() -> int:
     check_links()
     check_tables()
     check_counts()
+    check_partition()
 
     for s in skips:
         print(f"  SKIP  {s}")

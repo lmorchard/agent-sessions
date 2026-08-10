@@ -34,7 +34,7 @@ by `gh project create`, which applies no template, so it started on the bare `To
 
 ## Risk-gated paths (off-limits to unattended work)
 
-`references/acceptance-criteria.md`'s **trigger 2** is project-configurable — it fires on *"anything
+`skills/agent-session/references/acceptance-criteria.md`'s **trigger 2** is project-configurable — it fires on *"anything
 the project's CLAUDE.md marks off-limits."*
 
 **The default is `needs-review`: anything not named drivable below is gated.** This is an allowlist,
@@ -66,7 +66,7 @@ For this repo, the gated paths worth calling out by name, because the *reason* i
 
 - **`src/agent_sessions/driver/router.py` and `src/agent_sessions/driver/reconciler.py` — the outcome routing and reactive reconciler**, extracted per issues #182 and #185 to replace the coarse gating of `driver/agent-session-driver.sh`. The modules hold the priority ladder, reactive event handlers, and skip/unpark decision logic, so gating them isolates the routing while freeing the rest of the driver orchestration.
 
-- **`driver/credentials.py` and `driver/writes.py` — the credential split and the write
+- **`src/agent_sessions/driver/credentials.py` and `src/agent_sessions/driver/writes.py` — the credential split and the write
   manifest**, added per issue #191. These are not oracles; they are the *containment boundary*.
   `credentials.py` decides which token the agent's subprocess gets, and `writes.py` decides which
   GitHub writes the driver will spend its write token on. A run that edits either is editing the
@@ -91,8 +91,8 @@ they look.
 
 **The residual risk, named rather than gated away.** A run that edits `docs/` *and* `src/agent_sessions/scripts/docs_check.py` in one change
 could weaken the detector that would have caught its own doc rot, and `make check` would still be
-green. The broad reading would close that, but it would also sweep in `driver/test-driver.sh`,
-`driver/test_gate.py`, `driver/test-park-state.sh` and the `Makefile` recipes — every one of which is
+green. The broad reading would close that, but it would also sweep in `driver/test_driver.py`,
+`driver/test_gate.py`, `driver/test_park_state.py` and the `Makefile` recipes — every one of which is
 listed as drivable directly below, and whose drivability is the only reason this repo can dogfood
 itself. The mitigations are the same ones already relied on: tests that import what ships, `make
 check` in every PR, and a human at the merge gate. Revisit if a run ever actually does it.

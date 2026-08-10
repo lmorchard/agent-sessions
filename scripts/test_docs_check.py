@@ -291,3 +291,29 @@ def test_g4_a_dot_git_entry_at_root_changes_nothing_under_an_excluded_name(
     with_git = build_tree(point_root_at(monkeypatch, base / (BRANCH + "-git")))
     (with_git / ".git").write_text("gitdir: /elsewhere/repo/.git/worktrees/wt\n")
     assert scanned(with_git) == baseline
+
+
+# --- partition check tests -------------------------------------------------
+
+def test_partition_check_passes_when_paths_exist_and_are_not_shims(isolate):
+    write(isolate, "CLAUDE.md", "## Risk-gated paths\n- `src/agent_sessions/driver/gate.py`\n### Drivable\n- `Makefile`\n")
+    write(isolate, "src/agent_sessions/driver/gate.py", "# real code\nclass Gate: pass\n")
+    write(isolate, "Makefile", "check:\n\t@echo ok\n")
+    docs_check.check_partition()
+    assert docs_check.failures == []
+
+
+def test_partition_check_fails_when_path_does_not_exist(isolate):
+    write(isolate, "CLAUDE.md", "## Risk-gated paths\n- `src/agent_sessions/driver/nonexistent.py`\n")
+    docs_check.check_partition()
+    assert len(docs_check.failures) == 1
+    assert "does not exist" in docs_check.failures[0]
+
+
+def test_partition_check_fails_when_path_is_a_shim(isolate):
+    write(isolate, "CLAUDE.md", "## Risk-gated paths\n- `driver/gate.py`\n")
+    write(isolate, "driver/gate.py", "# Shim re-exporting agent_sessions.driver.gate\nfrom agent_sessions.driver.gate import *\n")
+    docs_check.check_partition()
+    assert len(docs_check.failures) == 1
+    assert "re-export shim" in docs_check.failures[0]
+
