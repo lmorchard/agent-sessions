@@ -4,10 +4,11 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help check board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly lint typecheck
+.PHONY: help doctor doctor-self check board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly lint typecheck
 
 help:
 	@echo "check            run every check -- the targets listed below, in one go"
+	@echo "doctor           check the driver's GitHub credentials against a live repo"
 	@echo "lint             run ruff linter"
 	@echo "typecheck        run mypy type checker"
 	@echo "board-audit      audit this repo's live GitHub project (read-only)"
@@ -125,6 +126,15 @@ commit-lint:
 
 guard-lint:
 	@gh issue list --json body | python3 scripts/guard_lint.py
+
+# Credential preflight. Not in `check`: it makes live GitHub calls and depends on
+# the operator's own tokens, so it is a thing you run when setting a machine up or
+# when the driver starts failing for reasons that look like nothing.
+doctor:
+	@uv run --quiet python -m agent_sessions.scripts.doctor --repo $(REPO) --repo-path $(REPO_PATH) --board $(BOARD)
+
+doctor-self:
+	@uv run --quiet python -m agent_sessions.scripts.doctor --repo lmorchard/agent-sessions --repo-path $(CURDIR) --board lmorchard/9
 
 dry-run:
 	@bash $(DRIVER) --repo $(REPO) --board $(BOARD) --dry-run

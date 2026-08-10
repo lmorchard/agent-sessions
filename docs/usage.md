@@ -199,6 +199,42 @@ Two optional routes, if a deployment ever wants them:
 Neither hides anything from the agent. They keep the secret out of shell history and out of
 plaintext on disk, which is worth something on a shared or backed-up machine and nothing here.
 
+### Which kind of token, and why it is not obvious
+
+Run **`make doctor`** before debugging anything else. It resolves both tokens, checks each against
+`gh api user`, probes read and write capability separately, and checks the board and the origin
+remote. Every check in it exists because that exact failure wasted time on 2026-08-10.
+
+The token *type* you need depends on who owns the repo and whether it is public. This is the part
+the GitHub UI gives no help with:
+
+| repo | agent's read token | driver's write token |
+|---|---|---|
+| public, owned by you | any fine-grained PAT on the machine user — public read is blanket and needs no grant | **classic** PAT, `public_repo` scope only |
+| private, in an org the machine user is a member of | fine-grained, resource owner = the org, repo selected, Contents/Issues/PRs at Read | same, at Read and write |
+| private, owned by you personally | **not possible** — see below | **not possible** |
+
+**The rule underneath it.** A fine-grained PAT has one *resource owner* — the token holder, or an
+org they are a member of — and reaches only repositories owned by that account. A machine user that
+owns no repos therefore reaches nothing through its grant at all, whatever "All repositories" is set
+to and however it was invited as a collaborator. What it *can* do is read any public repository,
+because that needs no grant. Which is why a machine user's PAT appears to work on a public repo and
+returns a bare `404` on a private one, with no setting in the UI that looks like the problem.
+
+Classic PATs are not resource-owner scoped, which is the one thing they still do better. But their
+scopes are coarse: `repo` is read **and** write, and there is no read-only-private scope — so a
+classic PAT can serve as the write token but never as the read token on a private repo, because
+granting read would grant write and collapse the split.
+
+**Boards need their own scope.** ProjectsV2 is GraphQL-only and follows the same resource-owner
+rule, so a fine-grained PAT cannot see a project owned by somebody else. A classic PAT needs
+`project` (or `read:project` if the driver never moves cards). Without it, selection falls back to
+labels — degraded, not broken, so `make doctor` reports it as a warning.
+
+**And whichever type: no `workflow` scope, and no `Workflows` permission.** With it, anything
+holding the token can rewrite `.github/**` and get arbitrary CI execution, which is a far larger
+prize than the token.
+
 ### What the credential split does and does not contain
 
 **It does contain the GitHub API.** The agent's token is read-only, so `gh issue comment`, `gh pr
