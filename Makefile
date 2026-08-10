@@ -136,8 +136,12 @@ doctor:
 doctor-self:
 	@uv run --quiet python -m agent_sessions.scripts.doctor --repo lmorchard/agent-sessions --repo-path $(CURDIR) --board lmorchard/9
 
+# The targeting flags must match `run` exactly -- a dry run that inspects a
+# different working tree is answering "what would happen?" about somewhere else.
+# scripts/test_dry_run_parity.py derives both sides from `make -n` and compares.
 dry-run:
-	@bash $(DRIVER) --repo $(REPO) --board $(BOARD) --dry-run
+	@bash $(DRIVER) --repo $(REPO) --board $(BOARD) \
+	  --skill-dir $(SKILL) --repo-path $(REPO_PATH) --dry-run
 
 # BUDGET is per issue, not per invocation. $12 is measured too low: real runs have
 # cost $4.41-$11.87, #710 exhausted $12 mid-review-cycle, and #52 hit $23.63.
@@ -195,4 +199,5 @@ run-self:
 	  --max-issues $(ISSUES) --max-budget-usd $(BUDGET) $(if $(ISSUE),--issue $(ISSUE),)
 
 dry-run-self:
-	@bash $(DRIVER) --repo lmorchard/agent-sessions --board lmorchard/9 --dry-run
+	@bash $(DRIVER) --repo lmorchard/agent-sessions --board lmorchard/9 \
+	  --skill-dir $(SKILL) --repo-path $(CURDIR) --allow-nested-skill-dir --dry-run

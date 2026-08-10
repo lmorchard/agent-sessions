@@ -46,12 +46,17 @@ class FakeGh:
     `visible` maps token -> set of repos. `writable` maps token -> set of repos.
     """
 
-    def __init__(self, *, logins=None, visible=None, writable=None, labels=("bug",), origin=None):
-        self.logins = logins if logins is not None else {READ: BOT, WRITE: BOT}
-        self.visible = visible if visible is not None else {READ: {REPO}, WRITE: {REPO}}
-        self.writable = writable if writable is not None else {WRITE: {REPO}}
+    def __init__(self, *, logins=None, visible=None, writable=None, labels=("bug",), origin=None,
+                 write_token=WRITE, repo=REPO, discussions=True, categories=("Lab Notebook",)):
+        # `write_token` lets a test swap in a real-shaped token (`github_pat_…` vs
+        # `ghp_…`) without having to restate every map by hand.
+        self.logins = logins if logins is not None else {READ: BOT, write_token: BOT}
+        self.visible = visible if visible is not None else {READ: {repo}, write_token: {repo}}
+        self.writable = writable if writable is not None else {write_token: {repo}}
         self.labels = list(labels)
         self.origin = origin if origin is not None else f"https://github.com/{REPO}.git"
+        self.discussions = discussions
+        self.categories = list(categories)
         self.calls: list[tuple[str, list[str]]] = []
 
     def __call__(self, argv, **kwargs):
@@ -85,6 +90,11 @@ class FakeGh:
             if repo in self.writable.get(token, set()):
                 return result(1, "", "gh: Validation Failed (HTTP 422) already_exists")
             return result(1, "", "gh: Resource not accessible by personal access token (HTTP 403)")
+
+        if "hasDiscussionsEnabled" in joined:
+            cats = ",".join('{"name":"%s"}' % c for c in self.categories)
+            return result(0, '{"data":{"repository":{"hasDiscussionsEnabled":%s,"discussionCategories":{"nodes":[%s]}}}}'
+                          % ("true" if self.discussions else "false", cats))
 
         if "labels" in joined:
             return result(0, "\n".join(self.labels) + "\n")
@@ -293,3 +303,134 @@ def test_an_invisible_board_warns_rather_than_fails():
     assert check.status == "warn"
     assert "project" in check.remedy
     assert doctor.exit_code(checks) == 0
+
+
+# -- the remedy for a write failure has to know *why* ------------------------
+
+
+def test_token_kinds_are_recognised_by_prefix():
+    assert doctor.token_kind("github_pat_11ABC") == "fine-grained"
+    assert doctor.token_kind("ghp_abc123") == "classic"
+    assert doctor.token_kind("gho_abc123") == "classic"
+    assert doctor.token_kind("ghs_abc123") == "app installation"
+    assert doctor.token_kind("whatever") == "unknown"
+
+
+def test_a_fine_grained_token_that_can_read_but_not_write_gets_the_ownership_answer():
+    """The failure this whole exchange turned on. The repo is *public*, so the
+    visibility check passes and the ownership diagnosis never fires there -- yet the
+    cause is the same: a fine-grained PAT's permissions apply only to repos owned by
+    its resource owner. Sending the operator back to tick Contents/Issues/PRs is
+    advice that cannot work, and it was given twice."""
+    tok = "github_pat_x"
+    checks = run(FakeGh(write_token=tok, writable={}), environ=env(DRIVER_GH_WRITE_TOKEN=tok))
+    remedy = by_name(checks, "write token can write").remedy
+    assert "classic" in remedy.lower()
+    assert "public_repo" in remedy
+    assert "Contents, Issues and Pull requests at Read and write" not in remedy
+
+
+def test_a_classic_token_that_cannot_write_gets_the_scope_answer():
+    """Same symptom, different cause: a classic PAT is not owner-scoped, so if it
+    cannot write it is missing a scope."""
+    tok = "ghp_x"
+    checks = run(FakeGh(write_token=tok, writable={}), environ=env(DRIVER_GH_WRITE_TOKEN=tok))
+    remedy = by_name(checks, "write token can write").remedy
+    assert "scope" in remedy.lower()
+    assert "public_repo" in remedy
+
+
+def test_a_fine_grained_token_on_its_own_repo_is_told_to_fix_permissions():
+    """Where the resource owner *is* right, ticking permissions is the correct advice."""
+    own = f"{BOT}/thing"
+    tok = "github_pat_x"
+    gh = FakeGh(write_token=tok, visible={READ: {own}, tok: {own}}, writable={})
+    checks = run(gh, environ=env(DRIVER_GH_WRITE_TOKEN=tok), repo=own)
+    remedy = by_name(checks, "write token can write").remedy
+    assert "Read and write" in remedy
+
+
+def test_the_write_remedy_mentions_discussions():
+    """`discussion_manager` posts the lab-notebook trail, and the driver swallows its
+    failures, so a missing Discussions permission is invisible at runtime."""
+    tok = "github_pat_x"
+    checks = run(FakeGh(write_token=tok, writable={}), environ=env(DRIVER_GH_WRITE_TOKEN=tok))
+    remedy = by_name(checks, "write token can write").remedy
+    assert "iscussion" in remedy
+
+
+# -- the lab-notebook discussion ---------------------------------------------
+
+
+def test_the_notebook_category_name_matches_discussion_manager():
+    """Two copies of a string that must agree. Pinned rather than trusted."""
+    import inspect
+
+    from agent_sessions.driver import discussion_manager
+
+    default = inspect.signature(discussion_manager.post_start).parameters
+    used = inspect.signature(discussion_manager.get_or_create_daily_discussion).parameters
+    assert used["category_name"].default == doctor.NOTEBOOK_CATEGORY
+    assert default is not None
+
+
+def test_a_present_notebook_category_passes():
+    checks = run(FakeGh(), repo=REPO)
+    assert by_name(checks, "discussions notebook").status == "pass"
+
+
+def test_a_missing_category_names_the_mutation_that_cannot_create_it():
+    """`ensure_category` calls `createDiscussionCategory`, which is not in GitHub's
+    GraphQL schema -- so it has never worked and fails silently. An operator hitting
+    a missing category should be told to create it by hand, not left waiting."""
+    checks = run(FakeGh(categories=("General",)), repo=REPO)
+    check = by_name(checks, "discussions notebook")
+    assert check.status == "warn"
+    assert "createDiscussionCategory" in check.remedy
+    assert "by hand" in check.remedy
+
+
+def test_discussions_disabled_warns_that_the_trail_is_lost_silently():
+    checks = run(FakeGh(discussions=False), repo=REPO)
+    check = by_name(checks, "discussions notebook")
+    assert check.status == "warn"
+    assert "silence" in check.remedy or "silent" in check.remedy
+
+
+def test_the_notebook_check_does_not_fail_the_preflight():
+    """The driver wraps the notes in try/except, so the loop runs without them."""
+    assert doctor.exit_code(run(FakeGh(discussions=False), repo=REPO)) == 0
+
+
+# -- why a board is invisible: three causes, one symptom ---------------------
+
+
+def board_remedy(error, token="ghp_x", login=BOT, board="lmorchard/9"):
+    return doctor._board_remedy(board, login, token, error)
+
+
+def test_a_scope_error_is_diagnosed_as_a_scope_error():
+    remedy = board_remedy("your token has not been granted the required scopes")
+    assert "read:project" in remedy
+
+
+def test_a_not_found_on_a_classic_token_is_diagnosed_as_per_project_access():
+    """The case that caught this out: project 6 was readable and project 9 was not,
+    with the same classic token. The scope was never the problem -- project 6 is
+    public and project 9 is private, and ProjectsV2 keeps its own collaborator list
+    that repository access does not feed into."""
+    remedy = board_remedy("GraphQL: Could not resolve to a ProjectV2 with the number 9. NOT_FOUND")
+    assert "Manage access" in remedy
+    assert "separate from repository" in remedy
+    assert "read:project" not in remedy, "blamed the scope again"
+
+
+def test_a_not_found_on_a_fine_grained_token_is_diagnosed_as_ownership():
+    remedy = board_remedy("NOT_FOUND", token="github_pat_x")
+    assert "fine-grained" in remedy
+    assert "classic PAT" in remedy
+
+
+def test_a_fine_grained_token_on_its_owners_project_is_not_told_about_ownership():
+    remedy = board_remedy("NOT_FOUND", token="github_pat_x", board=f"{BOT}/3")
+    assert "Manage access" in remedy
