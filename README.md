@@ -109,12 +109,15 @@ make check       # the driver's own tests
 `eligible-for-auto-merge`, which is a *finding it reports*, not an action it takes. A human
 still clicks merge. Every PR this system has produced was merged by hand.
 
-**The agent holds a read-only GitHub credential.** It records the writes it wants — comments,
-labels, the branch push, the PR — and the driver validates that record and performs them with a
-separate write token. There is no entry in that vocabulary that merges, so "nothing merges by
+**The system runs under its own GitHub account, not yours.** Two tokens on a machine user: the
+agent gets a read-only one and cannot write to GitHub at all; it records the writes it wants —
+comments, labels, the branch push, the PR — and the driver validates that record and performs them
+with the write token. There is no entry in that vocabulary that merges, so "nothing merges by
 machine" is a property of what the agent can express rather than an instruction it is following.
-Copy [`.env.example`](.env.example) to `.env` and read the credentials section; run without a read
-token and the loop still works, but it says loudly at startup that the agent is uncontained.
+
+There is no fallback to your `gh` login. Both tokens are checked against a live `gh api user`
+before anything is spent, and the driver refuses to start if either belongs to somebody else. See
+[`.env.example`](.env.example).
 
 See [docs/usage.md](docs/usage.md) for the operator's guide — what the outcomes mean, what
 files a run leaves behind, and how to recover an interrupted one.

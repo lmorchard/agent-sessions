@@ -109,9 +109,9 @@ That partition is the only reason this repo can dogfood itself at all: skill-wor
 routes to a human, orchestration and doc work does not.
 
 **What the driver may write to a target repo: anything the agent recorded in a validated write
-manifest, and nothing else. Never a merge.** Amended 2026-08-10 by #191, from the original
-metadata-only rule, and the amendment was put to the human rather than discovered in a diff — as
-the rule itself demanded.
+manifest, and nothing else. Never a merge. Always under its own GitHub account.** Amended
+2026-08-10 by #191, from the original metadata-only rule, and the amendment was put to the human
+rather than discovered in a diff — as the rule itself demanded.
 
 The original line read *"issue **metadata**, never issue or PR **content**"*, recorded 2026-07-29
 when #5 turned the park record into a `driver-parked` label and the driver became a GitHub writer
@@ -131,6 +131,19 @@ So the boundary moved from *what kind of thing* to *where it came from*:
   vocabulary rather than an instruction anybody has to follow.
 - **Widening `KINDS` is still a decision to put to the human**, on the same terms the original line
   set: written down rather than inferred from what the driver happens to call today.
+
+**And under whose name.** The driver holds two tokens on a machine user, and there is no fallback
+to the host `gh` login: all three of `DRIVER_GH_LOGIN`, `AGENT_GH_READ_TOKEN` and
+`DRIVER_GH_WRITE_TOKEN` are required, and both tokens are checked against a live `gh api user`
+before anything is spent. The reason is the same one that motivates the allowlist above — *the
+failure mode of forgetting must be inconvenient, not silent.* A fallback is reached by omission,
+and its result is a commit or comment attributed to a person who did not make it. **Re-introducing
+a fallback is a decision to put to the human**, on the same terms as widening `KINDS`.
+
+That account's login is also load-bearing for #183: a PAT-backed machine user carries no `[bot]`
+suffix, so `has_new_human_comment` cannot tell it from a person by inspection. It is told, via
+`credentials.bot_logins`. **A future identity change — a GitHub App, a rename — must go through
+that function, not around it**, or the driver starts unparking the issues it just parked.
 
 One exception to "relay, not author", named so it is not mistaken for drift: `discussion_manager`
 posts the driver's own start/finish notes to a Lab Notebook discussion. That is the driver

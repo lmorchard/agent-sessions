@@ -14,6 +14,8 @@ import credentials  # noqa: E402
 
 READ = "ghp_read_only_token"
 WRITE = "ghp_write_capable_token"
+BOT = "lmorchard-agent"
+HUMAN = "lmorchard"
 
 
 def split_env(**extra):
@@ -40,14 +42,13 @@ def test_resolve_treats_identical_tokens_as_not_split():
     assert creds.split is False, "one credential wearing two names is one credential"
 
 
-def test_a_read_token_with_no_write_token_is_split():
-    """The recommended config: read token in .env, write side left to the host keyring.
-
-    There is no write token to leak, which is the strongest arrangement, so this
-    must not be reported as degraded.
-    """
+def test_a_read_token_with_no_write_token_is_not_split():
+    """This used to count as the *best* arrangement, on the reasoning that a write
+    token absent from the process cannot leak. That reasoning assumed the host
+    keyring was an acceptable write identity. Under a dedicated account it is not:
+    the absent token means the driver would write as whoever ran it."""
     creds = credentials.resolve({credentials.READ_TOKEN_VAR: READ})
-    assert creds.split is True
+    assert creds.split is False
 
 
 # -- the agent's environment ------------------------------------------------
@@ -78,12 +79,15 @@ def test_agent_env_is_a_copy():
     assert base[credentials.WRITE_TOKEN_VAR] == WRITE, "agent_env mutated the caller's environment"
 
 
-def test_degraded_agent_env_is_left_exactly_as_today():
-    """With no read token there is nothing to install, and scrubbing GH_TOKEN would
-    break the inherited host auth the driver still runs on. Warn, do not maim."""
+def test_agent_env_with_no_read_token_hands_over_no_credential_at_all():
+    """Fail closed. Passing the host's auth through was the pre-bot-account
+    behaviour; under a dedicated agent account there is no credential the agent is
+    entitled to except its own, so absence means absence, not inheritance."""
     base = {"GH_TOKEN": WRITE, "PATH": "/usr/bin"}
     env = credentials.agent_env(base, credentials.resolve(base))
-    assert env == base
+    assert "GH_TOKEN" not in env
+    assert WRITE not in env.values()
+    assert env["PATH"] == "/usr/bin"
 
 
 # -- the driver's own environment -------------------------------------------
@@ -95,10 +99,12 @@ def test_driver_env_installs_the_write_token():
     assert env["GITHUB_TOKEN"] == WRITE
 
 
-def test_driver_env_leaves_host_auth_alone_when_no_write_token_is_configured():
-    base = {credentials.READ_TOKEN_VAR: READ, "PATH": "/usr/bin"}
+def test_driver_env_invents_nothing_when_no_write_token_is_configured():
+    """A configuration `config_error` refuses outright; asserted here so the function
+    stays total, and so it cannot quietly promote the read token to the write slot."""
+    base = {credentials.READ_TOKEN_VAR: READ, "GH_TOKEN": READ, "PATH": "/usr/bin"}
     env = credentials.driver_env(base, credentials.resolve(base))
-    assert "GH_TOKEN" not in env, "invented a credential where the host keyring was the answer"
+    assert "GH_TOKEN" not in env
 
 
 def test_driver_env_never_carries_the_read_token_as_the_active_credential():
@@ -106,29 +112,119 @@ def test_driver_env_never_carries_the_read_token_as_the_active_credential():
     assert env["GH_TOKEN"] == WRITE
 
 
-# -- the startup warning ----------------------------------------------------
+# -- the startup refusal ----------------------------------------------------
+#
+# There is no degraded mode. The driver runs under its own GitHub account or it does
+# not run: a fallback to the host login is how a write ends up attributed to a human
+# who did not make it, and a fallback reached by omission is the likeliest kind.
 
 
-def test_no_warning_when_the_credentials_are_split():
-    assert credentials.warning(credentials.resolve(split_env())) == ""
+def test_a_full_configuration_is_accepted():
+    assert credentials.config_error(credentials.resolve(split_env(**{credentials.LOGIN_VAR: BOT}))) == ""
 
 
-def test_warning_names_the_variable_to_set_when_no_read_token_exists():
-    msg = credentials.warning(credentials.resolve({credentials.WRITE_TOKEN_VAR: WRITE}))
-    assert msg, "the driver handed the agent write access and said nothing"
-    assert credentials.READ_TOKEN_VAR in msg
+def test_a_missing_read_token_is_refused():
+    msg = credentials.config_error(credentials.resolve({credentials.WRITE_TOKEN_VAR: WRITE, credentials.LOGIN_VAR: BOT}))
+    assert msg and credentials.READ_TOKEN_VAR in msg
 
 
-def test_warning_when_one_credential_wears_two_names():
-    msg = credentials.warning(credentials.resolve({credentials.READ_TOKEN_VAR: READ, credentials.WRITE_TOKEN_VAR: READ}))
+def test_a_missing_write_token_is_refused_rather_than_inherited():
+    msg = credentials.config_error(credentials.resolve({credentials.READ_TOKEN_VAR: READ, credentials.LOGIN_VAR: BOT}))
+    assert msg and credentials.WRITE_TOKEN_VAR in msg
+    assert "keyring" in msg or "host" in msg
+
+
+def test_a_missing_expected_login_is_refused():
+    """Without it nothing can be verified, and unverified is what we are leaving."""
+    msg = credentials.config_error(credentials.resolve(split_env()))
+    assert msg and credentials.LOGIN_VAR in msg
+
+
+def test_one_credential_wearing_two_names_is_refused():
+    creds = credentials.resolve({
+        credentials.READ_TOKEN_VAR: READ,
+        credentials.WRITE_TOKEN_VAR: READ,
+        credentials.LOGIN_VAR: BOT,
+    })
+    msg = credentials.config_error(creds)
+    assert msg and "identical" in msg.lower()
+
+
+def test_no_refusal_leaks_a_token_value():
+    for env in (
+        {credentials.WRITE_TOKEN_VAR: WRITE},
+        {credentials.READ_TOKEN_VAR: READ, credentials.WRITE_TOKEN_VAR: READ, credentials.LOGIN_VAR: BOT},
+        {credentials.READ_TOKEN_VAR: READ},
+    ):
+        msg = credentials.config_error(credentials.resolve(env))
+        assert READ not in msg and WRITE not in msg, f"the refusal printed a credential: {msg}"
+
+
+# -- the identity assertion --------------------------------------------------
+
+
+def full_creds():
+    return credentials.resolve(split_env(**{credentials.LOGIN_VAR: BOT}))
+
+
+def test_matching_identities_are_accepted():
+    assert credentials.identity_error(full_creds(), read_login=BOT, write_login=BOT) == ""
+
+
+def test_a_write_token_belonging_to_a_human_is_refused():
+    msg = credentials.identity_error(full_creds(), read_login=BOT, write_login=HUMAN)
     assert msg
-    assert "identical" in msg.lower()
+    assert HUMAN in msg and BOT in msg
 
 
-def test_no_warning_leaks_a_token_value():
-    for env in ({credentials.WRITE_TOKEN_VAR: WRITE}, {credentials.READ_TOKEN_VAR: READ, credentials.WRITE_TOKEN_VAR: READ}):
-        msg = credentials.warning(credentials.resolve(env))
-        assert READ not in msg and WRITE not in msg, f"the warning printed a credential: {msg}"
+def test_a_read_token_belonging_to_a_human_is_refused_too():
+    """Reads are attributed too, and a personal PAT pasted into the read slot is the
+    likeliest way the wrong account ends up in the loop."""
+    msg = credentials.identity_error(full_creds(), read_login=HUMAN, write_login=BOT)
+    assert msg and HUMAN in msg
+
+
+def test_an_unresolvable_identity_is_refused_not_assumed():
+    assert credentials.identity_error(full_creds(), read_login=BOT, write_login="")
+    assert credentials.identity_error(full_creds(), read_login="", write_login=BOT)
+
+
+def test_identity_comparison_ignores_case():
+    assert credentials.identity_error(full_creds(), read_login=BOT.upper(), write_login=BOT) == ""
+
+
+# -- the bot-login set (issue #183) ------------------------------------------
+
+
+def test_the_drivers_own_login_counts_as_a_bot():
+    """A PAT-backed account has no `[bot]` suffix, so nothing about the login itself
+    says machine. Without this the driver's own park comment reads as a human reply
+    and unparks the issue it just parked."""
+    logins = credentials.bot_logins(full_creds())
+    assert BOT in logins
+
+
+def test_configured_extra_logins_are_included():
+    creds = credentials.resolve(split_env(**{
+        credentials.LOGIN_VAR: BOT,
+        credentials.BOT_LOGINS_VAR: "dependabot[bot], renovate[bot]",
+    }))
+    logins = credentials.bot_logins(creds)
+    assert "dependabot[bot]" in logins and "renovate[bot]" in logins
+
+
+def test_github_actions_is_always_a_bot():
+    logins = credentials.bot_logins(full_creds())
+    assert "github-actions" in logins and "github-actions[bot]" in logins
+
+
+def test_bot_logins_are_lowercased_for_comparison():
+    creds = credentials.resolve(split_env(**{credentials.LOGIN_VAR: "LMorchard-Agent"}))
+    assert "lmorchard-agent" in credentials.bot_logins(creds)
+
+
+def test_a_human_login_is_not_in_the_set():
+    assert HUMAN not in credentials.bot_logins(full_creds())
 
 
 # -- the .env exposure check ------------------------------------------------
@@ -139,6 +235,7 @@ def test_write_token_in_a_dotenv_the_agent_can_read_is_an_error(tmp_path: Path):
     repo_path.mkdir()
     msg = credentials.exposure_error({credentials.WRITE_TOKEN_VAR}, repo_path / ".env", repo_path)
     assert msg, "the write token sat in a file the agent has Read access to and nobody objected"
+    assert not msg.startswith("error: "), "die() adds the prefix; two reads as a stutter"
     assert credentials.WRITE_TOKEN_VAR in msg
 
 

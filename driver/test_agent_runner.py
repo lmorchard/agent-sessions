@@ -164,14 +164,17 @@ def test_agent_child_env_carries_the_read_token_only(tmp_path: Path, monkeypatch
     assert credentials.WRITE_TOKEN_VAR not in env
 
 
-def test_agent_child_env_is_unchanged_when_no_read_token_is_configured(tmp_path: Path, monkeypatch):
-    """Degraded mode still has to run; the driver warns about it at startup."""
+def test_agent_child_env_hands_over_nothing_when_no_read_token_is_configured(tmp_path: Path, monkeypatch):
+    """Fail closed. Passing the host credential through was the pre-bot-account
+    behaviour; the driver now refuses to start in this configuration at all, and the
+    runner invoked on its own applies the same policy rather than inheriting."""
     monkeypatch.delenv(credentials.READ_TOKEN_VAR, raising=False)
     monkeypatch.setenv("GH_TOKEN", "host-token")
 
     env = _run_and_capture_env(tmp_path, monkeypatch)
 
-    assert env["GH_TOKEN"] == "host-token"
+    assert "GH_TOKEN" not in env
+    assert "host-token" not in env.values()
 
 
 def test_writes_file_is_exported_to_the_agent(tmp_path: Path, monkeypatch):

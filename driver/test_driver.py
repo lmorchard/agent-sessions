@@ -40,6 +40,11 @@ def test_build_prompt(tmp_path: Path, monkeypatch):
         returncode = 0
 
     def mock_run(cmd, *args, **kwargs):
+        if [str(c) for c in cmd][:3] == ["gh", "api", "user"]:
+            class Login:
+                stdout = "agent-session-bot\n"
+                returncode = 0
+            return Login()
         return MockResult()
 
     monkeypatch.setattr("subprocess.run", mock_run)
@@ -75,12 +80,21 @@ def test_driver_env_defaults(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("BACKEND", "opencode")
     monkeypatch.setenv("HIGH_TIER_MODEL", "model-high")
     monkeypatch.setenv("LOW_TIER_MODEL", "model-low")
+    # The driver refuses to start without its own account (#191).
+    monkeypatch.setenv("AGENT_GH_READ_TOKEN", "read-token")
+    monkeypatch.setenv("DRIVER_GH_WRITE_TOKEN", "write-token")
+    monkeypatch.setenv("DRIVER_GH_LOGIN", "agent-session-bot")
 
     class MockResult:
         stdout = json.dumps([])
         returncode = 0
 
     def mock_run(cmd, *args, **kwargs):
+        if [str(c) for c in cmd][:3] == ["gh", "api", "user"]:
+            class Login:
+                stdout = "agent-session-bot\n"
+                returncode = 0
+            return Login()
         return MockResult()
 
     monkeypatch.setattr("subprocess.run", mock_run)
@@ -172,12 +186,21 @@ def test_driver_tier_passed(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("REPO_PATH", str(repo_dir))
     monkeypatch.setenv("SKILL_DIR", str(skill_dir))
     monkeypatch.setenv("BACKEND", "opencode")
+    # The driver refuses to start without its own account (#191).
+    monkeypatch.setenv("AGENT_GH_READ_TOKEN", "read-token")
+    monkeypatch.setenv("DRIVER_GH_WRITE_TOKEN", "write-token")
+    monkeypatch.setenv("DRIVER_GH_LOGIN", "agent-session-bot")
 
     class MockResult:
         stdout = json.dumps([])
         returncode = 0
 
     def mock_run(cmd, *args, **kwargs):
+        if [str(c) for c in cmd][:3] == ["gh", "api", "user"]:
+            class Login:
+                stdout = "agent-session-bot\n"
+                returncode = 0
+            return Login()
         return MockResult()
 
     monkeypatch.setattr("subprocess.run", mock_run)

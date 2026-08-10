@@ -1,3 +1,4 @@
+identity: acting as agent-session-bot (agent reads, driver writes)
 WARNING: origin is git@github.com:owner/repo.git, an SSH remote. The credential split does not cover `git push`: SSH authenticates with this host's key, not with the read token, so the agent can push branches even though it cannot reach the GitHub API. Use an HTTPS remote to contain pushes too.
 == select ==
 board owner/9: read 11 items (advisory only; does not gate)

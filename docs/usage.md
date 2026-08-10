@@ -144,24 +144,46 @@ make run-self     # drive this repo (ISSUE=n to pin one)
 Override the target with `REPO=`, `REPO_PATH=`, `BOARD=`; the per-issue ceiling with `BUDGET=`;
 queue depth with `ISSUES=`.
 
-### Two GitHub credentials
+### The driver's own GitHub account
 
-The agent runs with a **read-scoped** token and cannot write to GitHub at all. It records the
-writes it wants — comments, labels, the branch push, the PR — into `writes.jsonl` in the run
-directory, and the driver validates that file and performs them with a **write** token after the
-run ends. Copy `.env.example` to `.env` and read the credentials section there; the short version:
+**The driver does not use your credentials, for reads or for writes.** It runs under a machine
+user you create for it, with two fine-grained PATs on that one account:
 
-- `AGENT_GH_READ_TOKEN` in `.env` — a fine-grained PAT, read-only on Contents, Issues, Pull
-  requests and Metadata.
-- `DRIVER_GH_WRITE_TOKEN` **exported in the driver's shell, never in `.env`** — or left unset, so
-  the driver uses your host `gh` login. The driver **refuses to start** if it finds *any*
-  write-capable variable (`GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`,
-  `GITHUB_ENTERPRISE_TOKEN`, `DRIVER_GH_WRITE_TOKEN`) in a `.env` inside the repo the agent works
-  in, because the agent can read that file. An existing `.env` from before #191 usually holds
-  `GITHUB_TOKEN`; move it to your shell.
-- Configure neither and the loop runs as it did before: the agent inherits your host's
-  write-capable `gh` auth, and the driver says so loudly at startup. That is a supported way to
-  run, not a broken one — it is just not contained.
+| Variable | Where it lives | What it is |
+|---|---|---|
+| `DRIVER_GH_LOGIN` | `.env` | the account both tokens must belong to |
+| `AGENT_GH_READ_TOKEN` | `.env` | read-only PAT — Metadata, Contents, Issues, Pull requests, Actions, Checks |
+| `DRIVER_GH_WRITE_TOKEN` | **your shell, never `.env`** | write PAT — Contents, Issues, Pull requests |
+
+The agent gets the read token and cannot write to GitHub at all. It records the writes it wants —
+comments, labels, the branch push, the PR — into `writes.jsonl` in the run directory, and the driver
+validates that file and performs them with the write token after the run ends.
+
+**All three are required and there is no fallback.** The driver refuses to start if any is missing,
+if the two tokens are identical, or if either token turns out to belong to somebody other than
+`DRIVER_GH_LOGIN` — checked against a live `gh api user`, once per token, before anything is spent.
+A successful start prints the account it resolved:
+
+```
+identity: acting as your-agent-account (agent reads, driver writes)
+```
+
+Two failure modes that check catches, both of which are silent otherwise:
+
+- **A missing `DRIVER_GH_WRITE_TOKEN`** — an unexported variable, or a cron with a clean
+  environment. The old behaviour was to fall back to your `gh` keyring, which meant the driver's
+  commits and comments arrived under your name.
+- **The wrong token in a slot** — a personal PAT pasted into the read variable. Invisible without
+  asking GitHub whose token it is.
+
+The driver also **refuses to start if it finds any write-capable variable** (`GH_TOKEN`,
+`GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, `DRIVER_GH_WRITE_TOKEN`) in a
+`.env` inside the repo the agent works in, because the agent can read that file. A `.env` from
+before #191 usually holds `GITHUB_TOKEN`; move it to your shell.
+
+**`git push` is only covered on HTTPS remotes.** `GH_TOKEN` reaches git through the `gh` credential
+helper, which fires for HTTPS only; on an SSH origin the host key authenticates and the agent can
+push regardless. The driver says so at startup when it sees one.
 
 The manifest vocabulary has no entry that merges a PR or enables auto-merge, so "nothing merges by
 machine" holds even if a run decides to try.

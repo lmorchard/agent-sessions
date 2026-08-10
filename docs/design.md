@@ -541,14 +541,28 @@ Closed, but the *reasoning* is still load-bearing.
   verifier that runs checks: `Bash(python3:*)` and `Bash(pytest:*)` are write primitives, and a
   cooperative run *looks* contained because the subagent declines rather than being denied.
 
-  **What #191 settled: containment by credential, for the GitHub half.** A tool allowlist cannot
+  **What #191 settled: containment by credential, for the GitHub half, under a dedicated
+  account.** A tool allowlist cannot
   contain an agent that has a shell, and a compliant agent is indistinguishable from a contained
   one — but a read-scoped token is refused by the API whatever the agent runs and however
   cooperative it is being. `driver/credentials.py` builds the agent's child environment with the
   read token and strips every write-capable one; `driver/writes.py` performs the run's comments,
   labels, branch push and PR from a schema-validated manifest, under the driver's write token.
-  There is no manifest kind that merges. When only one credential is configured the loop runs as it
-  did before and says so loudly at startup, rather than handing the agent write access in silence.
+  There is no manifest kind that merges.
+
+  **And there is no degraded mode.** An earlier revision of this change let the driver fall back to
+  the host `gh` keyring, with a loud warning. That was wrong for the reason the whole allowlist
+  section above is written: a fallback is reached by *omission* — an unexported variable, a cron
+  with a clean environment — and warnings scroll past. The driver now requires `DRIVER_GH_LOGIN`
+  plus both tokens, verifies each token against a live `gh api user`, and refuses to start if
+  either belongs to somebody else. It runs under its own account or it does not run.
+
+  That also supplies #183's missing input. The driver's identity was previously whatever the host
+  happened to be authenticated as, which is why `has_new_human_comment` could only guess by
+  suffix; a PAT-backed machine user has no `[bot]` suffix, so the guess failed and the driver
+  unparked the issues it had just parked. `credentials.bot_logins` now carries the configured
+  login, which settles #183 criteria 1 and 2. Criteria 3 (a comment watermark relative to the park
+  time) and 4 (attempt counters surviving an unpark) are untouched and the issue stays open.
 
   **What #191 did not settle**, and is still the spike's open question: the *local* half. The agent
   still has a shell and still writes files in the working tree, so `Bash(python3:*)` is still a

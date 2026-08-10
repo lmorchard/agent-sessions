@@ -23,6 +23,19 @@ READ_TOKEN_VAR = "AGENT_GH_READ_TOKEN"
 #: file inside the agent's repo path -- see `exposure_error`.
 WRITE_TOKEN_VAR = "DRIVER_GH_WRITE_TOKEN"
 
+#: The GitHub login both tokens must resolve to. Required, and checked against a live
+#: `gh api user`: without it the driver can only assume whose account it is spending,
+#: and "assumed" is exactly what this module exists to stop.
+LOGIN_VAR = "DRIVER_GH_LOGIN"
+
+#: Comma-separated extra logins to treat as machines when deciding whether a comment
+#: is a human reply. Configuration rather than a constant, because the writing
+#: identity varies by deployment -- see issue #183.
+BOT_LOGINS_VAR = "DRIVER_BOT_LOGINS"
+
+#: Always machines, whatever else is configured.
+ALWAYS_BOT_LOGINS = frozenset({"github-actions", "github-actions[bot]", "agent-session"})
+
 #: Every variable `gh` and the git credential helper will accept as a credential.
 #: All of them are removed from the child environment before the read token goes in,
 #: so an inherited write token cannot survive by wearing a different name.
@@ -42,37 +55,40 @@ AGENT_TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN")
 class Credentials:
     read_token: str = ""
     write_token: str = ""
+    login: str = ""
+    extra_bot_logins: tuple[str, ...] = ()
 
     @property
     def split(self) -> bool:
-        """True when the agent gets a credential the driver's writes do not use.
-
-        A read token with no write token counts: the driver falls back to the host
-        keyring, so there is no write token in the process to leak at all.
-        """
-        return bool(self.read_token) and self.read_token != self.write_token
+        """True when the agent's credential is not the one the driver writes with."""
+        return bool(self.read_token) and bool(self.write_token) and self.read_token != self.write_token
 
 
 def resolve(env: dict[str, str] | None = None) -> Credentials:
     src = os.environ if env is None else env
+    extras = [p.strip() for p in (src.get(BOT_LOGINS_VAR) or "").split(",")]
     return Credentials(
         read_token=(src.get(READ_TOKEN_VAR) or "").strip(),
         write_token=(src.get(WRITE_TOKEN_VAR) or "").strip(),
+        login=(src.get(LOGIN_VAR) or "").strip(),
+        extra_bot_logins=tuple(p for p in extras if p),
     )
 
 
 def agent_env(env: dict[str, str], creds: Credentials) -> dict[str, str]:
     """The environment the agent subprocess runs in.
 
-    With no read token configured there is nothing to install, and scrubbing
-    `GH_TOKEN` would break the inherited host auth the loop still depends on. That
-    case is the degraded one `warning` shouts about; it is not silently maimed here.
+    Fails closed. With no read token configured the child gets no credential at all
+    rather than inheriting the host's: under a dedicated agent account there is no
+    credential the agent is entitled to except its own. The driver refuses to start
+    in that configuration anyway; this is the same policy one layer down, for the
+    runner invoked on its own.
     """
     child = dict(env)
-    if not creds.read_token:
-        return child
     for var in TOKEN_VARS:
         child.pop(var, None)
+    if not creds.read_token:
+        return child
     for var in AGENT_TOKEN_VARS:
         child[var] = creds.read_token
     return child
@@ -81,8 +97,8 @@ def agent_env(env: dict[str, str], creds: Credentials) -> dict[str, str]:
 def driver_env(env: dict[str, str], creds: Credentials) -> dict[str, str]:
     """The environment the driver's own `gh` and `git` calls run in.
 
-    No write token configured means the host keyring is the credential, so nothing
-    is invented here.
+    No write token configured is a configuration the driver refuses (`config_error`),
+    so this only strips the read token back out rather than inventing anything.
     """
     parent = dict(env)
     if not creds.write_token:
@@ -109,24 +125,77 @@ def apply_driver_env(creds: Credentials, env: dict[str, str] | None = None) -> N
             target.pop(var, None)
 
 
-def warning(creds: Credentials) -> str:
-    """The loud startup line for a run that is not actually contained.
+def config_error(creds: Credentials) -> str:
+    """Non-empty when the driver must refuse to start.
 
-    Never includes a token value: this string goes to stdout and into run logs.
+    There is no degraded mode and no fallback to the host `gh` login. The driver
+    runs under its own GitHub account or it does not run -- because a fallback is
+    reached by omission (an unexported variable, a cron with a clean environment),
+    and the result is a write attributed to a human who did not make it.
+
+    Never includes a token value: this string goes to stderr and into run logs.
     """
-    if creds.split:
-        return ""
-    if creds.read_token and creds.read_token == creds.write_token:
+    missing = []
+    if not creds.read_token:
+        missing.append(f"{READ_TOKEN_VAR} (the agent's read-scoped token)")
+    if not creds.write_token:
+        missing.append(f"{WRITE_TOKEN_VAR} (the driver's write token; there is no fallback to the host gh keyring)")
+    if not creds.login:
+        missing.append(f"{LOGIN_VAR} (the account both tokens must belong to)")
+    if missing:
+        return "the driver needs its own GitHub account. Missing: " + "; ".join(missing)
+
+    if creds.read_token == creds.write_token:
         return (
-            f"WARNING: {READ_TOKEN_VAR} and {WRITE_TOKEN_VAR} are identical, so the agent "
-            "holds the driver's write-capable credential. Containment is prompt wording only."
+            f"{READ_TOKEN_VAR} and {WRITE_TOKEN_VAR} are identical, so the agent holds the "
+            "driver's write-capable credential. Issue two separate tokens on the same account -- "
+            "one read-only, one write."
         )
+    return ""
+
+
+def identity_error(creds: Credentials, read_login: str, write_login: str) -> str:
+    """Non-empty when a token does not belong to the account it was supposed to.
+
+    `read_login` and `write_login` come from a live `gh api user` under each token.
+    An empty one means the lookup failed, which is refused rather than assumed: an
+    unverifiable identity is the thing this check exists to rule out.
+    """
+    expected = creds.login.strip().lower()
+    problems = []
+    for name, var, actual in (
+        ("read", READ_TOKEN_VAR, read_login),
+        ("write", WRITE_TOKEN_VAR, write_login),
+    ):
+        resolved = (actual or "").strip().lower()
+        if not resolved:
+            problems.append(f"could not resolve the account behind {var}")
+        elif resolved != expected:
+            problems.append(f"{var} belongs to {actual.strip()!r}, not {creds.login!r}")
+    if not problems:
+        return ""
     return (
-        f"WARNING: no {READ_TOKEN_VAR} is configured, so the agent inherits this host's "
-        "write-capable GitHub authentication. It can comment, label, push and merge "
-        "regardless of what the prompt or the PreToolUse hook say. Set "
-        f"{READ_TOKEN_VAR} to a read-scoped token to contain it."
+        f"the driver's credentials do not belong to {creds.login!r}. "
+        + "; ".join(problems)
+        + f". Set {LOGIN_VAR} to the account you meant, or issue the tokens on that account. "
+        "The driver will not write to GitHub as somebody it cannot identify."
     )
+
+
+def bot_logins(creds: Credentials) -> frozenset[str]:
+    """Logins whose comments are the machine talking to itself (issue #183).
+
+    The driver's own login has to be in here. A PAT-backed account carries no
+    `[bot]` suffix, so nothing about the name says machine -- and without it the
+    driver's park explanation reads as a human reply and unparks the issue it just
+    parked, resetting the attempt counters on the way.
+    """
+    logins = {name.lower() for name in ALWAYS_BOT_LOGINS}
+    if creds.login:
+        logins.add(creds.login.strip().lower())
+        logins.add(f"{creds.login.strip().lower()}[bot]")
+    logins.update(name.strip().lower() for name in creds.extra_bot_logins if name.strip())
+    return frozenset(logins)
 
 
 def remote_warning(remote_url: str) -> str:
@@ -165,7 +234,7 @@ def exposure_error(loaded_keys: set[str], env_file: Path | str, repo_path: Path 
     except (ValueError, OSError):
         return ""
     return (
-        f"error: {', '.join(exposed)} loaded from {resolved_env}, which is inside the "
+        f"{', '.join(exposed)} loaded from {resolved_env}, which is inside the "
         f"agent's repo path ({resolved_repo}). The agent can read that file, so the "
         "write credential is not contained. Export these in the driver's environment "
         f"instead, and keep only {READ_TOKEN_VAR} in .env."

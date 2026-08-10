@@ -154,10 +154,18 @@ def park_label_remove(issue_number: str | int, repo: str) -> None:
         say(f"  WARNING: could not remove the {PARK_LABEL} label from #{issue_number} -- it stays parked")
 
 
-def has_new_human_comment(issue_number: str | int, repo: str) -> tuple[bool, str]:
+def has_new_human_comment(
+    issue_number: str | int, repo: str, bot_logins: frozenset[str] | set[str] | None = None
+) -> tuple[bool, str]:
     """Check if the latest comment on a parked issue is from a human user.
     Returns (has_human_comment, author_login).
+
+    `bot_logins` must include the driver's own login (`credentials.bot_logins`
+    builds it). A PAT-backed account carries no `[bot]` suffix, so without it the
+    driver's own park explanation reads as a human reply and unparks the issue it
+    just parked -- issue #183.
     """
+    known_bots = {name.lower() for name in (bot_logins or credentials.ALWAYS_BOT_LOGINS)}
     try:
         cmd = ["gh", "issue", "view", str(issue_number), "--repo", repo, "--json", "comments"]
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -168,7 +176,7 @@ def has_new_human_comment(issue_number: str | int, repo: str) -> tuple[bool, str
         latest = comments[-1]
         author = latest.get("author", {})
         login = author.get("login", "")
-        if not login or login.endswith("[bot]") or login in ("github-actions", "agent-session"):
+        if not login or login.endswith("[bot]") or login.lower() in known_bots:
             return False, ""
         return True, login
     except Exception:
@@ -395,9 +403,7 @@ def acquire_lock(issue_number: str | int, phase: str, repo_path: Path) -> bool:
             return False
 
 
-def build_prompt(
-    url_or_number: str | int, phase: str, skill_dir: Path, writes_file: Path | str = "", contained: bool = True
-) -> str:
+def build_prompt(url_or_number: str | int, phase: str, skill_dir: Path, writes_file: Path | str = "") -> str:
     if str(url_or_number).startswith("http"):
         url = str(url_or_number)
     else:
@@ -412,22 +418,6 @@ def build_prompt(
 
     manifest = str(writes_file) if writes_file else f"the path in ${agent_runner.WRITES_FILE_VAR}"
 
-    # Degraded runs still route writes through the manifest -- one path, always
-    # exercised -- but the prompt may not claim a containment that is not there.
-    # An agent told its token is read-scoped when it is not will discover the
-    # discrepancy the first time a write succeeds, and stop believing the rest.
-    credential_note = (
-        "Your GitHub credential is read-scoped. Reads work normally -- gh issue view, gh pr\n"
-        "view, gh pr checks, gh api graphql queries -- but every write will be refused, and\n"
-        "no amount of retrying will change that."
-        if contained
-        else (
-            "This host is misconfigured: no contained credential was set up, so your GitHub\n"
-            "token is write-capable. Do not use it to write. The driver performs this run's\n"
-            "writes, and a write you make directly is one it cannot see, validate or record."
-        )
-    )
-
     return f"""You are running unattended, invoked by the agent-session board-driver.
 
 Read {skill_dir}/SKILL.md, then read {skill_dir}/{phase_file} and follow it
@@ -438,7 +428,9 @@ exactly for this issue:
 The skill is not installed as a registered skill. Its files live at {skill_dir} and
 you must read them from there by absolute path.
 
-{credential_note} Record the writes you want instead, by
+Your GitHub credential is read-scoped. Reads work normally -- gh issue view, gh pr
+view, gh pr checks, gh api graphql queries -- but every write will be refused, and
+no amount of retrying will change that. Record the writes you want instead, by
 appending one JSON object per line to the write manifest at:
 
   {manifest}
@@ -456,6 +448,21 @@ why, and what options exist, plus a label entry applying the parking label, and
 state the verdict. Do not substitute your own judgment for the decision just because
 nobody is here to answer: a parked issue is a normal, expected outcome for this
 driver, and an unattended guess is not."""
+
+
+def whoami(env: dict[str, str]) -> str:
+    """The GitHub login a token authenticates as, or "" if it cannot be resolved."""
+    try:
+        res = subprocess.run(
+            ["gh", "api", "user", "--jq", ".login"],
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+        )
+        return res.stdout.strip()
+    except Exception:
+        return ""
 
 
 def perform_writes(writes_file: Path, repo: str, repo_path: Path, rundir: Path, board: str = "") -> dict:
@@ -667,27 +674,36 @@ def main(argv: list[str] | None = None) -> int:
     skill_dir = abspath(args.skill_dir)
     repo_path = abspath(args.repo_path)
 
-    # The credential split, before anything spends either credential.
+    # The credential split, before anything spends either credential. There is no
+    # degraded mode: the driver runs under its own GitHub account or it does not run.
     creds = credentials.resolve()
     exposure = credentials.exposure_error(env_file_keys, env_file, repo_path)
     if exposure:
         die(exposure)
-    cred_warning = credentials.warning(creds)
-    if cred_warning:
-        say(cred_warning)
-    if creds.split:
-        try:
-            res = subprocess.run(
-                ["git", "-C", str(repo_path), "remote", "get-url", "origin"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            remote_warning = credentials.remote_warning(res.stdout)
-        except Exception:
-            remote_warning = ""
-        if remote_warning:
-            say(remote_warning)
+    config_problem = credentials.config_error(creds)
+    if config_problem:
+        die(config_problem)
+
+    read_login = whoami(credentials.agent_env(dict(os.environ), creds))
+    write_login = whoami(credentials.driver_env(dict(os.environ), creds))
+    identity_problem = credentials.identity_error(creds, read_login=read_login, write_login=write_login)
+    if identity_problem:
+        die(identity_problem)
+    say(f"identity: acting as {creds.login} (agent reads, driver writes)")
+
+    driver_bots = credentials.bot_logins(creds)
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_path), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        remote_warning = credentials.remote_warning(res.stdout)
+    except Exception:
+        remote_warning = ""
+    if remote_warning:
+        say(remote_warning)
     credentials.apply_driver_env(creds)
 
     state_dir_str = args.state_dir
@@ -896,7 +912,7 @@ def main(argv: list[str] | None = None) -> int:
     for iss in all_issues_json:
         n = str(iss.get("number"))
         if n in parked_nums and n != args.retry:
-            has_human, login = has_new_human_comment(n, repo)
+            has_human, login = has_new_human_comment(n, repo, driver_bots)
             human_comments_map[n] = (has_human, login)
             if not has_human:
                 park_reasons[n] = park_reason(n, state_dir)
@@ -989,7 +1005,7 @@ def main(argv: list[str] | None = None) -> int:
         stderr_output = rundir / "stderr.txt"
 
         writes_file = rundir / "writes.jsonl"
-        prompt = build_prompt(url, phase, skill_dir, writes_file, contained=creds.split)
+        prompt = build_prompt(url, phase, skill_dir, writes_file)
         prompt_file = rundir / "prompt.txt"
         prompt_file.write_text(prompt, encoding="utf-8")
 
