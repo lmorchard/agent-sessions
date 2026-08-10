@@ -109,3 +109,8 @@ model is good at.
   the spec's Open questions were supposed to carry defaults for exactly this.
 - A phase can't be a vertical slice because it genuinely depends on infrastructure that
   doesn't exist → surface before writing more.
+
+When stopping or surfacing due to any of the above:
+1. **Post a top-level comment on the GitHub issue** using `gh issue comment <issue_number> --body "<text>"` explaining plainly what needs a decision, why, and what choices exist.
+2. **Apply the parking label** using `python3 scripts/label_manager.py park --issue <issue_number>`.
+3. Stop and report the parked outcome.

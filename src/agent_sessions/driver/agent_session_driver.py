@@ -402,9 +402,11 @@ Stop at the merge gate and report the verdict. Do not merge the PR and do not en
 auto-merge.
 
 There is no human watching this run. If the phase directs you to stop and surface
-something, stop and state plainly what needs a decision and why. Do not substitute
-your own judgment for the decision just because nobody is here to answer: a parked
-issue is a normal, expected outcome for this driver, and an unattended guess is not."""
+something, post a top-level comment on the GitHub issue (using gh issue comment)
+explaining plainly what needs a decision, why, and what options exist. Apply the parking
+label using python3 scripts/label_manager.py park --issue <number>, and state the verdict.
+Do not substitute your own judgment for the decision just because nobody is here to answer:
+a parked issue is a normal, expected outcome for this driver, and an unattended guess is not."""
 
 
 def fetch_board_json(board: str) -> list[dict]:
