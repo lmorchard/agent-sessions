@@ -395,7 +395,9 @@ def acquire_lock(issue_number: str | int, phase: str, repo_path: Path) -> bool:
             return False
 
 
-def build_prompt(url_or_number: str | int, phase: str, skill_dir: Path, writes_file: Path | str = "") -> str:
+def build_prompt(
+    url_or_number: str | int, phase: str, skill_dir: Path, writes_file: Path | str = "", contained: bool = True
+) -> str:
     if str(url_or_number).startswith("http"):
         url = str(url_or_number)
     else:
@@ -410,6 +412,22 @@ def build_prompt(url_or_number: str | int, phase: str, skill_dir: Path, writes_f
 
     manifest = str(writes_file) if writes_file else f"the path in ${agent_runner.WRITES_FILE_VAR}"
 
+    # Degraded runs still route writes through the manifest -- one path, always
+    # exercised -- but the prompt may not claim a containment that is not there.
+    # An agent told its token is read-scoped when it is not will discover the
+    # discrepancy the first time a write succeeds, and stop believing the rest.
+    credential_note = (
+        "Your GitHub credential is read-scoped. Reads work normally -- gh issue view, gh pr\n"
+        "view, gh pr checks, gh api graphql queries -- but every write will be refused, and\n"
+        "no amount of retrying will change that."
+        if contained
+        else (
+            "This host is misconfigured: no contained credential was set up, so your GitHub\n"
+            "token is write-capable. Do not use it to write. The driver performs this run's\n"
+            "writes, and a write you make directly is one it cannot see, validate or record."
+        )
+    )
+
     return f"""You are running unattended, invoked by the agent-session board-driver.
 
 Read {skill_dir}/SKILL.md, then read {skill_dir}/{phase_file} and follow it
@@ -420,9 +438,7 @@ exactly for this issue:
 The skill is not installed as a registered skill. Its files live at {skill_dir} and
 you must read them from there by absolute path.
 
-Your GitHub credential is read-scoped. Reads work normally -- gh issue view, gh pr
-view, gh pr checks, gh api graphql queries -- but every write will be refused, and
-no amount of retrying will change that. Record the writes you want instead, by
+{credential_note} Record the writes you want instead, by
 appending one JSON object per line to the write manifest at:
 
   {manifest}
@@ -973,7 +989,7 @@ def main(argv: list[str] | None = None) -> int:
         stderr_output = rundir / "stderr.txt"
 
         writes_file = rundir / "writes.jsonl"
-        prompt = build_prompt(url, phase, skill_dir, writes_file)
+        prompt = build_prompt(url, phase, skill_dir, writes_file, contained=creds.split)
         prompt_file = rundir / "prompt.txt"
         prompt_file.write_text(prompt, encoding="utf-8")
 

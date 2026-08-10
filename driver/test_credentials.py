@@ -142,6 +142,30 @@ def test_write_token_in_a_dotenv_the_agent_can_read_is_an_error(tmp_path: Path):
     assert credentials.WRITE_TOKEN_VAR in msg
 
 
+def test_any_write_capable_variable_in_a_readable_dotenv_is_an_error(tmp_path: Path):
+    """The check is about *credentials*, not about one variable name. A `.env`
+    carrying `GITHUB_TOKEN` exposes exactly as much as one carrying the driver's own
+    variable -- and `GITHUB_TOKEN` is what a pre-#191 `.env` actually holds."""
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    for var in credentials.TOKEN_VARS:
+        msg = credentials.exposure_error({var}, repo_path / ".env", repo_path)
+        assert msg, f"{var} in a readable .env was not flagged"
+        assert var in msg
+
+
+def test_exposure_error_names_every_offending_variable(tmp_path: Path):
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    msg = credentials.exposure_error(
+        {"GITHUB_TOKEN", credentials.WRITE_TOKEN_VAR, credentials.READ_TOKEN_VAR, "REPO"},
+        repo_path / ".env",
+        repo_path,
+    )
+    assert "GITHUB_TOKEN" in msg and credentials.WRITE_TOKEN_VAR in msg
+    assert "REPO," not in msg and credentials.READ_TOKEN_VAR not in msg.split("keep only")[0]
+
+
 def test_read_token_in_a_dotenv_the_agent_can_read_is_fine(tmp_path: Path):
     repo_path = tmp_path / "repo"
     repo_path.mkdir()

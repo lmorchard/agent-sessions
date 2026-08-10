@@ -154,8 +154,11 @@ run ends. Copy `.env.example` to `.env` and read the credentials section there; 
 - `AGENT_GH_READ_TOKEN` in `.env` — a fine-grained PAT, read-only on Contents, Issues, Pull
   requests and Metadata.
 - `DRIVER_GH_WRITE_TOKEN` **exported in the driver's shell, never in `.env`** — or left unset, so
-  the driver uses your host `gh` login. The driver **refuses to start** if it finds the write token
-  in a `.env` inside the repo the agent works in, because the agent can read that file.
+  the driver uses your host `gh` login. The driver **refuses to start** if it finds *any*
+  write-capable variable (`GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`,
+  `GITHUB_ENTERPRISE_TOKEN`, `DRIVER_GH_WRITE_TOKEN`) in a `.env` inside the repo the agent works
+  in, because the agent can read that file. An existing `.env` from before #191 usually holds
+  `GITHUB_TOKEN`; move it to your shell.
 - Configure neither and the loop runs as it did before: the agent inherits your host's
   write-capable `gh` auth, and the driver says so loudly at startup. That is a supported way to
   run, not a broken one — it is just not contained.

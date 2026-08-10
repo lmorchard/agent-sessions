@@ -155,7 +155,8 @@ def exposure_error(loaded_keys: set[str], env_file: Path | str, repo_path: Path 
     tree the agent holds `Read` and `Bash` over -- it just opens the file. Fail
     closed rather than ship theatre.
     """
-    if WRITE_TOKEN_VAR not in loaded_keys:
+    exposed = sorted(loaded_keys & set(TOKEN_VARS))
+    if not exposed:
         return ""
     try:
         resolved_env = Path(env_file).resolve()
@@ -164,8 +165,8 @@ def exposure_error(loaded_keys: set[str], env_file: Path | str, repo_path: Path 
     except (ValueError, OSError):
         return ""
     return (
-        f"error: {WRITE_TOKEN_VAR} was loaded from {resolved_env}, which is inside the "
+        f"error: {', '.join(exposed)} loaded from {resolved_env}, which is inside the "
         f"agent's repo path ({resolved_repo}). The agent can read that file, so the "
-        "write credential is not contained. Export it in the driver's environment "
+        "write credential is not contained. Export these in the driver's environment "
         f"instead, and keep only {READ_TOKEN_VAR} in .env."
     )

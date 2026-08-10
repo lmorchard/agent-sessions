@@ -1200,3 +1200,19 @@ def test_an_ssh_remote_is_called_out_at_startup(loop):
 
     assert "SSH remote" in out
     assert "git push" in out
+
+
+def test_a_degraded_run_is_not_told_its_token_is_read_scoped(loop):
+    """The prompt may not claim a containment that is not there. An agent told its
+    credential is read-only will find out otherwise the first time a write succeeds,
+    and has no reason to believe the rest of the prompt after that."""
+    contained = agent_session_driver.build_prompt("issue #1", "execute", Path("/skill"), "/w.jsonl", contained=True)
+    degraded = agent_session_driver.build_prompt("issue #1", "execute", Path("/skill"), "/w.jsonl", contained=False)
+
+    assert "read-scoped" in contained
+    assert "read-scoped" not in degraded
+    assert "write-capable" in degraded
+    # Both route writes through the manifest, so there is only ever one path to test.
+    for prompt in (contained, degraded):
+        assert "/w.jsonl" in prompt
+        assert "write manifest" in prompt
