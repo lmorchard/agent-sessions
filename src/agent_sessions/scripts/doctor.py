@@ -27,6 +27,7 @@ import argparse
 import os
 import subprocess
 import sys
+import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -65,7 +66,12 @@ class Check:
     name: str
     status: str
     detail: str = ""
+    #: Why. Prose, and secondary -- it is read once and then not again.
     remedy: str = ""
+    #: What to do, as one imperative naming the exact variable and values. Identical
+    #: strings from different checks collapse into one line in the summary, because
+    #: two symptoms of one cause are still one thing to fix.
+    action: str = ""
 
 
 @dataclass
@@ -76,6 +82,7 @@ class _Probe:
     token: str
     login: str = ""
     error: str = ""
+    scopes: frozenset = frozenset()
     checks: list = field(default_factory=list)
 
 
@@ -145,7 +152,28 @@ def _write_remedy(repo: str, login: str, token: str) -> str:
     )
 
 
-def _scopes_check(runner, token: str, board: str) -> Check:
+def scope_action(scopes: set[str], board: str) -> str:
+    """The re-issue instruction: the exact variable, kind, and full scope list.
+
+    Additive over what the token already has -- an instruction that silently drops
+    `write:discussion` breaks the lab notebook and the operator would not know why --
+    and never suggests a dangerous scope back.
+    """
+    desired = set(scopes)
+    if not desired & set(WRITE_SCOPES):
+        desired.add("public_repo")
+    if board:
+        if not desired & set(BOARD_SCOPES):
+            desired.add("project")
+        desired.add(ORG_SCOPE)
+    desired -= set(DANGEROUS_SCOPES)
+    return (
+        f"re-issue {credentials.WRITE_TOKEN_VAR} as a classic PAT with scopes: "
+        + ", ".join(sorted(desired))
+    )
+
+
+def _scopes_check(runner, token: str, board: str) -> tuple[Check, frozenset]:
     """Read a classic token's scopes from `X-OAuth-Scopes` rather than probing.
 
     The header is definitive and free. Only fine-grained tokens have no equivalent,
@@ -158,36 +186,39 @@ def _scopes_check(runner, token: str, board: str) -> Check:
             header = line.split(":", 1)[1]
             break
     if not header.strip():
-        return Check("write token scopes", "skip", "no X-OAuth-Scopes header on the response")
+        return Check("write token scopes", "skip", "no X-OAuth-Scopes header on the response"), frozenset()
 
     scopes = {p.strip() for p in header.split(",") if p.strip()}
-    problems, remedies = [], []
-
+    missing = []
     if not scopes & set(WRITE_SCOPES):
-        problems.append("no write scope")
-        remedies.append(f"add `public_repo` (public repos) or `repo` (private): has {sorted(scopes)}")
-    if board:
-        if not scopes & set(BOARD_SCOPES):
-            problems.append("no project scope")
-            remedies.append("add `read:project`, or `project` if the driver moves cards")
-        if ORG_SCOPE not in scopes:
-            problems.append(f"no {ORG_SCOPE}")
-            remedies.append(
-                f"add `{ORG_SCOPE}` -- `gh project` resolves `--owner` by asking for the organization "
-                "and user id in one query, so it fails with `unknown owner type` without it, even for "
-                "a user-owned project"
-            )
+        missing.append("a write scope")
+    if board and not scopes & set(BOARD_SCOPES):
+        missing.append("a project scope")
+    if board and ORG_SCOPE not in scopes:
+        missing.append(ORG_SCOPE)
     dangerous = sorted(scopes & set(DANGEROUS_SCOPES))
-    if dangerous:
-        problems.append(f"has {', '.join(dangerous)}")
-        remedies.append(
-            f"drop `{dangerous[0]}` -- it allows rewriting .github/** and thus arbitrary CI execution, "
-            "which is a larger prize than the token itself"
-        )
 
-    if not problems:
-        return Check("write token scopes", "pass", ", ".join(sorted(scopes)))
-    return Check("write token scopes", "warn", f"{', '.join(sorted(scopes))} -- {'; '.join(problems)}", ". ".join(remedies))
+    if not missing and not dangerous:
+        return Check("write token scopes", "pass", ", ".join(sorted(scopes))), frozenset(scopes)
+
+    detail = ", ".join(sorted(scopes)) + " -- missing " + " and ".join(missing) if missing else ", ".join(sorted(scopes))
+    why = []
+    if ORG_SCOPE in missing:
+        why.append(
+            f"`{ORG_SCOPE}` is the non-obvious one: `gh project` resolves `--owner` by asking for the "
+            "organization and user id in one query, so it fails with `unknown owner type` without it, "
+            "even for a user-owned project."
+        )
+    if dangerous:
+        detail += f" -- has {', '.join(dangerous)}"
+        why.append(
+            f"`{dangerous[0]}` allows rewriting .github/** and thus arbitrary CI execution, a larger "
+            "prize than the token itself."
+        )
+    return (
+        Check("write token scopes", "warn", detail, " ".join(why), scope_action(scopes, board)),
+        frozenset(scopes),
+    )
 
 
 def _board_remedy(board: str, login: str, token: str, error: str) -> str:
@@ -384,7 +415,8 @@ def check_all(environ: dict, runner, *, repo: str, repo_path: str, board: str = 
     writer = next((p for p in visible if p.label == "write"), None)
 
     if writer and token_kind(writer.token) == "classic":
-        checks.append(_scopes_check(runner, writer.token, board))
+        scope_check, writer.scopes = _scopes_check(runner, writer.token, board)
+        checks.append(scope_check)
     elif writer:
         checks.append(
             Check(
@@ -400,12 +432,20 @@ def check_all(environ: dict, runner, *, repo: str, repo_path: str, board: str = 
         if getattr(res, "returncode", 1) == 0:
             checks.append(Check("board readable", "pass", board))
         else:
+            # Same root cause as the scopes check when it is a scope problem, so it
+            # emits the same action string and the two collapse into one next step.
+            action = (
+                scope_action(set(writer.scopes), board)
+                if token_kind(writer.token) == "classic" and "unknown owner type" in text.lower()
+                else ""
+            )
             checks.append(
                 Check(
                     "board readable",
                     "warn",
                     f"{board}: {text}",
                     _board_remedy(board, writer.login, writer.token, text),
+                    action,
                 )
             )
 
@@ -460,32 +500,55 @@ def exit_code(checks: list[Check]) -> int:
     return 1 if any(c.status == "fail" for c in checks) else 0
 
 
+def _wrap(text: str, prefix: str, width: int = 96) -> list[str]:
+    """Continuation lines indent to the prefix's width rather than repeating it."""
+    return textwrap.wrap(text, width=width, initial_indent=prefix, subsequent_indent=" " * len(prefix)) or []
+
+
 def render(checks: list[Check]) -> str:
+    """Scannable list, then one block of things to do.
+
+    The check list stays one line per check. Explanations live in `Next steps`, once
+    each -- printing them inline made a two-warning report longer than the thing it
+    was reporting on, and buried the single action under a paragraph of mechanism.
+    """
     width = max((len(c.name) for c in checks), default=0)
     lines = []
     for check in checks:
         lines.append(f"  [{SEVERITY.get(check.status, '????')}]  {check.name.ljust(width)}  {check.detail}")
-        if check.remedy and check.status in ("fail", "warn"):
-            for para in check.remedy.split("\n"):
-                lines.append(f"           -> {para}")
+        # A warning with no action has nowhere else to put its advice.
+        if check.status in ("fail", "warn") and not check.action and check.remedy:
+            lines += _wrap(check.remedy, "           -> ")
+
     failed = sum(1 for c in checks if c.status == "fail")
     warned = sum(1 for c in checks if c.status == "warn")
     skipped = sum(1 for c in checks if c.status == "skip")
+
     lines.append("")
     if failed:
         lines.append(f"doctor: {failed} check(s) failed. The driver will not run correctly.")
     elif warned or skipped:
-        # "all checks passed" printed above two warnings once, which is the same
-        # shape as the worst bug this tool exists to catch: a report that reads as a
-        # pass while the thing it describes does not work.
         parts = []
         if warned:
             parts.append(f"{warned} warning(s)")
         if skipped:
             parts.append(f"{skipped} check(s) could not be run (skip is not a pass)")
-        lines.append(f"doctor: no failures, but {' and '.join(parts)} -- read them.")
+        lines.append(f"doctor: no failures, but {' and '.join(parts)}.")
     else:
         lines.append("doctor: all checks passed.")
+
+    # Deduplicated, first-seen order: two symptoms of one cause are one thing to do.
+    actions: dict[str, str] = {}
+    for check in checks:
+        if check.action and check.action not in actions:
+            actions[check.action] = check.remedy
+    if actions:
+        lines.append("")
+        lines.append("Next steps:")
+        for i, (action, why) in enumerate(actions.items(), start=1):
+            lines += _wrap(action, f"  {i}. ")
+            if why:
+                lines += _wrap(why, "     why: ")
     return "\n".join(lines)
 
 
