@@ -97,5 +97,7 @@ an action it takes.
 - A frozen check appears to be wrong.
 - Self-review finds a bug whose fix would change the spec's intent.
 
-In every case: stop and surface. Asking is cheap; a run built on a wrong foundation is expensive
-and, worse, arrives wearing green checks.
+In every case, stop and surface:
+1. **Post a top-level comment on the GitHub issue** using `gh issue comment <issue_number> --body "<text>"` explaining plainly what needs a decision, why, and what choices exist.
+2. **Apply the parking label** using `python3 scripts/label_manager.py park --issue <issue_number>`.
+3. State the verdict plainly in your final output and exit. Asking is cheap; a run built on a wrong foundation is expensive and, worse, arrives wearing green checks.

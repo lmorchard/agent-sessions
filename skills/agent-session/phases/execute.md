@@ -129,3 +129,8 @@ Small plan/codebase mismatches: adapt, continue, note the adaptation. Fundamenta
 wrong API, missing dependency, structurally wrong approach — stop and re-open `plan`, or
 `intake` if the spec itself is wrong. Don't paper over a bad foundation with on-the-fly
 rewrites; the frozen checks will fail honestly and you'll be tempted to blame them.
+
+When stopping or surfacing due to a fundamental problem or mismatch:
+1. **Post a top-level comment on the GitHub issue** using `gh issue comment <issue_number> --body "<text>"` explaining plainly what structural mismatch or decision was encountered, why, and what choices exist.
+2. **Apply the parking label** using `python3 scripts/label_manager.py park --issue <issue_number>`.
+3. Stop and report the parked outcome.
