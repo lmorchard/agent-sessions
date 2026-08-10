@@ -25,7 +25,13 @@ from agent_sessions.driver import agent_runner, discussion_manager, gate, gh_que
 PARK_LABEL = "agent-session:needs-human"
 INTERACTIVE_LABEL = "agent-session:needs-human-interactive"
 MERGE_READY_LABEL = "agent-session:merge-ready"
+SPEC_LABEL = "agent-session:spec"
 MARKER = "<!-- agent-session:spec -->"
+
+
+def is_specced(iss: dict) -> bool:
+    labels = [l.get("name") for l in iss.get("labels", []) if isinstance(l, dict)]
+    return SPEC_LABEL in labels or MARKER in (iss.get("body") or "")
 
 CURRENT_LOCK_ISSUE: str | None = None
 
@@ -732,13 +738,13 @@ def main(argv: list[str] | None = None) -> int:
     candidates_json = [
         iss
         for iss in filtered_issues
-        if MARKER in iss.get("body", "")
+        if is_specced(iss)
         and not any(
-            isinstance(l, dict) and l.get("name") == "agent-session:merge-ready"
+            isinstance(l, dict) and l.get("name") == MERGE_READY_LABEL
             for l in iss.get("labels", [])
         )
     ]
-    markerless_json = [iss for iss in filtered_issues if MARKER not in iss.get("body", "")]
+    markerless_json = [iss for iss in filtered_issues if not is_specced(iss)]
     all_issues_json = candidates_json + markerless_json
     parked = parked_numbers(all_issues_json)
 

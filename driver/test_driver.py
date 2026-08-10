@@ -110,3 +110,29 @@ def test_has_new_human_comment(monkeypatch):
     monkeypatch.setattr("subprocess.run", mock_run_bot)
     has_human, login = agent_session_driver.has_new_human_comment(42, "owner/repo")
     assert has_human is False
+
+
+def test_is_specced():
+    # Issue with label agent-session:spec but no body marker
+    iss_label = {
+        "number": 1,
+        "labels": [{"name": "agent-session:spec"}],
+        "body": "No marker here",
+    }
+    assert agent_session_driver.is_specced(iss_label) is True
+
+    # Issue with body marker but no label
+    iss_marker = {
+        "number": 2,
+        "labels": [],
+        "body": "<!-- agent-session:spec -->\nSome spec content",
+    }
+    assert agent_session_driver.is_specced(iss_marker) is True
+
+    # Issue with neither
+    iss_neither = {
+        "number": 3,
+        "labels": [{"name": "bug"}],
+        "body": "Plain issue description",
+    }
+    assert agent_session_driver.is_specced(iss_neither) is False
