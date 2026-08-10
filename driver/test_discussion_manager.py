@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from agent_sessions.driver.discussion_manager import (
@@ -9,6 +10,10 @@ from agent_sessions.driver.discussion_manager import (
 )
 
 MODULE_PATH = "agent_sessions.driver.discussion_manager"
+
+
+def _today_title() -> str:
+    return f"Lab Notebook: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
 
 
 def test_ensure_category_success():
@@ -36,7 +41,7 @@ def test_ensure_category_already_exists():
 
 
 def test_get_or_create_daily_discussion_finds_existing():
-    sample_json = json.dumps([{"title": "Lab Notebook: 2026-08-09", "url": "https://github.com/owner/repo/discussions/10"}])
+    sample_json = json.dumps([{"title": _today_title(), "url": "https://github.com/owner/repo/discussions/10"}])
 
     def mock_run_gh(args):
         if "discussion" in args and "list" in args:
@@ -67,7 +72,7 @@ def test_post_start():
     def mock_run_gh(args):
         calls.append(args)
         if "list" in args:
-            return 0, json.dumps([{"title": "Lab Notebook: 2026-08-09", "url": "https://github.com/owner/repo/discussions/10"}]), ""
+            return 0, json.dumps([{"title": _today_title(), "url": "https://github.com/owner/repo/discussions/10"}]), ""
         if "comment" in args:
             return 0, "commented", ""
         return 1, "", "error"
@@ -91,7 +96,7 @@ def test_post_finish(tmp_path):
     def mock_run_gh(args):
         calls.append(args)
         if "list" in args:
-            return 0, json.dumps([{"title": "Lab Notebook: 2026-08-09", "url": "https://github.com/owner/repo/discussions/10"}]), ""
+            return 0, json.dumps([{"title": _today_title(), "url": "https://github.com/owner/repo/discussions/10"}]), ""
         if "comment" in args:
             return 0, "commented", ""
         return 1, "", "error"
