@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from agent_sessions.driver import agent_runner, discussion_manager, gate, gh_query
+from agent_sessions.driver import agent_runner, discussion_manager, gate, gh_query, router
 
 PARK_LABEL = "agent-session:needs-human"
 INTERACTIVE_LABEL = "agent-session:needs-human-interactive"
@@ -213,6 +213,7 @@ def apply_park_state(
     repo: str,
     state_dir: Path,
     parked_log: Path,
+    quiet: bool = False,
 ) -> None:
     iss_num = str(issue_number)
     if outcome in ("parked", "failed", "no-gate"):
@@ -221,7 +222,8 @@ def apply_park_state(
             f.write(json.dumps(row) + "\n")
         park_label_add(iss_num, repo)
         clear_attempt_labels(iss_num, repo)
-        say(f"  parked -- excluded from future selection unless --retry {iss_num}")
+        if not quiet:
+            say(f"  parked -- excluded from future selection unless --retry {iss_num}")
         notify_human(iss_num, f"{outcome}: {reason}", state_dir)
     elif outcome == "gate-human":
         row = {"issue": int(iss_num), "repo": repo, "parked_at": ts, "outcome": outcome, "reason": reason}
@@ -717,15 +719,6 @@ def main(argv: list[str] | None = None) -> int:
     say("== select ==")
     board_items = fetch_board_json(args.board) if args.board and not args.all_issues else []
 
-    board_nums = set()
-    for item in board_items:
-        st = item.get("status", "")
-        prio = item.get("priority", "")
-        if st == "Ready" or prio in ("P0", "P1"):
-            content = item.get("content", {})
-            if isinstance(content, dict) and "number" in content:
-                board_nums.add(str(content["number"]))
-
     try:
         cmd = ["gh", "issue", "list", "--repo", repo, "--state", "open", "--limit", "500", "--json", "number,title,body,labels,url"]
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -734,7 +727,14 @@ def main(argv: list[str] | None = None) -> int:
         log(f"failed to list open issues: {e}")
         open_issues = []
 
-    total_issues = len(open_issues)
+    board_nums = set()
+    for item in board_items:
+        st = item.get("status", "")
+        prio = item.get("priority", "")
+        if st == "Ready" or prio in ("P0", "P1"):
+            content = item.get("content", {})
+            if isinstance(content, dict) and "number" in content:
+                board_nums.add(str(content["number"]))
 
     if not args.all_issues:
         filtered_issues = []
@@ -762,145 +762,66 @@ def main(argv: list[str] | None = None) -> int:
 
     open_prs = gh_query.fetch_open_prs(repo)
 
-    p1_unblock: list[tuple[str, str]] = []
-    p2_execute: list[tuple[str, str]] = []
-    p3_groom: list[tuple[str, str]] = []
-    p4_escalate: list[tuple[str, str]] = []
+    parked_nums = parked
+    park_reasons = {}
+    attempts_map = {}
+    human_comments_map = {}
+    pr_details_map = {}
 
-    # Process markerless issues
-    markerless_list = []
-    for m_iss in markerless_json:
-        m = str(m_iss.get("number"))
-        markerless_list.append(f"#{m}")
-        if m in parked and str(m) != args.retry:
-            has_human, human_login = has_new_human_comment(m, repo)
-            if has_human:
-                say(f"  UNPARK  #{m}  new comment from @{human_login} detected -- removing {PARK_LABEL}")
-                park_label_remove(m, repo)
-                clear_attempt_labels(m, repo)
-            else:
-                reason = park_reason(m, state_dir)
-                say(f"  SKIP    #{m}  parked: {reason}")
-                continue
-        else:
-            phase = "triage"
-            attempts = get_attempts(m, repo, issues_json=all_issues_json)
-            if attempts >= args.max_phase_attempts:
-                reason = f"MAX_PHASE_ATTEMPTS ({args.max_phase_attempts}) reached for phase {phase}"
-                apply_park_state(m, "parked", datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"), f"parked by loop breaker: {reason}", repo, state_dir, parked_log)
-                say(f"  SKIP    #{m}  {reason}")
-            else:
-                p3_groom.append((m, phase))
-                say(f"  ELIGIBLE #{m}  triage (Priority 3: Groom)")
+    for iss in all_issues_json:
+        n = str(iss.get("number"))
+        if n in parked_nums and n != args.retry:
+            has_human, login = has_new_human_comment(n, repo)
+            human_comments_map[n] = (has_human, login)
+            if not has_human:
+                park_reasons[n] = park_reason(n, state_dir)
+        attempts_map[n] = get_attempts(n, repo, issues_json=all_issues_json)
 
-    if markerless_json:
-        say(f"repo {repo}: read {total_issues} open issues ({len(candidates_json)} carry the label; {len(markerless_json)} do not: {', '.join(markerless_list)} -- run triage)")
-    else:
-        say(f"repo {repo}: read {total_issues} open issues")
+    for pr in open_prs:
+        prnum = str(pr.get("number"))
+        unresolved = check_pr_unresolved_threads(repo, prnum)
+        failed_ci, pending_ci = check_pr_ci_status(repo, prnum)
+        req_rev, revd = check_pr_reviews(repo, prnum)
+        pr_details_map[prnum] = {
+            "unresolved": unresolved,
+            "failed_ci": failed_ci,
+            "pending_ci": pending_ci,
+            "req_rev": req_rev,
+            "revd": revd,
+        }
 
-    # Process specced candidates
-    for c_iss in candidates_json:
-        n = str(c_iss.get("number"))
-        body = c_iss.get("body", "")
-        tier = gate.tier_of(body)
+    config = {
+        "repo": repo,
+        "all_issues": args.all_issues,
+        "max_phase_attempts": args.max_phase_attempts,
+        "retry": args.retry,
+        "issue": args.issue,
+    }
 
-        is_parked = n in parked and str(n) != args.retry
-        if is_parked:
-            has_human, human_login = has_new_human_comment(n, repo)
-            if has_human:
-                say(f"  UNPARK  #{n}  new comment from @{human_login} detected -- removing {PARK_LABEL}")
-                park_label_remove(n, repo)
-                clear_attempt_labels(n, repo)
-                is_parked = False
-        parked_r = park_reason(n, state_dir) if is_parked else ""
+    sel_res = router.select(
+        open_issues=open_issues,
+        open_prs=open_prs,
+        board_items=board_items,
+        parked_nums=parked_nums,
+        park_reasons=park_reasons,
+        attempts_map=attempts_map,
+        human_comments_map=human_comments_map,
+        pr_details_map=pr_details_map,
+        config=config,
+    )
 
-        is_invalid_tier = tier in ("conflict", "missing", "unparsed")
-        tier_r = f"tier is invalid ({tier})"
+    for msg in sel_res["messages"]:
+        say(msg)
 
-        prline = gh_query.pr_blocking_issue(n, open_prs)
-        if prline:
-            prnum = prline.split("\t")[0]
-            unresolved = check_pr_unresolved_threads(repo, prnum)
-            if unresolved > 0:
-                phase = "address_comments"
-            else:
-                failed_ci, pending_ci = check_pr_ci_status(repo, prnum)
-                if failed_ci > 0:
-                    phase = "fix_ci"
-                elif pending_ci > 0:
-                    say(f"  SKIP    #{n}  PR #{prnum} CI is still pending; waiting...")
-                    continue
-                else:
-                    req_rev, revd = check_pr_reviews(repo, prnum)
-                    if req_rev == 0 and revd == 0:
-                        phase = "request_review"
-                    else:
-                        phase = "grade_gate"
+    ts_str = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    for m in sel_res["unpark_actions"]:
+        park_label_remove(m, repo)
+        clear_attempt_labels(m, repo)
 
-            attempts = get_attempts(n, repo, issues_json=all_issues_json)
-            if attempts >= args.max_phase_attempts:
-                reason = f"MAX_PHASE_ATTEMPTS ({args.max_phase_attempts}) reached for phase {phase}"
-                apply_park_state(n, "parked", datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"), f"parked by loop breaker: {reason}", repo, state_dir, parked_log)
-                say(f"  SKIP    #{n}  {reason}")
-            else:
-                p1_unblock.append((n, phase))
-                say(f"  ELIGIBLE #{n}  tier: auto-ok (Priority 1: Unblock - {phase})")
-                if is_parked:
-                    say(f"  NOTE    #{n}  Bypassing park state (parked: {parked_r}) to perform Unblock phase: {phase}")
-        else:
-            if is_parked:
-                say(f"  SKIP    #{n}  parked: {parked_r}")
-            elif is_invalid_tier:
-                say(f"  SKIP    #{n}  {tier_r}")
-            elif tier == "needs-review":
-                phase = "refine"
-                attempts = get_attempts(n, repo, issues_json=all_issues_json)
-                if attempts >= args.max_phase_attempts:
-                    reason = f"MAX_PHASE_ATTEMPTS ({args.max_phase_attempts}) reached for phase {phase}"
-                    apply_park_state(n, "parked", datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"), f"parked by loop breaker: {reason}", repo, state_dir, parked_log)
-                    say(f"  SKIP    #{n}  {reason}")
-                else:
-                    p3_groom.append((n, phase))
-                    say(f"  ELIGIBLE #{n}  tier: needs-review (Priority 3: Groom - {phase})")
-            elif tier == "auto-ok":
-                phase = "execute"
-                attempts = get_attempts(n, repo, issues_json=all_issues_json)
-                if attempts >= args.max_phase_attempts:
-                    reason = f"MAX_PHASE_ATTEMPTS ({args.max_phase_attempts}) reached for phase {phase}"
-                    apply_park_state(n, "parked", datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"), f"parked by loop breaker: {reason}", repo, state_dir, parked_log)
-                    say(f"  SKIP    #{n}  {reason}")
-                else:
-                    p2_execute.append((n, phase))
-                    say(f"  ELIGIBLE #{n}  tier: auto-ok (Priority 2: Execute - {phase})")
+    for m, reason in sel_res["park_actions"]:
+        apply_park_state(m, "parked", ts_str, f"parked by loop breaker: {reason}", repo, state_dir, parked_log, quiet=True)
 
-    all_candidates: list[tuple[str, str]] = p1_unblock + p2_execute + p3_groom + p4_escalate
-
-    # Single issue override
-    if args.issue:
-        iss_override = str(args.issue)
-        say(f"== select (single issue: #{iss_override}) ==")
-        phase = "execute"
-        prline = gh_query.pr_for_issue(iss_override, open_prs)
-        if prline:
-            prnum = prline.split("\t")[0]
-            unresolved = check_pr_unresolved_threads(repo, prnum)
-            if unresolved > 0:
-                phase = "address_comments"
-            else:
-                failed_ci, pending_ci = check_pr_ci_status(repo, prnum)
-                if failed_ci > 0:
-                    phase = "fix_ci"
-                elif pending_ci > 0:
-                    phase = "wait_ci"
-                else:
-                    phase = "grade_gate"
-
-        if phase == "wait_ci":
-            say(f"PR for #{iss_override} CI is still pending; waiting...")
-            all_candidates = []
-        else:
-            say("  eligibility check bypassed by --issue")
-            all_candidates = [(iss_override, phase)]
+    all_candidates = sel_res["candidates"]
 
     locked_candidates: list[tuple[str, str]] = []
     for cand_item in all_candidates:

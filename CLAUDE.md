@@ -64,20 +64,7 @@ For this repo, the gated paths worth calling out by name, because the *reason* i
   not cover it, and this line was added because the move-7 partition missed it: `driver/` was
   wholly drivable before the classifier moved there.
 
-- **`driver/agent-session-driver.sh` — the outcome *routing*, gated 2026-08-03 by Les.** The file
-  holds the parking case lists and the budget-reclassification thresholds, so a run could in
-  principle edit them to flatter its own record. This was previously named as an accepted residual
-  risk with the note *"revisit if a run ever touches that routing."* **That clause has now fired
-  three times** — on #39, on #58, and it would fire again on [#82](https://github.com/lmorchard/agent-sessions/issues/82)
-  — and PR #78's gate block escalated it in writing rather than resolving it. A revisit trigger that
-  keeps firing and never converts is not a trigger; it is a deferral. So it converted.
-
-  **The cost is stated, because it is real and it is the reason this was a human's call.** Path
-  granularity cannot express *"this file except its classification path,"* so gating the routing
-  gates the whole driver script — the largest single piece of orchestration in the repo, and the
-  thing most likely to need work. Driver changes now route to a human. If that proves too coarse,
-  the fix is to extract the routing into its own module the way `gate.py` was extracted, and gate
-  *that*; **it is not to quietly widen the allowlist back.**
+- **`driver/router.py` and `driver/reconciler.py` — the outcome routing and reactive reconciler**, extracted per issues #182 and #185 to replace the coarse gating of `driver/agent-session-driver.sh`. The modules hold the priority ladder, reactive event handlers, and skip/unpark decision logic, so gating them isolates the routing while freeing the rest of the driver orchestration.
 
 Plus the standing defaults trigger 2 already names: auth/authorization, secrets, data
 migration/deletion, deploy/infra/CI config, dependency changes.
@@ -104,9 +91,7 @@ check` in every PR, and a human at the merge gate. Revisit if a run ever actuall
 
 ### Drivable (the allowlist)
 
-- **`driver/`, except `driver/gate.py` and `driver/agent-session-driver.sh`** — its bash fixture
-  suites (`test-driver.sh`, `test-park-state.sh`) and its Python tests (`test_gate.py`). Note what
-  this leaves: as of 2026-08-03 the driver's *tests* are drivable and the driver itself is not.
+- **`driver/`, except `driver/gate.py`, `driver/router.py`, and `driver/reconciler.py`** — its tests (`driver/test_*.py`), fixtures (`driver/test-*.sh`), and driver orchestration (`agent_session_driver.py`, etc.). Note what this leaves: `driver/gate.py` (oracle), `driver/router.py` (outcome routing), and `driver/reconciler.py` (reconciler) are off-limits, while the driver script and tests are drivable.
 - **`docs/`** — including `findings.md` and session notes.
 - **`Makefile`**.
 - **`scripts/`** — `docs_check.py` and its tests, per the narrow reading above. Added 2026-07-29; it
