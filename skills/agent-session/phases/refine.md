@@ -4,21 +4,18 @@ A stateless phase for the unattended agent-session driver. It takes a `tier: nee
 
 ## Process
 
-1. **Understand the intent.** Read the target issue body (`gh issue view <n>`). Understand *why* it is currently `needs-review`. Look for subjective criteria (like visual design or human validation) or high-risk paths (infrastructure changes, migrations).
+1. **Understand the intent & check comments.** Read the target issue body and comments (`gh issue view <n> --comments`). Understand *why* it is currently `needs-review`. Look for subjective criteria or high-risk paths (dependencies, migrations). Check if the human explicitly approved the risk-gated decision in the comments (e.g., "Adding dependencies is fine", "Approved").
 
-2. **Evaluate automatability.** Can the criteria be replaced by a concrete, runnable test command (`pytest`, `make test`, `bash` assertions) that provides equal confidence? 
-   - **Yes (Automable):** Rewrite the acceptance criteria into Given/When/Then + Check format (per `references/acceptance-criteria.md`).
-   - **No (Subjective/High-Risk):** Stop immediately. Output a summary stating that the issue requires human judgment or review and cannot be automated. Do not edit the issue.
+2. **Evaluate automatability & human approval.**
+   - **Approved by human:** If the human explicitly approved the risk-gated path in the comments, or if the criteria can be replaced by runnable test commands (`pytest`, `make test`, `bash`), upgrade the issue to `auto-ok`.
+   - **Unapproved High-Risk/Subjective:** Stop immediately. Output a summary stating that the issue requires human judgment/review and cannot be automated. Ensure `agent-session:needs-review` label is set.
 
-3. **Verify the new checks.** If you drafted new checks, you MUST verify that they are runnable *right now* and fail (because the issue is not implemented yet). 
-   - Run the proposed check command.
-   - If it passes (which means it's a guard, not a criterion) or errors due to missing fixtures, fix it or revert to `needs-review`.
+3. **Verify the new checks.** If you drafted new checks, verify that they are runnable *right now* and fail (because the issue is not implemented yet).
 
-4. **Rewrite the issue body (if upgraded).** If you successfully drafted automated criteria that fail:
-   - Rewrite the entire issue body.
-   - Change `## Tier: needs-review` to `## Tier: auto-ok`.
-   - Replace the old criteria with your new verifiable criteria + checks.
-   - PRESERVE the original author's description and context text verbatim. Do not delete their context.
+4. **Apply Tier Label & Update Issue.** If upgraded to `auto-ok`:
+   - Apply the `agent-session:auto-ok` label (`gh issue edit <n> --add-label "agent-session:auto-ok" --remove-label "agent-session:needs-review"`).
+   - Replace the criteria with verifiable criteria + checks in the issue body.
+   - PRESERVE the original author's description and context text verbatim.
    - Update the issue using `gh issue edit <n> --body "<body>"`.
 
 5. **Stop.** Output a concise summary of the outcome (Upgraded to auto-ok OR Left as needs-review). No PR gate block is needed for `refine` since no code was committed. The driver will read the updated tier on its next loop.
