@@ -400,3 +400,37 @@ def test_discussions_disabled_warns_that_the_trail_is_lost_silently():
 def test_the_notebook_check_does_not_fail_the_preflight():
     """The driver wraps the notes in try/except, so the loop runs without them."""
     assert doctor.exit_code(run(FakeGh(discussions=False), repo=REPO)) == 0
+
+
+# -- why a board is invisible: three causes, one symptom ---------------------
+
+
+def board_remedy(error, token="ghp_x", login=BOT, board="lmorchard/9"):
+    return doctor._board_remedy(board, login, token, error)
+
+
+def test_a_scope_error_is_diagnosed_as_a_scope_error():
+    remedy = board_remedy("your token has not been granted the required scopes")
+    assert "read:project" in remedy
+
+
+def test_a_not_found_on_a_classic_token_is_diagnosed_as_per_project_access():
+    """The case that caught this out: project 6 was readable and project 9 was not,
+    with the same classic token. The scope was never the problem -- project 6 is
+    public and project 9 is private, and ProjectsV2 keeps its own collaborator list
+    that repository access does not feed into."""
+    remedy = board_remedy("GraphQL: Could not resolve to a ProjectV2 with the number 9. NOT_FOUND")
+    assert "Manage access" in remedy
+    assert "separate from repository" in remedy
+    assert "read:project" not in remedy, "blamed the scope again"
+
+
+def test_a_not_found_on_a_fine_grained_token_is_diagnosed_as_ownership():
+    remedy = board_remedy("NOT_FOUND", token="github_pat_x")
+    assert "fine-grained" in remedy
+    assert "classic PAT" in remedy
+
+
+def test_a_fine_grained_token_on_its_owners_project_is_not_told_about_ownership():
+    remedy = board_remedy("NOT_FOUND", token="github_pat_x", board=f"{BOT}/3")
+    assert "Manage access" in remedy

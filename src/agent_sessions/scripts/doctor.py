@@ -135,6 +135,34 @@ def _write_remedy(repo: str, login: str, token: str) -> str:
     )
 
 
+def _board_remedy(board: str, login: str, token: str, error: str) -> str:
+    """Why a board is invisible. GraphQL already distinguishes the two causes and the
+    first version of this check ignored it, blaming a missing scope for what was
+    actually per-project access.
+
+    ProjectsV2 has its own collaborator list, separate from every repository. An
+    account with full write on a repo still cannot see that repo's private board
+    unless it was added to the board as well.
+    """
+    owner = board.partition("/")[0]
+    if "scope" in error.lower():
+        return (
+            "The token is missing the projects scope: add `read:project` to a classic PAT, or "
+            "`project` if the driver moves cards. ProjectsV2 is not covered by `repo`."
+        )
+    if token_kind(token) == "fine-grained" and owner.lower() != login.lower():
+        return (
+            f"A fine-grained PAT owned by {login} cannot reach a project owned by {owner} at all, "
+            "whatever its permissions say. Use a classic PAT with `project`."
+        )
+    return (
+        f"The scope is present -- a public project owned by {owner} would be readable -- so this "
+        f"board is private and {login} is not on it. ProjectsV2 access is separate from repository "
+        f"access: being a collaborator on the repo grants nothing here. Either make the project "
+        f"public, or add {login} under the project's Settings -> Manage access."
+    )
+
+
 def _repo_remedy(repo: str, login: str) -> str:
     owner = repo.split("/")[0]
     if owner.lower() == login.lower():
@@ -307,9 +335,8 @@ def check_all(environ: dict, runner, *, repo: str, repo_path: str, board: str = 
                     "board readable",
                     "warn",
                     f"{board}: not visible to the write token",
-                    f"Selection falls back to labels without it. A classic PAT needs the `project` "
-                    f"scope (or `read:project`); a fine-grained PAT cannot reach a project owned by "
-                    f"{owner} at all unless {owner} is its resource owner.",
+                    "Selection falls back to labels without it. "
+                    + _board_remedy(board, writer.login, writer.token, text),
                 )
             )
 
