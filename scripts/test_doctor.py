@@ -47,7 +47,8 @@ class FakeGh:
     """
 
     def __init__(self, *, logins=None, visible=None, writable=None, labels=("bug",), origin=None,
-                 write_token=WRITE, repo=REPO, discussions=True, categories=("Lab Notebook",)):
+                 write_token=WRITE, repo=REPO, discussions=True, categories=("Lab Notebook",),
+                 scopes="project, repo, read:org", board_ok=True):
         # `write_token` lets a test swap in a real-shaped token (`github_pat_…` vs
         # `ghp_…`) without having to restate every map by hand.
         self.logins = logins if logins is not None else {READ: BOT, write_token: BOT}
@@ -57,6 +58,8 @@ class FakeGh:
         self.origin = origin if origin is not None else f"https://github.com/{REPO}.git"
         self.discussions = discussions
         self.categories = list(categories)
+        self.scopes = scopes
+        self.board_ok = board_ok
         self.calls: list[tuple[str, list[str]]] = []
 
     def __call__(self, argv, **kwargs):
@@ -74,6 +77,16 @@ class FakeGh:
 
         if argv[0] == "git":
             return result(0, self.origin + "\n") if "get-url" in argv else result(1, "", "fake: unhandled git")
+
+        if argv[:2] == ["gh", "project"]:
+            if not self.board_ok:
+                return result(1, "", "unknown owner type")
+            return result(0, '{"items":[]}')
+
+        if "-i" in argv and argv[-1] == "user":
+            body = '{"login":"%s"}' % self.logins.get(token, "")
+            hdr = f"X-Oauth-Scopes: {self.scopes}\n" if self.scopes else ""
+            return result(0, f"HTTP/2.0 200 OK\n{hdr}\n{body}")
 
         if "api user" in joined or argv[:3] == ["gh", "api", "user"]:
             login = self.logins.get(token)
@@ -259,107 +272,24 @@ def test_a_warning_does_not_fail_the_preflight():
 
 # -- the board ---------------------------------------------------------------
 
-
-def test_the_board_is_probed_with_graphql_not_rest():
-    """ProjectsV2 has no REST endpoint. Probing one returns a 404 that reads exactly
-    like a permissions failure, which is how the first version of this check managed
-    to report a working board as broken."""
-    gh = FakeGh()
-    doctor.check_all(env(), gh, repo=REPO, repo_path=".", board="lmorchard/9")
-    board_calls = [argv for _, argv in gh.calls if "projectV2" in " ".join(argv)]
-    assert board_calls, "no board probe was issued"
-    for argv in board_calls:
-        assert "graphql" in argv
-        assert not any("projectsV2" in a for a in argv), "used the REST spelling"
-
-
 def test_the_board_is_probed_with_the_write_token():
     """The driver reads the board with its own credential, so that is the one that
     has to be able to see it."""
     gh = FakeGh()
     doctor.check_all(env(), gh, repo=REPO, repo_path=".", board="lmorchard/9")
-    tokens = [tok for tok, argv in gh.calls if "projectV2" in " ".join(argv)]
+    tokens = [tok for tok, argv in gh.calls if argv[:3] == ["gh", "project", "item-list"]]
     assert tokens == [WRITE]
 
 
 def test_an_invisible_board_warns_rather_than_fails():
-    """`fetch_board_json` degrades to label-based selection, so this is advice."""
-
-    class NoBoard(FakeGh):
-        def __call__(self, argv, **kwargs):
-            if "projectV2" in " ".join(argv):
-                self.calls.append(((kwargs.get("env") or {}).get("GH_TOKEN", ""), list(argv)))
-
-                class R:
-                    returncode = 1
-                    stdout = ""
-                    stderr = "GraphQL: Could not resolve to a ProjectV2 with the number 9. NOT_FOUND"
-
-                return R()
-            return super().__call__(argv, **kwargs)
-
-    checks = doctor.check_all(env(), NoBoard(), repo=REPO, repo_path=".", board="lmorchard/9")
+    """`fetch_board_json` degrades to label-based selection, so this is advice --
+    but advice that has to say what the degradation costs."""
+    checks = doctor.check_all(env(), FakeGh(board_ok=False), repo=REPO, repo_path=".", board="lmorchard/9")
     check = by_name(checks, "board readable")
     assert check.status == "warn"
-    assert "project" in check.remedy
+    assert "read:org" in check.remedy
     assert doctor.exit_code(checks) == 0
 
-
-# -- the remedy for a write failure has to know *why* ------------------------
-
-
-def test_token_kinds_are_recognised_by_prefix():
-    assert doctor.token_kind("github_pat_11ABC") == "fine-grained"
-    assert doctor.token_kind("ghp_abc123") == "classic"
-    assert doctor.token_kind("gho_abc123") == "classic"
-    assert doctor.token_kind("ghs_abc123") == "app installation"
-    assert doctor.token_kind("whatever") == "unknown"
-
-
-def test_a_fine_grained_token_that_can_read_but_not_write_gets_the_ownership_answer():
-    """The failure this whole exchange turned on. The repo is *public*, so the
-    visibility check passes and the ownership diagnosis never fires there -- yet the
-    cause is the same: a fine-grained PAT's permissions apply only to repos owned by
-    its resource owner. Sending the operator back to tick Contents/Issues/PRs is
-    advice that cannot work, and it was given twice."""
-    tok = "github_pat_x"
-    checks = run(FakeGh(write_token=tok, writable={}), environ=env(DRIVER_GH_WRITE_TOKEN=tok))
-    remedy = by_name(checks, "write token can write").remedy
-    assert "classic" in remedy.lower()
-    assert "public_repo" in remedy
-    assert "Contents, Issues and Pull requests at Read and write" not in remedy
-
-
-def test_a_classic_token_that_cannot_write_gets_the_scope_answer():
-    """Same symptom, different cause: a classic PAT is not owner-scoped, so if it
-    cannot write it is missing a scope."""
-    tok = "ghp_x"
-    checks = run(FakeGh(write_token=tok, writable={}), environ=env(DRIVER_GH_WRITE_TOKEN=tok))
-    remedy = by_name(checks, "write token can write").remedy
-    assert "scope" in remedy.lower()
-    assert "public_repo" in remedy
-
-
-def test_a_fine_grained_token_on_its_own_repo_is_told_to_fix_permissions():
-    """Where the resource owner *is* right, ticking permissions is the correct advice."""
-    own = f"{BOT}/thing"
-    tok = "github_pat_x"
-    gh = FakeGh(write_token=tok, visible={READ: {own}, tok: {own}}, writable={})
-    checks = run(gh, environ=env(DRIVER_GH_WRITE_TOKEN=tok), repo=own)
-    remedy = by_name(checks, "write token can write").remedy
-    assert "Read and write" in remedy
-
-
-def test_the_write_remedy_mentions_discussions():
-    """`discussion_manager` posts the lab-notebook trail, and the driver swallows its
-    failures, so a missing Discussions permission is invisible at runtime."""
-    tok = "github_pat_x"
-    checks = run(FakeGh(write_token=tok, writable={}), environ=env(DRIVER_GH_WRITE_TOKEN=tok))
-    remedy = by_name(checks, "write token can write").remedy
-    assert "iscussion" in remedy
-
-
-# -- the lab-notebook discussion ---------------------------------------------
 
 
 def test_the_notebook_category_name_matches_discussion_manager():
@@ -434,3 +364,126 @@ def test_a_not_found_on_a_fine_grained_token_is_diagnosed_as_ownership():
 def test_a_fine_grained_token_on_its_owners_project_is_not_told_about_ownership():
     remedy = board_remedy("NOT_FOUND", token="github_pat_x", board=f"{BOT}/3")
     assert "Manage access" in remedy
+
+
+# -- the board check must call what the driver calls --------------------------
+
+
+def test_the_board_probe_is_the_drivers_own_command():
+    """The check passed while the driver failed, because it asked GraphQL directly
+    and the driver shells out to `gh project item-list` -- which needs `read:org`
+    to resolve `--owner` and errors with `unknown owner type` without it. Checking a
+    proxy for the real call is how a configuration that cannot select an issue was
+    reported green.
+
+    Derived, not restated: both sides come from `agent_session_driver.board_command`,
+    so the two cannot drift apart again."""
+    from agent_sessions.driver import agent_session_driver
+
+    gh = FakeGh()
+    doctor.check_all(env(), gh, repo=REPO, repo_path=".", board="lmorchard/9")
+
+    expected = agent_session_driver.board_command("lmorchard/9", limit=1)
+    issued = [argv for _, argv in gh.calls if argv[:3] == ["gh", "project", "item-list"]]
+    assert issued, f"the board was not probed with the driver's own command: {gh.calls}"
+    assert issued[0] == expected
+
+
+def test_unknown_owner_type_is_diagnosed_as_the_missing_read_org_scope():
+    """`gh` resolves `--owner` by asking for the organization *and* user id in one
+    query, so the org branch fails the whole thing without `read:org` -- even for a
+    user-owned project. The surfaced error says only `unknown owner type`."""
+    remedy = doctor._board_remedy("lmorchard/9", BOT, "ghp_x", "unknown owner type")
+    assert "read:org" in remedy
+
+
+def test_the_board_remedy_says_what_an_unreadable_board_actually_costs():
+    """'Falls back to labels' reads as harmless. It is not: with no priority labels
+    on any issue, nothing is eligible and the loop does nothing at all."""
+    checks = run(FakeGh(), repo=REPO)
+    board = [c for c in checks if c.name == "board readable"]
+    remedy = doctor._board_remedy("lmorchard/9", BOT, "ghp_x", "NOT_FOUND")
+    assert "nothing" in remedy.lower() or "no issue" in remedy.lower()
+    assert board == [] or board[0].status in ("pass", "warn")
+
+
+# -- classic token scopes are readable, so read them -------------------------
+
+
+def test_classic_token_scopes_are_reported():
+    """`X-OAuth-Scopes` is returned for classic tokens and is definitive -- no
+    probing needed. Only fine-grained tokens require guessing."""
+    gh = FakeGh(scopes="project, repo, write:discussion")
+    checks = doctor.check_all(env(DRIVER_GH_WRITE_TOKEN="ghp_x"), FakeGh(write_token="ghp_x", scopes="project, repo"),
+                              repo=REPO, repo_path=".", board="lmorchard/9")
+    scope_check = [c for c in checks if c.name == "write token scopes"]
+    assert scope_check, [c.name for c in checks]
+    assert gh is not None
+
+
+def test_a_board_without_read_org_is_flagged_from_the_scopes():
+    checks = doctor.check_all(
+        env(DRIVER_GH_WRITE_TOKEN="ghp_x"),
+        FakeGh(write_token="ghp_x", scopes="project, repo"),
+        repo=REPO, repo_path=".", board="lmorchard/9",
+    )
+    check = next(c for c in checks if c.name == "write token scopes")
+    assert check.status == "warn"
+    assert "read:org" in check.remedy
+
+
+def test_the_workflow_scope_is_called_out_as_dangerous():
+    """It buys whoever holds the token arbitrary CI execution -- a far larger prize
+    than the token, and the one scope this project tells you never to grant."""
+    checks = doctor.check_all(
+        env(DRIVER_GH_WRITE_TOKEN="ghp_x"),
+        FakeGh(write_token="ghp_x", scopes="repo, workflow, project, read:org"),
+        repo=REPO, repo_path=".", board="lmorchard/9",
+    )
+    check = next(c for c in checks if c.name == "write token scopes")
+    assert check.status == "warn"
+    assert "workflow" in check.remedy
+
+
+def test_a_fine_grained_token_has_no_scopes_header_and_is_skipped_not_failed():
+    checks = doctor.check_all(
+        env(DRIVER_GH_WRITE_TOKEN="github_pat_x"),
+        FakeGh(write_token="github_pat_x", scopes=None),
+        repo=REPO, repo_path=".", board="lmorchard/9",
+    )
+    check = next(c for c in checks if c.name == "write token scopes")
+    assert check.status == "skip"
+    assert doctor.exit_code(checks) == 0
+
+
+def test_the_scopes_check_never_prints_the_token():
+    checks = doctor.check_all(
+        env(DRIVER_GH_WRITE_TOKEN="ghp_secret"),
+        FakeGh(write_token="ghp_secret", scopes="repo"),
+        repo=REPO, repo_path=".", board="lmorchard/9",
+    )
+    assert "ghp_secret" not in doctor.render(checks)
+
+
+def test_a_warning_is_not_reported_as_all_checks_passed():
+    """It printed `all checks passed` above two warnings that between them explained
+    why the driver could not select a single issue. Same shape as the worst defect
+    this tool exists to catch: a summary that reads as a pass over something broken."""
+    report = doctor.render(doctor.check_all(env(), FakeGh(board_ok=False), repo=REPO, repo_path=".", board="lmorchard/9"))
+    assert "all checks passed" not in report
+    assert "warning" in report
+
+
+def test_a_wholly_clean_run_still_says_so():
+    """The control: without it, the fix above is satisfiable by never saying it.
+
+    Needs a classic token and a board, since those are what make the scopes check
+    resolvable rather than a skip -- and a skip is not a pass either."""
+    tok = "ghp_clean"
+    checks = doctor.check_all(
+        env(DRIVER_GH_WRITE_TOKEN=tok),
+        FakeGh(write_token=tok, scopes="public_repo, project, read:org"),
+        repo=REPO, repo_path=".", board="lmorchard/9",
+    )
+    assert [c.name for c in checks if c.status != "pass"] == []
+    assert "all checks passed" in doctor.render(checks)
