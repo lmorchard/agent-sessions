@@ -28,6 +28,16 @@ MERGE_READY_LABEL = "agent-session:merge-ready"
 SPEC_LABEL = "agent-session:spec"
 MARKER = "<!-- agent-session:spec -->"
 
+PHASE_TIERS = {
+    "triage": "low",
+    "refine": "low",
+    "execute": "high",
+    "address_comments": "high",
+    "fix_ci": "high",
+    "request_review": "low",
+    "grade_gate": "low",
+}
+
 
 def is_specced(iss: dict) -> bool:
     labels = [l.get("name") for l in iss.get("labels", []) if isinstance(l, dict)]
@@ -956,6 +966,10 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps({"issue": int(num), "started": ts, "run_dir": str(rundir), "url": url}), encoding="utf-8"
         )
 
+        if phase not in PHASE_TIERS:
+            die(f"unknown phase: {phase}")
+        tier = PHASE_TIERS[phase]
+
         runner_args = [
             "--backend", args.backend,
             "--repo-path", str(repo_path),
@@ -966,6 +980,7 @@ def main(argv: list[str] | None = None) -> int:
             "--max-budget", str(args.max_budget_usd),
             "--timeout", str(args.timeout),
             "--settings", str(hook_settings_file),
+            "--tier", tier,
         ]
         if args.model:
             runner_args.extend(["--model", args.model])
