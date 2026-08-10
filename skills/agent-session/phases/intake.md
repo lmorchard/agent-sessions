@@ -76,11 +76,14 @@ exception, and needs no rule here: `acceptance-criteria.md`'s trigger 1 already 
    doing) and get confirmation before filing.
 
 10. **File or update the issue.**
-   - **Ensure the label exists:** run `gh label create "agent-session:spec" --color 0E8A16` (ignore the error if it already exists).
-   - *New:* `gh issue create` with body = spec; title from
-     the Goal (<70 chars); apply the `agent-session:spec` label (`--label`); add to the board's Ready
-     column if configured.
-   - *Existing (augment):* `gh issue edit <n>` — add the `agent-session:spec` label (`--add-label`), add the spec sections. **Preserve the original author's text**; augment, don't overwrite
+   Under the board-driver you have no GitHub write access: record each of these as a write-manifest
+   entry instead of running it. See `references/write-manifest.md`.
+   - **Ensure the label exists:** a `label_create` entry for `agent-session:spec`, colour `0E8A16`.
+   - *New:* an `issue_create` entry with body = spec; title from
+     the Goal (<70 chars); `labels: ["agent-session:spec"]`; a `project_item_add` entry for the
+     board's Ready column if configured.
+   - *Existing (augment):* a `label` entry adding `agent-session:spec`, plus an `issue_body` entry
+     carrying the spec sections. **Preserve the original author's text**; augment, don't overwrite
      intent.
    - **The `## Tier:` heading is the one section you replace rather than add.** A body with two
      `## Tier:` headings reads as a conflict and the issue is skipped — so when a decision revises a

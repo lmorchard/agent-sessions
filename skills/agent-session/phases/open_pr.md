@@ -3,7 +3,13 @@
 Self-review, push, open a PR, run the review cycle, and **stop at the merge gate**.
 
 Reads `references/frozen-checks.md` (gate condition), `references/pr-body-template.md` (body +
-gate block), `references/github-projects.md` (board hook).
+gate block), `references/github-projects.md` (board hook), `references/write-manifest.md` (how to
+push and open a PR without write access).
+
+**You cannot push or open a PR yourself.** Under the board-driver your GitHub credential is
+read-scoped: you commit locally as normal, then *record* the push and the PR as write-manifest
+entries and the driver performs them after your run. Read `references/write-manifest.md` before
+step 5.
 
 The gate is where this mode ends: it reports whether the gate is satisfied and stops.
 
@@ -60,13 +66,15 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
    verified was verified against the older base. If new commits appear, redo the rebase and
    re-verification.
 
-5. **(If using frozen checks) Run the tamper check, record the verdict, and push the branch as-is.** Run
+5. **(If using frozen checks) Run the tamper check, record the verdict, and record the push of the branch as-is.** Run
    `git diff <freeze-sha> -- <check files>` and **record the verdict in `checks.md` and the gate
    block**. If `Check files` is empty, run the substitutes from `frozen-checks.md`'s "When the
    criteria are commands, not test files" instead and record `clean-by-substitute` + its basis; the
    bare command proves nothing there.
 
-   If skipping the frozen checks ceremony, simply push the branch.
+   If skipping the frozen checks ceremony, simply record the push: a `push` entry naming your
+   branch. Record it *before* the `pr_create` entry — the driver executes in order and stops at the
+   first failure, so a PR entry ahead of its branch never runs.
 
    **Do not squash the branch.** The freeze commit must stay an ancestor of the pushed head, because
    that is what lets somebody other than the implementer re-run the tamper diff. `git reset --soft
@@ -74,7 +82,9 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
    the recorded verdict becomes a claim the run made about itself rather than a command a reviewer can
    check. Leave history alone and let the merge button decide its shape.
 
-6. **Open the PR** using `references/pr-body-template.md`. Apply the `agent-session:gate` label (`gh pr edit <n> --add-label "agent-session:gate"`). Title under 70 chars. Fill the
+6. **Record the PR** as a `pr_create` entry, with the body from `references/pr-body-template.md`,
+   `labels: ["agent-session:gate"]` and `reviewers: ["copilot-pull-request-reviewer"]`. Never
+   `pr_edit` a PR the same manifest creates: you do not know its number. Title under 70 chars. Fill the
    **Acceptance criteria** table from the *independent verifier's* report — never from the
    implementer's own run. Include `Closes #N`, links to `spec.md` / `checks.md` / `plan.md`, and
    the gate block.
@@ -86,13 +96,12 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
    window where an automated reader can act on a verdict nobody derived. Step 14 writes the real
    one.
 
-7. **Board hook.** If a board is configured, move each `Closes #N` issue to `in_review`.
-   Otherwise report `board: not configured` with the verdict — not a silent skip.
+7. **Board hook.** If a board is configured, record a `project_item_edit` entry moving each
+   `Closes #N` issue to `in_review`. Otherwise report `board: not configured` with the verdict —
+   not a silent skip.
 
+8. **Review request.** Already covered: it rode along on the `pr_create` entry in step 6, because
+   the PR number does not exist until the driver has made it.
 
-8. **Request a review**:
-   ```
-   gh pr edit <number> --add-reviewer copilot-pull-request-reviewer
-   ```
-   
-9. **Stop.** State that the PR is open, review requested, and exit so the orchestrator can wait for CI or comments.
+9. **Stop.** State that the push and the PR are *recorded*, that the review was requested on the
+   `pr_create` entry, and exit so the orchestrator can perform the writes and wait for CI.

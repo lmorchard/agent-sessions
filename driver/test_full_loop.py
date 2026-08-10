@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -58,7 +59,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
-from agent_sessions.driver import agent_runner, agent_session_driver
+from agent_sessions.driver import agent_runner, agent_session_driver, credentials
 
 REPO = "owner/repo"
 BOARD = "owner/9"
@@ -74,9 +75,17 @@ LOCK_SHA = "1111111111111111111111111111111111111111"
 
 DISCUSSION_URL = "https://github.com/owner/repo/discussions/1"
 
-#: The identity `gh` writes as on the driver host. A human-looking login, not a
-#: `*[bot]` — which is the whole of issue #183.
-DRIVER_LOGIN = "lmorchard"
+#: Head sha the fake stamps on a PR the driver opens from a manifest, so a gate
+#: block written against it can be graded as current.
+NEW_PR_HEAD = "beef1234beef1234beef1234beef1234beef1234"
+
+#: The account the driver holds its own tokens on. A PAT-backed machine user, so a
+#: human-looking login with no `*[bot]` suffix — which is the whole of issue #183, and
+#: the reason `DRIVER_GH_LOGIN` has to be configuration rather than a guess.
+DRIVER_LOGIN = "agent-session-bot"
+
+#: A real person. Their comment is the one that unparks an issue.
+HUMAN_LOGIN = "lmorchard"
 
 GOLDEN = Path(__file__).parent / "fixtures" / "select_golden.txt"
 
@@ -190,16 +199,30 @@ class FakeGitHub:
     over the same instance sees the first pass's effects.
     """
 
-    def __init__(self, *, issues=(), prs=(), board_items=(), viewer_login=DRIVER_LOGIN, held_locks=None):
+    def __init__(self, *, issues=(), prs=(), board_items=(), viewer_login=DRIVER_LOGIN, held_locks=None,
+                 logins=None, committable=()):
         self.issues = [dict(i) for i in issues]
         self.prs = [dict(p) for p in prs]
         self.board_items = list(board_items)
         self.viewer_login = viewer_login
+        #: token -> login, so `gh api user` answers for whichever credential was
+        #: presented. Without this the identity assertion cannot be tested at all:
+        #: a fake that returns one login regardless proves only that a call happened.
+        self.logins = dict(logins or {READ_TOKEN: viewer_login, WRITE_TOKEN: viewer_login})
+        #: Paths `git check-ignore` reports as NOT ignored, i.e. committable. Empty by
+        #: default: a `.env` beside the driver is git-ignored in every real checkout.
+        self.committable = {str(c) for c in committable}
         #: ref -> (sha, unix time). A ref present here makes `ls-remote` report a lock.
         self.held_locks = dict(held_locks or {})
 
         self.gh_calls: list[list[str]] = []
         self.git_calls: list[list[str]] = []
+        #: (argv, env) for every command, so a test can ask *which credential* paid
+        #: for a write -- the property #191 exists to establish.
+        self.calls_with_env: list[tuple[list[str], dict]] = []
+        #: gh write commands only, in order, as (verb, argv).
+        self.write_calls: list[tuple[str, list[str]]] = []
+        self.next_pr_number = 900
         self.label_calls: list[tuple[str, ...]] = []
         self.discussion_calls: list[list[str]] = []
         self.unhandled: list[list[str]] = []
@@ -266,6 +289,9 @@ class FakeGitHub:
 
     def run(self, cmd, **kwargs):
         argv = [str(c) for c in cmd]
+        env = dict(kwargs.get("env") or {})
+        self.calls_with_env.append((argv, env))
+        self._active_token = env.get("GH_TOKEN", os.environ.get("GH_TOKEN", ""))
         if argv[0] == "gh":
             res = self._gh(argv)
         elif argv[0] == "git":
@@ -366,12 +392,16 @@ class FakeGitHub:
             )
 
         if rest[:2] == ["api", "user"]:
-            # No caller today. It is here because #183's fix needs the driver's own
-            # resolved login to be discoverable, and the xfail case below is written
-            # against a fixture where that login authored the park comment.
+            # The driver's startup identity assertion: one call per token, each under
+            # the environment that token lives in. Answering from `logins` rather than
+            # a constant is what lets a test present a *human* token and see the
+            # refusal, which is the property #191's bot-account mode exists for.
+            login = self.logins.get(self._active_token)
+            if login is None:
+                return _Result(1, "", "fake: gh api user with an unknown credential")
             if "--jq" in argv:
-                return _Result(0, self.viewer_login + "\n")
-            return _Result(0, json.dumps({"login": self.viewer_login}))
+                return _Result(0, login + "\n")
+            return _Result(0, json.dumps({"login": login}))
 
         if rest[:2] == ["repo", "view"]:
             return _Result(0, "R_fixture_repo_id\n")
@@ -386,8 +416,67 @@ class FakeGitHub:
             self.discussion_calls.append(argv)
             return _Result(0, "")
 
+        # -- writes, which only reach here via the driver's manifest (#191) ----
+
+        if rest[:2] == ["issue", "comment"]:
+            number = rest[2]
+            if self.issue_by_number(number) is None:
+                return _Result(1, "", f"fake: no fixture issue #{number}")
+            self.write_calls.append(("issue_comment", argv))
+            self.add_comment(number, self.viewer_login, self._body_of(argv))
+            return _Result(0, "")
+
+        if rest[:2] == ["issue", "edit"]:
+            number = rest[2]
+            iss = self.issue_by_number(number)
+            if iss is None:
+                return _Result(1, "", f"fake: no fixture issue #{number}")
+            self.write_calls.append(("issue_edit", argv))
+            for i, tok in enumerate(argv):
+                if tok == "--add-label":
+                    self.add_label(number, argv[i + 1])
+                elif tok == "--remove-label":
+                    self.remove_label(number, argv[i + 1])
+                elif tok == "--body-file":
+                    iss["body"] = Path(argv[i + 1]).read_text(encoding="utf-8")
+            return _Result(0, "")
+
+        if rest[:2] == ["pr", "create"]:
+            self.write_calls.append(("pr_create", argv))
+            number = self.next_pr_number
+            self.next_pr_number += 1
+            body = self._body_of(argv)
+            self.prs.append(
+                pr(
+                    number,
+                    body=body,
+                    closes=[int(n) for n in re.findall(r"(?i)closes #(\d+)", body)],
+                    head_oid=NEW_PR_HEAD,
+                    head_ref=argv[argv.index("--head") + 1] if "--head" in argv else None,
+                    checks=[("test", "pass")],
+                )
+            )
+            return _Result(0, f"https://github.com/{REPO}/pull/{number}\n")
+
+        if rest[:2] == ["pr", "edit"]:
+            number = rest[2]
+            if self.pr_by_number(number) is None:
+                return _Result(1, "", f"fake: no fixture PR #{number}")
+            self.write_calls.append(("pr_edit", argv))
+            return _Result(0, "")
+
+        if rest[:2] == ["label", "create"]:
+            self.write_calls.append(("label_create", argv))
+            return _Result(0, "")
+
         self.unhandled.append(argv)
         return _Result(1, "", f"fake: unhandled gh command {rest}")
+
+    @staticmethod
+    def _body_of(argv):
+        if "--body-file" in argv:
+            return Path(argv[argv.index("--body-file") + 1]).read_text(encoding="utf-8")
+        return ""
 
     # -- git --------------------------------------------------------------
 
@@ -417,6 +506,9 @@ class FakeGitHub:
             return _Result(0, "0\n")
         if rest[:1] == ["push"]:
             return _Result(0, "")
+        if rest[:1] == ["check-ignore"]:
+            target = rest[-1]
+            return _Result(1 if target in self.committable else 0, "")
 
         self.unhandled.append(argv)
         return _Result(1, "", f"fake: unhandled git command {rest}")
@@ -474,21 +566,37 @@ def agent_stream(*, final="the agent's report", cost=1.23, session="sess-abc", s
 class StubAgent:
     """Stands in for `agent_runner.run_agent`, writing a fixture stream to disk.
 
-    `side_effect` models what the agent does to GitHub — post a comment, apply a
-    label — so the driver's post-run reads see a world the agent changed.
+    `manifest` is how a real agent asks for a GitHub write since #191: it has a
+    read-scoped token, so it records entries and the driver performs them. Tests
+    that assert on writes should use it, because that is the shipping path.
+
+    `side_effect` remains for the cases that need the world to change *behind* the
+    driver's back — a human commenting mid-run — which is not a manifest write.
     """
 
-    def __init__(self, *, stream=None, returncode=0, side_effect=None):
+    def __init__(self, *, stream=None, returncode=0, side_effect=None, manifest=None):
         self.stream = agent_stream() if stream is None else stream
         self.returncode = returncode
         self.side_effect = side_effect
+        self.manifest = manifest
         self.calls: list[list[str]] = []
 
     def __call__(self, argv):
         self.calls.append(list(argv))
+        #: The driver's environment at the moment of invocation. `agent_runner`
+        #: derives the child's environment from this, so it is what a test needs to
+        #: see to know whether the agent could have written to GitHub.
+        self.env_at_call = dict(os.environ)
         raw = Path(argv[argv.index("--raw-output") + 1])
         raw.parent.mkdir(parents=True, exist_ok=True)
         raw.write_text("".join(json.dumps(e) + "\n" for e in self.stream), encoding="utf-8")
+        if self.manifest is not None:
+            writes_file = Path(argv[argv.index("--writes-file") + 1])
+            writes_file.parent.mkdir(parents=True, exist_ok=True)
+            body = self.manifest if isinstance(self.manifest, str) else "".join(
+                json.dumps(e) + "\n" for e in self.manifest
+            )
+            writes_file.write_text(body, encoding="utf-8")
         if self.side_effect is not None:
             self.side_effect()
         return self.returncode
@@ -503,7 +611,18 @@ _DRIVER_ENV = (
     "ISSUE", "MAX_ISSUES", "MAX_BUDGET_USD", "MAX_BUDGET", "MAX_PHASE_ATTEMPTS", "RUN_TIMEOUT",
     "TIMEOUT", "STATE_DIR", "BOARD", "DRIVER_BOARD", "BACKEND", "DRIVER_BACKEND", "MODEL",
     "HIGH_TIER_MODEL", "LOW_TIER_MODEL", "RETRY", "XDG_STATE_HOME",
+    "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+    credentials.READ_TOKEN_VAR, credentials.WRITE_TOKEN_VAR, credentials.LOGIN_VAR,
+    credentials.BOT_LOGINS_VAR, credentials.CONFIG_FILE_VAR,
+    credentials.READ_TOKEN_VAR + credentials.CMD_SUFFIX,
+    credentials.WRITE_TOKEN_VAR + credentials.CMD_SUFFIX,
 )
+
+#: The contained configuration, which every pass runs under unless it says otherwise.
+#: Without it the driver refuses to start at all -- there is no degraded mode -- so a
+#: pass that wants the refusal has to unset one of these deliberately.
+READ_TOKEN = "read-scoped-token"
+WRITE_TOKEN = "write-capable-token"
 
 
 class LoopHarness:
@@ -523,6 +642,9 @@ class LoopHarness:
         monkeypatch.chdir(tmp_path)
         for var in _DRIVER_ENV:
             monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv(credentials.READ_TOKEN_VAR, READ_TOKEN)
+        monkeypatch.setenv(credentials.WRITE_TOKEN_VAR, WRITE_TOKEN)
+        monkeypatch.setenv(credentials.LOGIN_VAR, DRIVER_LOGIN)
         monkeypatch.setattr(agent_session_driver, "datetime", FrozenDatetime)
         # The driver releases its lock from an atexit hook keyed on this global.
         # monkeypatch restores it to None, so no pass can leave a live lock behind.
@@ -639,6 +761,7 @@ def test_pass_ending_gate_eligible(loop):
             "reason": "all gate rows satisfied",
             "pr": f"https://github.com/{REPO}/pull/201",
             "run_dir": str(rundir),
+            "writes": {"recorded": 0, "applied": 0, "ok": True},
             "provenance": {},
         }
     ]
@@ -718,8 +841,10 @@ def test_pass_with_a_stale_ci_row_is_not_eligible(loop):
 def test_pass_ending_parked(loop):
     """A markerless issue goes to triage; the agent parks it and explains why.
 
-    The park is the agent's: it applies the label and comments, exactly as
-    `build_prompt` instructs. The driver then reads the label back and records it.
+    The park is the agent's *decision* but not the agent's *write*: since #191 it
+    holds a read-scoped token, so it records the comment and the label in the write
+    manifest and the driver applies them. The driver then reads the label back and
+    records the outcome.
     """
     gh = FakeGitHub(
         issues=[issue(102, body="Something vague.", labels=["P2"])],
@@ -727,10 +852,10 @@ def test_pass_ending_parked(loop):
     )
     agent = StubAgent(
         stream=agent_stream(final="Two readings of the requirement; needs a human decision.", cost=0.42),
-        side_effect=lambda: (
-            gh.add_label(102, agent_session_driver.PARK_LABEL),
-            gh.add_comment(102, DRIVER_LOGIN, "Parking: two readings of the requirement."),
-        ),
+        manifest=[
+            {"kind": "issue_comment", "issue": 102, "body": "Parking: two readings of the requirement."},
+            {"kind": "label", "issue": 102, "add": [agent_session_driver.PARK_LABEL]},
+        ],
     )
 
     code, out = loop.run(gh, agent=agent)
@@ -739,6 +864,14 @@ def test_pass_ending_parked(loop):
     assert "ELIGIBLE #102  triage (Priority 3: Groom)" in out
     assert "outcome  parked" in out
     assert "parked -- excluded from future selection unless --retry 102" in out
+
+    # Both writes were performed by the driver, in manifest order, on the write
+    # credential -- not by the agent, which had no way to issue them.
+    assert [kind for kind, _ in gh.write_calls] == ["issue_comment", "issue_edit"]
+    assert "  writes   2/2 applied by the driver" in out
+    for argv, env in gh.calls_with_env:
+        if argv[:3] in (["gh", "issue", "comment"], ["gh", "issue", "edit"]):
+            assert env.get("GH_TOKEN") == WRITE_TOKEN, f"a write ran on the wrong credential: {argv}"
 
     (row,) = loop.rows("runs.jsonl")
     assert row["outcome"] == "parked"
@@ -815,7 +948,7 @@ def golden_fixture():
         issue(301, body="No marker, no tier.", labels=["P1"]),
         # markerless, parked, latest comment is a bot -> stays parked
         issue(302, body="Also markerless.", labels=["P1", agent_session_driver.PARK_LABEL],
-              comments=[comment(DRIVER_LOGIN, "the original report"), comment("github-actions[bot]", "CI note")]),
+              comments=[comment(HUMAN_LOGIN, "the original report"), comment("github-actions[bot]", "CI note")]),
         # specced auto-ok, no PR -> execute
         issue(303, body=spec_body("auto-ok"), labels=["P1"]),
         # specced needs-review -> refine
@@ -889,23 +1022,17 @@ def test_selection_output_is_byte_identical_to_the_golden(loop):
 # --- case 4: the discriminating case (#183) ---------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "issue #183: has_new_human_comment reads only the latest comment and treats any "
-        "author that is not *[bot] as a human. The agent posts its park explanation under "
-        "the driver's own gh identity -- a human login on this host -- so the driver reads "
-        "its own comment as grounds to unpark, and clears the attempt counters while doing "
-        "it. Flips to XPASS(strict) -> failure the moment #183 lands, so nobody has to "
-        "remember to unskip it."
-    ),
-)
 def test_agent_park_comment_under_driver_identity_does_not_unpark(loop):
-    """Two passes. The agent parks and comments as itself; the issue must stay parked.
+    """Two passes. The driver parks and comments as itself; the issue must stay parked.
 
     This is the chain from #183, not a tableau of it: pass 1's park label and park
-    comment are written by the stubbed agent into the fixture, and pass 2 reads them
-    back through the same `gh` surface a real pass would.
+    comment are real manifest writes, and pass 2 reads them back through the same
+    `gh` surface a real pass would.
+
+    It fails without `DRIVER_GH_LOGIN`. The driver's account is a PAT-backed machine
+    user, so its login carries no `[bot]` suffix and nothing about the name says
+    machine — its own park explanation reads as a human reply, the next pass unparks,
+    the attempt counters reset, and the loop breaker can never fire.
     """
     gh = FakeGitHub(
         issues=[issue(102, body="Something vague.", labels=["P2"])],
@@ -913,12 +1040,10 @@ def test_agent_park_comment_under_driver_identity_does_not_unpark(loop):
     )
     agent = StubAgent(
         stream=agent_stream(final="Two readings of the requirement; needs a human decision."),
-        side_effect=lambda: (
-            gh.add_label(102, agent_session_driver.PARK_LABEL),
-            # The agent runs `gh issue comment` under whatever identity the driver
-            # host is authenticated as, which on this host is a human login.
-            gh.add_comment(102, DRIVER_LOGIN, "Parking: two readings of the requirement."),
-        ),
+        manifest=[
+            {"kind": "issue_comment", "issue": 102, "body": "Parking: two readings of the requirement."},
+            {"kind": "label", "issue": 102, "add": [agent_session_driver.PARK_LABEL]},
+        ],
     )
 
     first_code, _ = loop.run(gh, agent=agent)
@@ -938,3 +1063,299 @@ def test_agent_park_comment_under_driver_identity_does_not_unpark(loop):
     assert agent_session_driver.PARK_LABEL in gh.labels_of(102)
     # And the agent was not dispatched a second time.
     assert len(agent.calls) == 1
+
+
+# --- case 5: the credential split (#191) ------------------------------------
+
+
+def test_the_driver_opens_the_pr_the_agent_recorded(loop):
+    """The agent cannot call `gh pr create`. It records the PR, and the driver --
+    holding the write credential -- pushes the branch and opens it, in that order.
+
+    This is the pass that makes the split load-bearing rather than decorative: the
+    PR the gate then grades is one the driver created.
+    """
+    head = NEW_PR_HEAD
+    gh = FakeGitHub(
+        issues=[issue(105, body=spec_body("auto-ok"), labels=["P1"])],
+        board_items=[board_item(105)],
+    )
+    agent = StubAgent(
+        stream=agent_stream(final="Implemented and graded.", cost=2.0),
+        manifest=[
+            {"kind": "push", "branch": "feat/105-thing"},
+            {
+                "kind": "pr_create",
+                "head": "feat/105-thing",
+                "title": "feat: the thing",
+                "body": gate_body(105, verdict="eligible-for-auto-merge", ci_row=f"1/1 pass @ {head[:7]}"),
+            },
+        ],
+    )
+
+    code, out = loop.run(gh, agent=agent)
+
+    assert code == 0
+    assert "  writes   2/2 applied by the driver" in out
+
+    # The branch went up before the PR referenced it, on an explicit refspec.
+    assert ["push", "--set-upstream", "origin", "feat/105-thing:refs/heads/feat/105-thing"] in gh.git_calls
+    assert [kind for kind, _ in gh.write_calls] == ["pr_create"]
+
+    # And the gate graded the PR the driver just made.
+    (row,) = loop.rows("runs.jsonl")
+    assert row["outcome"] == "gate-eligible"
+    assert row["pr"].endswith("/pull/900")
+    assert row["writes"] == {"recorded": 2, "applied": 2, "ok": True}
+
+
+def test_the_agent_is_invoked_with_a_credential_that_cannot_write(loop):
+    """The driver installs the write token in its *own* environment so `gh` inherits
+    it. The property that matters is that the child's environment, derived from that
+    same environment, does not carry it."""
+    gh = FakeGitHub(issues=[issue(106, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(106)])
+    agent = StubAgent()
+
+    loop.run(gh, agent=agent)
+
+    parent = agent.env_at_call
+    assert parent["GH_TOKEN"] == WRITE_TOKEN, "the driver's own writes were not on the write credential"
+
+    child = credentials.agent_env(parent, credentials.resolve(parent))
+    assert child["GH_TOKEN"] == READ_TOKEN
+    assert WRITE_TOKEN not in child.values(), f"the agent inherited a write-capable credential: {child}"
+
+    # And it was told where to record what it cannot write itself.
+    argv = agent.calls[0]
+    writes_file = Path(argv[argv.index("--writes-file") + 1])
+    assert writes_file.parent == loop.run_dir(106)
+    assert "write manifest" in (loop.run_dir(106) / "prompt.txt").read_text(encoding="utf-8")
+
+
+def test_a_manifest_with_an_unknown_kind_applies_nothing(loop):
+    """All-or-nothing. The valid comment ahead of the bad entry is not applied
+    either, because a manifest the driver does not fully understand is one whose
+    author's intent it does not fully understand."""
+    gh = FakeGitHub(issues=[issue(107, body="Vague.", labels=["P2"])], board_items=[board_item(107)])
+    agent = StubAgent(
+        stream=agent_stream(final="Tried to merge itself.", cost=0.1),
+        manifest=[
+            {"kind": "issue_comment", "issue": 107, "body": "A perfectly good comment."},
+            {"kind": "merge_pr", "pr": 900},
+        ],
+    )
+
+    code, out = loop.run(gh, agent=agent)
+
+    assert code == 0
+    assert gh.write_calls == [], "a rejected manifest still reached GitHub"
+    assert "WRITE REJECTED" in out and "merge_pr" in out
+
+    (row,) = loop.rows("runs.jsonl")
+    assert "write manifest rejected" in row["reason"]
+    assert row["writes"] == {"recorded": 2, "applied": 0, "ok": False}
+
+
+def test_a_manifest_cannot_push_to_the_integration_branch(loop):
+    gh = FakeGitHub(issues=[issue(108, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(108)])
+    agent = StubAgent(manifest=[{"kind": "push", "branch": "main"}])
+
+    _, out = loop.run(gh, agent=agent)
+
+    assert ["push", "--set-upstream", "origin", "main:refs/heads/main"] not in gh.git_calls
+    assert "WRITE REJECTED" in out
+
+def test_a_missing_credential_stops_the_run_rather_than_falling_back(loop):
+    """No degraded mode. The driver runs under its own account or it does not run --
+    because the fallback is reached by *omission* (an unexported variable, a cron with
+    a clean environment), and its result is a write attributed to a human."""
+    gh = FakeGitHub(issues=[issue(109, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(109)])
+
+    for var in (credentials.READ_TOKEN_VAR, credentials.WRITE_TOKEN_VAR, credentials.LOGIN_VAR):
+        loop.monkeypatch.setenv(credentials.READ_TOKEN_VAR, READ_TOKEN)
+        loop.monkeypatch.setenv(credentials.WRITE_TOKEN_VAR, WRITE_TOKEN)
+        loop.monkeypatch.setenv(credentials.LOGIN_VAR, DRIVER_LOGIN)
+        loop.monkeypatch.delenv(var, raising=False)
+
+        with pytest.raises(SystemExit) as excinfo:
+            loop.run(gh, argv=["--dry-run"])
+        assert excinfo.value.code == 2, f"missing {var} did not stop the run"
+        assert gh.write_calls == []
+
+
+def test_a_token_belonging_to_a_human_stops_the_run(loop):
+    """The whole point of a dedicated account is that nothing is written as Les. A
+    token pasted into the wrong slot is the likeliest way that happens, and it is
+    invisible without asking GitHub whose token it is."""
+    gh = FakeGitHub(
+        issues=[issue(109, body=spec_body("auto-ok"), labels=["P1"])],
+        board_items=[board_item(109)],
+        logins={READ_TOKEN: DRIVER_LOGIN, WRITE_TOKEN: HUMAN_LOGIN},
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        loop.run(gh, argv=["--dry-run"])
+
+    assert excinfo.value.code == 2
+    assert gh.write_calls == []
+
+
+def test_a_human_read_token_stops_the_run_too(loop):
+    gh = FakeGitHub(
+        issues=[issue(109, body=spec_body("auto-ok"), labels=["P1"])],
+        board_items=[board_item(109)],
+        logins={READ_TOKEN: HUMAN_LOGIN, WRITE_TOKEN: DRIVER_LOGIN},
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        loop.run(gh, argv=["--dry-run"])
+
+    assert excinfo.value.code == 2
+
+
+def test_the_resolved_identity_is_reported(loop):
+    gh = FakeGitHub(issues=[issue(109, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(109)])
+
+    _, out = loop.run(gh, argv=["--dry-run"])
+
+    assert f"identity: acting as {DRIVER_LOGIN}" in out
+
+
+def test_a_human_comment_still_unparks(loop):
+    """The bot-login set must not swallow the signal it exists to disambiguate."""
+    gh = FakeGitHub(
+        issues=[issue(102, body="Vague.", labels=["P2", agent_session_driver.PARK_LABEL],
+                      comments=[comment(DRIVER_LOGIN, "Parking: unclear."),
+                                comment(HUMAN_LOGIN, "Do the first reading.")])],
+        board_items=[board_item(102)],
+    )
+
+    _, out = loop.run(gh, argv=["--dry-run"])
+
+    assert "UNPARK" in out.upper(), f"a real human reply did not unpark the issue:\n{out}"
+
+
+
+
+def test_build_prompt_no_longer_instructs_a_github_write(loop):
+    """Issue #191's named check for criterion 2: the prompt used to tell the agent to
+    run `gh issue comment` and `label_manager.py park`, both of which its token now
+    refuses. An instruction that cannot succeed is worse than none -- the agent
+    retries it and the park explanation never appears."""
+    prompt = agent_session_driver.build_prompt(
+        "https://github.com/owner/repo/issues/42", "execute", Path("/skill"), Path("/run/writes.jsonl")
+    )
+
+    assert "gh issue comment" not in prompt
+    assert "label_manager.py" not in prompt
+    assert "/run/writes.jsonl" in prompt
+    assert "read-scoped" in prompt
+
+
+def test_an_ssh_remote_is_called_out_at_startup(loop):
+    """The fake's origin is `git@github.com:...`, so the pass exercises the warning."""
+    gh = FakeGitHub(issues=[issue(111, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(111)])
+
+    _, out = loop.run(gh, argv=["--dry-run"])
+
+    assert "SSH remote" in out
+    assert "git push" in out
+
+
+
+def test_the_write_token_can_live_in_a_user_credentials_file(loop):
+    """So it is neither typed at a prompt nor kept in the agent's working tree."""
+    creds_file = loop.tmp_path / "user-config" / "credentials.env"
+    creds_file.parent.mkdir(parents=True)
+    creds_file.write_text(f"{credentials.WRITE_TOKEN_VAR}={WRITE_TOKEN}\n", encoding="utf-8")
+    creds_file.chmod(0o600)
+    loop.monkeypatch.delenv(credentials.WRITE_TOKEN_VAR, raising=False)
+    loop.monkeypatch.setenv(credentials.CONFIG_FILE_VAR, str(creds_file))
+
+    gh = FakeGitHub(issues=[issue(112, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(112)])
+    code, out = loop.run(gh, argv=["--dry-run"])
+
+    assert code == 0
+    assert f"identity: acting as {DRIVER_LOGIN}" in out
+
+
+def test_a_group_readable_credentials_file_stops_the_run(loop):
+    creds_file = loop.tmp_path / "user-config" / "credentials.env"
+    creds_file.parent.mkdir(parents=True)
+    creds_file.write_text(f"{credentials.WRITE_TOKEN_VAR}={WRITE_TOKEN}\n", encoding="utf-8")
+    creds_file.chmod(0o644)
+    loop.monkeypatch.setenv(credentials.CONFIG_FILE_VAR, str(creds_file))
+
+    gh = FakeGitHub(issues=[issue(112, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(112)])
+    with pytest.raises(SystemExit) as excinfo:
+        loop.run(gh, argv=["--dry-run"])
+    assert excinfo.value.code == 2
+
+
+def test_a_project_env_still_wins_over_the_user_file(loop):
+    """Project configuration is the more specific of the two, and an operator
+    overriding for one repo should not have to edit their global file."""
+    creds_file = loop.tmp_path / "user-config" / "credentials.env"
+    creds_file.parent.mkdir(parents=True)
+    creds_file.write_text(f"{credentials.LOGIN_VAR}=some-other-account\n", encoding="utf-8")
+    creds_file.chmod(0o600)
+    loop.monkeypatch.setenv(credentials.CONFIG_FILE_VAR, str(creds_file))
+
+    gh = FakeGitHub(issues=[issue(112, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(112)])
+    code, out = loop.run(gh, argv=["--dry-run"])
+
+    assert code == 0
+    assert f"identity: acting as {DRIVER_LOGIN}" in out
+
+
+def test_a_write_token_in_a_committable_file_stops_the_run(loop):
+    """The surviving hygiene check. Where the token lives is not containment -- the
+    agent runs as the same uid and can read any file the driver can -- but a token in
+    a file git would happily add is one `git add -A` from being published, and that
+    does not un-happen."""
+    env_file = loop.repo_path / ".env"
+    env_file.write_text(f"{credentials.WRITE_TOKEN_VAR}={WRITE_TOKEN}\n", encoding="utf-8")
+    loop.monkeypatch.chdir(loop.repo_path)
+
+    gh = FakeGitHub(
+        issues=[issue(113, body=spec_body("auto-ok"), labels=["P1"])],
+        board_items=[board_item(113)],
+        committable=[str(env_file.resolve())],
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        loop.run(gh, argv=["--dry-run"])
+    assert excinfo.value.code == 2
+
+
+def test_a_write_token_in_a_gitignored_env_beside_the_driver_is_allowed(loop):
+    """The configuration Les actually keeps: both tokens in a git-ignored `.env`.
+    Decided 2026-08-10 -- refusing it forbade the convenient setup and bought nothing,
+    because no storage location on this host is out of the agent's reach anyway."""
+    env_file = loop.repo_path / ".env"
+    env_file.write_text(f"{credentials.WRITE_TOKEN_VAR}={WRITE_TOKEN}\n", encoding="utf-8")
+    loop.monkeypatch.chdir(loop.repo_path)
+    loop.monkeypatch.delenv(credentials.WRITE_TOKEN_VAR, raising=False)
+
+    gh = FakeGitHub(issues=[issue(113, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(113)])
+    code, out = loop.run(gh, argv=["--dry-run"])
+
+    assert code == 0
+    assert f"identity: acting as {DRIVER_LOGIN}" in out
+
+
+def test_the_agent_still_never_gets_the_write_token_from_that_env(loop):
+    """The split is what survives the relaxation: the token being readable *on disk*
+    is not the same as it being handed over. The child's environment stays read-only,
+    so every cooperative path is still contained."""
+    env_file = loop.repo_path / ".env"
+    env_file.write_text(f"{credentials.WRITE_TOKEN_VAR}={WRITE_TOKEN}\n", encoding="utf-8")
+    loop.monkeypatch.chdir(loop.repo_path)
+    loop.monkeypatch.delenv(credentials.WRITE_TOKEN_VAR, raising=False)
+
+    gh = FakeGitHub(issues=[issue(114, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(114)])
+    agent = StubAgent()
+    loop.run(gh, agent=agent)
+
+    child = credentials.agent_env(agent.env_at_call, credentials.resolve(agent.env_at_call))
+    assert child["GH_TOKEN"] == READ_TOKEN
+    assert WRITE_TOKEN not in child.values()

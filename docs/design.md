@@ -107,7 +107,9 @@ issues into autonomy tiers for free.
 3. **Agent SDK** (Python/TS) — full programmatic loop w/ hooks + subagents. **Overkill for
    decafclaw**: it's *already* an agent runtime with its own hooks/subagents/workflow
    engine. Building a second orchestrator to drive the first is redundant.
-4. **Hooks** — `PreToolUse` is the guardrail layer rather than the primary loop.
+4. **Hooks** — `PreToolUse` is the guardrail layer rather than the primary loop. Since #191 it is
+   explicitly *defence in depth*, not the containment layer: the read-scoped credential is, and the
+   hook stays so that a token which turns out to be over-scoped still meets a second refusal.
 
    **Unverified, flagged rather than fixed:** this entry used to assert a hook can hard-block *even
    under `bypassPermissions`*. That came from the same 2026-07-23 research pass whose own note below
@@ -531,15 +533,64 @@ Closed, but the *reasoning* is still load-bearing.
   rather than opening anything. What was actually missing was a *mechanism for the asymmetry* — one
   flat session-wide `--allowedTools` cannot say "implementers write, the verifier does not."
 
-  **D2 — how the verifier's read-only-ness is enforced — was spiked, not decided.** See
+  **D2 — how the verifier's read-only-ness is enforced — was spiked, then decided for GitHub
+  writes only (#191, 2026-08-10).** See
   [the spike](dev-sessions/2026-08-01-1932-verifier-containment/spike-verifier-containment.md).
   `--agents` honors an undocumented per-agent `tools` allowlist that yields an intersection rather
   than inheritance, which contains `Write`/`Edit` against a control. It does **not** contain a
   verifier that runs checks: `Bash(python3:*)` and `Bash(pytest:*)` are write primitives, and a
-  cooperative run *looks* contained because the subagent declines rather than being denied. The
-  proposed answer is to give the verifier no `Bash` at all and have the parent run the manifest's
-  named commands, which also moves command selection out of the verifier's judgment. Not yet
-  decided or built.
+  cooperative run *looks* contained because the subagent declines rather than being denied.
+
+  **What #191 settled: containment by credential, for the GitHub half, under a dedicated
+  account.** A tool allowlist cannot
+  contain an agent that has a shell, and a compliant agent is indistinguishable from a contained
+  one — but a read-scoped token is refused by the API whatever the agent runs and however
+  cooperative it is being. `driver/credentials.py` builds the agent's child environment with the
+  read token and strips every write-capable one; `driver/writes.py` performs the run's comments,
+  labels, branch push and PR from a schema-validated manifest, under the driver's write token.
+  There is no manifest kind that merges.
+
+  **And there is no degraded mode.** An earlier revision of this change let the driver fall back to
+  the host `gh` keyring, with a loud warning. That was wrong for the reason the whole allowlist
+  section above is written: a fallback is reached by *omission* — an unexported variable, a cron
+  with a clean environment — and warnings scroll past. The driver now requires `DRIVER_GH_LOGIN`
+  plus both tokens, verifies each token against a live `gh api user`, and refuses to start if
+  either belongs to somebody else. It runs under its own account or it does not run.
+
+  That also supplies #183's missing input. The driver's identity was previously whatever the host
+  happened to be authenticated as, which is why `has_new_human_comment` could only guess by
+  suffix; a PAT-backed machine user has no `[bot]` suffix, so the guess failed and the driver
+  unparked the issues it had just parked. `credentials.bot_logins` now carries the configured
+  login, which settles #183 criteria 1 and 2. Criteria 3 (a comment watermark relative to the park
+  time) and 4 (attempt counters surviving an unpark) are untouched and the issue stays open.
+
+  **What #191 did not settle**, and is still the spike's open question: the *local* half. The agent
+  runs as the same uid as the driver, with a shell. So `Bash(python3:*)` is still a write primitive
+  against the working tree, and — the sharper point — **every file the driver's operator can read,
+  the agent can read too**: `~/.zshrc`, the user credentials file, the `gh` keyring. The driver's
+  refusal to load a raw write token from a `.env` inside the agent's tree is hygiene against
+  accidental commit and backup, not a wall; it is documented as such in `usage.md` rather than left
+  to be inferred.
+
+  The single asymmetry that does hold is incidental: macOS does not expose a process's environment
+  through `ps`, even to its owner, so a token living only in the driver's environment is not
+  readable that way. Verified 2026-08-10 against `ps eww` and `ps -E`. On Linux
+  `/proc/<pid>/environ` is readable by the same uid and this does not hold, which is exactly why it
+  is not load-bearing.
+
+  **Decided 2026-08-10: deferred rather than solved.** Both tokens live in a git-ignored `.env`,
+  and the driver refuses only a credential in a file git would actually add — a token one
+  `git add -A` from publication is recoverable-from but not undoable, and that is the part that was
+  ever real. An earlier revision refused any write credential inside the agent's tree; it was
+  removed because it forbade the working configuration while buying nothing, which is the shape of
+  a control that measures away rather than protects (findings.md defect class 4).
+
+  So the honest statement is two claims, only one of them enforced: *the agent cannot act on GitHub
+  as anyone but its own read-only self* — mechanism — and *a determined agent on this host could
+  still find the driver's write token* — true, unmitigated. Closing the second needs a separate
+  uid, a container, or a different machine (#3's GHA host would do it). The spike's proposal — give
+  the verifier no `Bash` at all and have the parent run the manifest's named commands — narrows the
+  verifier case specifically, and remains unbuilt.
 - **Where park state lives** → **decided 2026-07-29 (#5): a `driver-parked` label on the issue.**
   This **revises D1 in part**, and the revision is the interesting half. Triage had settled D1 —
   derive the park list from the latest outcome per issue in `runs.jsonl` — and the handoff said not

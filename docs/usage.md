@@ -144,6 +144,114 @@ make run-self     # drive this repo (ISSUE=n to pin one)
 Override the target with `REPO=`, `REPO_PATH=`, `BOARD=`; the per-issue ceiling with `BUDGET=`;
 queue depth with `ISSUES=`.
 
+### The driver's own GitHub account
+
+**The driver does not use your credentials, for reads or for writes.** It runs under a machine
+user you create for it, with two fine-grained PATs on that one account:
+
+| Variable | Where it lives | What it is |
+|---|---|---|
+| `DRIVER_GH_LOGIN` | `.env` | the account both tokens must belong to |
+| `AGENT_GH_READ_TOKEN` | `.env` | read-only PAT — Metadata, Contents, Issues, Pull requests, Actions, Checks |
+| `DRIVER_GH_WRITE_TOKEN` | **your shell, never `.env`** | write PAT — Contents, Issues, Pull requests |
+
+The agent gets the read token and cannot write to GitHub at all. It records the writes it wants —
+comments, labels, the branch push, the PR — into `writes.jsonl` in the run directory, and the driver
+validates that file and performs them with the write token after the run ends.
+
+**All three are required and there is no fallback.** The driver refuses to start if any is missing,
+if the two tokens are identical, or if either token turns out to belong to somebody other than
+`DRIVER_GH_LOGIN` — checked against a live `gh api user`, once per token, before anything is spent.
+A successful start prints the account it resolved:
+
+```
+identity: acting as your-agent-account (agent reads, driver writes)
+```
+
+Two failure modes that check catches, both of which are silent otherwise:
+
+- **A missing `DRIVER_GH_WRITE_TOKEN`** — an unexported variable, or a cron with a clean
+  environment. The old behaviour was to fall back to your `gh` keyring, which meant the driver's
+  commits and comments arrived under your name.
+- **The wrong token in a slot** — a personal PAT pasted into the read variable. Invisible without
+  asking GitHub whose token it is.
+
+### Where to keep the tokens
+
+**Both go in `.env`, which is git-ignored.** Decided 2026-08-10, after an earlier revision of this
+change refused a write credential in any file inside the agent's working tree. That refusal bought
+nothing — see the next section — while forbidding the one configuration anybody would keep using.
+
+The driver refuses only the case that is still real: a credential in a file **git would happily
+add**. A token in a tracked file is one `git add -A` from being published, and that does not
+un-happen. A `.gitignore`d `.env` beside the driver is fine.
+
+Two optional routes, if a deployment ever wants them:
+
+- **A user-level file** at `${XDG_CONFIG_HOME:-~/.config}/agent-session/credentials.env` (override
+  with `DRIVER_CREDENTIALS_FILE`), loaded after `.env` so project settings win. Must be mode `0600`.
+- **A command instead of a value.** Any credential variable accepts a `<VAR>_CMD` form; the driver
+  runs it and takes stdout, so the secret can sit in a keychain:
+  `DRIVER_GH_WRITE_TOKEN_CMD=security find-generic-password -s agent-session-write -w`. Works with
+  `op read`, `pass show`, anything that prints a token. Run without a shell, so a config file is
+  not a code-execution surface.
+
+Neither hides anything from the agent. They keep the secret out of shell history and out of
+plaintext on disk, which is worth something on a shared or backed-up machine and nothing here.
+
+### What the credential split does and does not contain
+
+**It does contain the GitHub API.** The agent's token is read-only, so `gh issue comment`, `gh pr
+merge` and `git push` over HTTPS are refused by GitHub regardless of what the agent runs, how it
+phrases it, or whether it is cooperating. That is the property a tool allowlist could not give, and
+it holds.
+
+**It does not contain the local machine, and on one uid it cannot.** The agent runs as your user
+with a shell. It can read `.env`, `~/.zshrc`, the credentials file — and *replay* a keychain
+command: `security find-generic-password -w` returns the secret to any process running as you,
+without a prompt, because the ACL trusts the binary rather than the caller (verified 2026-08-10).
+Generalised:
+
+> **Anything the driver can obtain with no human present, the agent can obtain the same way.**
+
+The driver runs unattended, so every route to the token is non-interactive, so every route is open
+to a process with the same uid. Keychain, `0600` file, dotfile and environment variable differ in
+hygiene — history, backups, accidental commits — and not at all in who can reach them. There is one
+incidental exception: macOS does not expose a process's environment through `ps` even to its owner
+(verified against `ps eww` and `ps -E`; Linux `/proc/<pid>/environ` does), so a token reaching the
+driver's environment by a route the agent could not replay would be safe. No such route exists
+without a human at the keyboard.
+
+**So this is the accepted risk, stated plainly.** The agent is handed a read-only credential and
+every ordinary path — cooperative, careless, or confused — is contained by mechanism. An agent that
+deliberately goes looking for a second credential is not, and would find one. That has never been
+this project's observed failure mode ([findings.md](findings.md) defect class 1 is self-graded work,
+not exfiltration), and the alternative costs an architecture change. Revisit if a run ever actually
+does it.
+
+### Bounding what a found token is worth
+
+Since it cannot be hidden, make holding it worth less. This is the part that actually reduces risk,
+and all of it is GitHub-side configuration:
+
+- **Scope the write PAT to exactly the repos it drives.** Fine-grained, Contents + Issues + Pull
+  requests at Write. Nothing else, nothing on your other repos.
+- **Do not grant it `Workflows`.** With it, anything holding the token can rewrite `.github/**` and
+  get arbitrary CI execution — a much larger prize than the token.
+- **Protect `main`.** Require a pull request and a review. Then a found token still cannot merge,
+  which keeps the system's central promise mechanical rather than procedural.
+- **Short expiry**, and rotate.
+
+### The boundary, if it is ever wanted
+
+The write token should not be on the machine the agent runs on. None of these is built:
+
+1. **Driver on a different host** — a GitHub Actions runner
+   ([#3](https://github.com/lmorchard/agent-sessions/issues/3)). The agent's machine never holds a
+   write credential at all, and it fits the architecture, since the driver already does every write.
+2. **Agent in a container or VM**, with only the read token and the working tree mounted.
+3. **Agent under a separate uid**, with the driver's credential unreadable by it.
+
 ### What "eligible" means
 
 Open **and** carries the marker **and** its anchored `## Tier:` line says `auto-ok` **and** no
@@ -236,8 +344,15 @@ Under `<state-dir>/runs/<issue>-<timestamp>/`:
 | `final.txt` | the run's closing summary |
 | `gate.yaml` | the gate block as parsed |
 | `prompt.txt` | exactly what the run was asked |
+| `writes.jsonl` | the GitHub writes the agent recorded, one JSON object per line |
+| `writes-result.json` | what the driver made of them — validation errors, per-entry status, output |
 | `denials.txt` | permission denials, if any |
 | `child.pid` | for orphan detection |
+
+`writes-result.json` is the first thing to read when a run "did nothing": a manifest with one
+malformed entry applies **none** of them, so a park comment can go missing while the run itself
+looks fine. The driver prints `WRITE REJECTED` and folds the reason into the `runs.jsonl` row, but
+the per-entry detail is here.
 
 Plus two append-only logs in the state dir, both **history rather than state**:
 

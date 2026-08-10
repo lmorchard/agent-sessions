@@ -111,6 +111,6 @@ model is good at.
   doesn't exist → surface before writing more.
 
 When stopping or surfacing due to any of the above:
-1. **Post a top-level comment on the GitHub issue** using `gh issue comment <issue_number> --body "<text>"` explaining plainly what needs a decision, why, and what choices exist.
-2. **Apply the parking label** using `python3 scripts/label_manager.py park --issue <issue_number>`.
+1. **Record a top-level comment on the GitHub issue** by appending an `issue_comment` entry to the write manifest (`references/write-manifest.md`) explaining plainly what needs a decision, why, and what choices exist.
+2. **Record the parking label** as a `label` entry adding `agent-session:needs-human`.
 3. Stop and report the parked outcome.
