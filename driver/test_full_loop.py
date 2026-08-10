@@ -51,6 +51,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -301,10 +302,6 @@ class FakeGitHub:
                 continue
             out[f] = record[f]
         return out
-
-    @staticmethod
-    def _flag(argv, name):
-        return argv[argv.index(name) + 1] if name in argv else ""
 
     @staticmethod
     def _graphql_var(argv, key):
@@ -769,6 +766,38 @@ def test_pass_ending_parked(loop):
 
     inbox = (loop.state_dir / "inbox.md").read_text(encoding="utf-8")
     assert f"[{FROZEN_TS}] Issue #102 escalated: parked: {row['reason']}\n" == inbox
+
+
+def test_a_held_lock_takes_the_issue_out_of_the_pass(loop):
+    """An eligible issue whose lock another host holds is skipped, not run.
+
+    The lock is the one step of the pass that can veto a decision selection has
+    already made, so it gets a case where it does: a fresh ref on the remote, well
+    inside the phase TTL.
+    """
+    gh = FakeGitHub(
+        issues=[issue(103, body=spec_body("auto-ok"), labels=["P1"])],
+        board_items=[board_item(103)],
+        held_locks={"refs/locks/issue-103": ("2222222222222222222222222222222222222222", int(time.time()))},
+    )
+    agent = StubAgent()
+
+    code, out = loop.run(gh, agent=agent)
+
+    assert code == 0
+    assert "ELIGIBLE #103  tier: auto-ok (Priority 2: Execute - execute)" in out
+    assert "SKIP    #103  lock contention (another agent holds or held lock)" in out
+    assert "eligible: 0 ()" in out
+    assert "nothing eligible; no runs attempted." in out
+
+    # Nothing ran, so nothing was spent, counted or recorded.
+    assert agent.calls == []
+    assert gh.label_ops == []
+    assert loop.rows("runs.jsonl") == []
+    assert not (loop.state_dir / "inflight.json").exists()
+    # The contended ref was read, and no lock was pushed over it.
+    assert ["ls-remote", "origin", "refs/locks/issue-103"] in gh.git_calls
+    assert not [c for c in gh.git_calls if c[:1] == ["push"]]
 
 
 # --- case 3: selection as a golden ------------------------------------------
