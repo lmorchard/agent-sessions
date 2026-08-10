@@ -136,3 +136,83 @@ def test_is_specced():
         "body": "Plain issue description",
     }
     assert agent_session_driver.is_specced(iss_neither) is False
+
+
+def test_phase_tiers_coverage():
+    expected_phases = {
+        "triage",
+        "refine",
+        "execute",
+        "address_comments",
+        "fix_ci",
+        "request_review",
+        "grade_gate",
+    }
+    assert expected_phases.issubset(agent_session_driver.PHASE_TIERS.keys())
+    for phase, tier in agent_session_driver.PHASE_TIERS.items():
+        assert tier in ("high", "low")
+
+
+def test_driver_tier_passed(tmp_path: Path, monkeypatch):
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "REPO=owner/repo\n"
+        f"REPO_PATH={repo_dir}\n"
+        f"SKILL_DIR={skill_dir}\n"
+        "BACKEND=opencode\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPO", "owner/repo")
+    monkeypatch.setenv("REPO_PATH", str(repo_dir))
+    monkeypatch.setenv("SKILL_DIR", str(skill_dir))
+    monkeypatch.setenv("BACKEND", "opencode")
+
+    class MockResult:
+        stdout = json.dumps([])
+        returncode = 0
+
+    def mock_run(cmd, *args, **kwargs):
+        return MockResult()
+
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    captured_args = []
+
+    def mock_run_agent(argv):
+        captured_args.append(argv)
+        return 0
+
+    monkeypatch.setattr("agent_sessions.driver.agent_runner.run_agent", mock_run_agent)
+
+    # Test execute tier (high)
+    ret = agent_session_driver.main(["--issue", "42"])
+    assert ret == 0
+    assert len(captured_args) == 1
+    assert "--tier" in captured_args[0]
+    tier_idx = captured_args[0].index("--tier")
+    assert captured_args[0][tier_idx + 1] == "high"
+
+    # Test grade_gate tier (low): mock pr_for_issue and check functions
+    captured_args.clear()
+
+    def mock_pr_for_issue(num, open_prs):
+        return "123\thttps://github.com/owner/repo/pull/123"
+
+    monkeypatch.setattr("agent_sessions.driver.gh_query.pr_for_issue", mock_pr_for_issue)
+    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.check_pr_unresolved_threads", lambda r, p: 0)
+    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.check_pr_ci_status", lambda r, p: (0, 0))
+    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.check_pr_reviews", lambda r, p: (1, 1))
+
+    ret = agent_session_driver.main(["--issue", "42"])
+    assert ret == 0
+    assert len(captured_args) == 1
+    assert "--tier" in captured_args[0]
+    tier_idx = captured_args[0].index("--tier")
+    assert captured_args[0][tier_idx + 1] == "low"
+
