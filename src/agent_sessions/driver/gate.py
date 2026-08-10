@@ -36,7 +36,54 @@ import json
 import re
 import sys
 
-# A bare 7-40 char hex token anywhere in the ci row.
+# Schema definition for gate block fields per issue #184
+_SUBSTITUTE_MARKERS = ("-- via substitute", "clean-by-substitute", "substitute")
+
+def _is_substituted(val: str) -> bool:
+    """Check if a field value explicitly indicates substitution using schema markers."""
+    v = (val or "").lower()
+    return any(m in v for m in _SUBSTITUTE_MARKERS)
+
+
+def validate_gate_block(fields: dict[str, str]) -> tuple[bool, list[str]]:
+    """Schema validation for gate block fields.
+
+    Covers every required field (`verdict`, `tier`, `checks`, `tamper`,
+    `project-gates`, `threads`, `risk-paths`) with enum/format rules.
+    Returns (is_valid, list_of_errors).
+    """
+    errors: list[str] = []
+    required_fields = ["tier", "checks", "tamper", "project-gates", "threads", "risk-paths", "verdict"]
+    for f in required_fields:
+        if f not in fields or not fields[f].strip():
+            errors.append(f"missing required field: {f}")
+
+    verdict = fields.get("verdict", "").strip()
+    valid_verdicts = ("", "pending", "eligible-for-auto-merge", "human-merge-required")
+    if verdict not in valid_verdicts:
+        errors.append(f"invalid verdict value: {verdict}")
+
+    return len(errors) == 0, errors
+
+
+def render_gate_block(fields: dict[str, str]) -> str:
+    """Render a human-readable YAML gate block from validated fields structure."""
+    lines = ["## Merge gate", "", "```yaml"]
+    field_order = [
+        "tier", "checks", "guards", "tamper", "freeze",
+        "project-gates", "ci", "threads", "risk-paths",
+        "amendments", "verdict", "reason"
+    ]
+    seen = set()
+    for k in field_order:
+        if k in fields:
+            lines.append(f"{k}: {fields[k]}")
+            seen.add(k)
+    for k, v in fields.items():
+        if k not in seen:
+            lines.append(f"{k}: {v}")
+    lines.extend(["```", ""])
+    return "\n".join(lines)
 #
 # Anchoring on a literal `@` made this check silently un-runnable once: #722's
 # run wrote `ci: 2/2 pass (js-test, lint-and-test) on f42c0f1` -- a correct sha
@@ -258,7 +305,7 @@ def infer_provenance(fields: dict[str, str]) -> dict[str, str]:
         prov["checks"] = "failed"
     elif "fail" in checks or "pending" in checks:
         prov["checks"] = "failed"
-    elif "substitute" in checks.lower():
+    elif _is_substituted(checks):
         prov["checks"] = "substituted"
     else:
         prov["checks"] = "real"
@@ -269,7 +316,7 @@ def infer_provenance(fields: dict[str, str]) -> dict[str, str]:
         prov["guards"] = "failed"
     elif guards == "none":
         prov["guards"] = "not-applicable"
-    elif "substitute" in guards.lower():
+    elif _is_substituted(guards):
         prov["guards"] = "substituted"
     else:
         prov["guards"] = "real"
@@ -282,7 +329,7 @@ def infer_provenance(fields: dict[str, str]) -> dict[str, str]:
         prov["tamper"] = "failed"
     elif not (tamper.startswith("clean") or tamper.startswith("amended")):
         prov["tamper"] = "failed"
-    elif "substitute" in tamper.lower():
+    elif _is_substituted(tamper):
         prov["tamper"] = "substituted"
     else:
         prov["tamper"] = "real"
@@ -295,7 +342,7 @@ def infer_provenance(fields: dict[str, str]) -> dict[str, str]:
         prov["project-gates"] = "failed"
     elif "green" not in project_gates and "pass" not in project_gates:
         prov["project-gates"] = "failed"
-    elif "substitute" in project_gates.lower():
+    elif _is_substituted(project_gates):
         prov["project-gates"] = "substituted"
     else:
         prov["project-gates"] = "real"
@@ -310,7 +357,7 @@ def infer_provenance(fields: dict[str, str]) -> dict[str, str]:
         prov["ci"] = "failed"
     elif ci == "no checks configured" or "no checks" in ci.lower():
         prov["ci"] = "not-applicable"
-    elif "substitute" in ci.lower():
+    elif _is_substituted(ci):
         prov["ci"] = "substituted"
     else:
         prov["ci"] = "real"
@@ -321,7 +368,7 @@ def infer_provenance(fields: dict[str, str]) -> dict[str, str]:
         prov["threads"] = "failed"
     elif not threads.startswith("0 unresolved"):
         prov["threads"] = "failed"
-    elif "substitute" in threads.lower():
+    elif _is_substituted(threads):
         prov["threads"] = "substituted"
     else:
         prov["threads"] = "real"
@@ -332,7 +379,7 @@ def infer_provenance(fields: dict[str, str]) -> dict[str, str]:
         prov["risk-paths"] = "failed"
     elif risk_paths != "none":
         prov["risk-paths"] = "failed"
-    elif "substitute" in risk_paths.lower():
+    elif _is_substituted(risk_paths):
         prov["risk-paths"] = "substituted"
     else:
         prov["risk-paths"] = "real"
@@ -368,7 +415,7 @@ def classify(
         if res.get("outcome") == "gate-eligible":
             sub_fields = []
             for k, v in res.get("fields", {}).items():
-                if k not in ("verdict", "reason") and "substitute" in str(v).lower():
+                if k not in ("verdict", "reason") and _is_substituted(str(v)):
                     sub_fields.append(k)
             if sub_fields:
                 res["outcome"] = "gate-human"
@@ -382,6 +429,11 @@ def classify(
         return _check_substitute_and_return(result)
 
     result["fields"] = gate_fields(gate)
+    valid, errors = validate_gate_block(result["fields"])
+    if not valid:
+        result["outcome"] = "no-gate"
+        result["reason"] = f"gate block does not validate: {'; '.join(errors)}"
+        return _check_substitute_and_return(result)
     result["provenance"] = infer_provenance(result["fields"])
     verdict = gate_field(gate, "verdict")
     reason = gate_field(gate, "reason")
