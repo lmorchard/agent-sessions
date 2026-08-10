@@ -1,0 +1,17 @@
+== select ==
+board owner/9: read 11 items (advisory only; does not gate)
+  ELIGIBLE #301  triage (Priority 3: Groom)
+  SKIP    #302  parked: triage could not tell which subsystem this is about
+repo owner/repo: read 12 open issues (8 carry the label; 2 do not: #301, #302 -- run triage)
+  ELIGIBLE #303  tier: auto-ok (Priority 2: Execute - execute)
+  ELIGIBLE #304  tier: needs-review (Priority 3: Groom - refine)
+  SKIP    #305  tier is invalid (conflict)
+  ELIGIBLE #306  tier: auto-ok (Priority 1: Unblock - address_comments)
+  ELIGIBLE #307  tier: auto-ok (Priority 1: Unblock - fix_ci)
+  SKIP    #308  PR #408 CI is still pending; waiting...
+  ELIGIBLE #309  tier: auto-ok (Priority 1: Unblock - request_review)
+  parked -- excluded from future selection unless --retry 310
+  SKIP    #310  MAX_PHASE_ATTEMPTS (3) reached for phase execute
+eligible: 1 (306:address_comments)
+
+dry run -- no claude invocation.
