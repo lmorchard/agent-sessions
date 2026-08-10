@@ -199,6 +199,40 @@ Two optional routes, if a deployment ever wants them:
 Neither hides anything from the agent. They keep the secret out of shell history and out of
 plaintext on disk, which is worth something on a shared or backed-up machine and nothing here.
 
+### What this setup supports, and what it cannot
+
+The credential split needs a machine user that can be *granted* the two levels separately. Whether
+that is possible is a property of who owns the repo and whether it is public — not of how the
+tokens are configured. Three cases:
+
+| | works | how |
+|---|---|---|
+| **Public repo + public board**, owned by anyone | yes | read = any fine-grained PAT (public read needs no grant at all); write = classic PAT, `public_repo` + `project` |
+| **Private, owned by an org the machine user is a *member* of** | yes | fine-grained on both sides, resource owner = **the org**; the cleanest arrangement |
+| **Private, owned by a user who is not the machine user** | **no** | see below |
+
+The middle row is the one to reach for if the repo has to stay private, and the precise condition
+is easy to get wrong. A fine-grained PAT's *resource owner* is either the token holder's own
+account or **an organization the token holder is a member of** — so the machine user must be an org
+**member**, not an outside collaborator, and the org must permit fine-grained PATs (some
+configurations also require an owner to approve each one). The repo then appears in the token's
+repository selection because the *org* owns it, not because the machine user was invited to it.
+
+The last row is a hard limit, not a configuration gap. A fine-grained PAT reaches only repos owned
+by its resource owner, so it cannot touch a private repo owned by some other user however it was
+invited — and a machine user will never own yours. A classic PAT is not owner-scoped and *can*
+reach it — but its scopes are coarse: `repo` is read **and** write, with no read-only-private
+variant, so granting the agent read would grant it write and collapse the split. There is no third
+option short of a GitHub App.
+
+**Boards are a separate grant.** ProjectsV2 keeps its own collaborator list and repository access
+does not feed into it. A public board is readable by anyone; a private one needs the machine user
+added under the project's Settings → Manage access, whatever its repo permissions are.
+
+**So the practical shapes are: keep it public, or put it in an org.** This project drives its own
+repo under the first — public repo, public board, machine user with one fine-grained read token and
+one classic write token.
+
 ### Which kind of token, and why it is not obvious
 
 Run **`make doctor`** before debugging anything else. It resolves both tokens, checks each against
@@ -211,8 +245,8 @@ the GitHub UI gives no help with:
 | repo | agent's read token | driver's write token |
 |---|---|---|
 | public, owned by you | any fine-grained PAT on the machine user — public read is blanket and needs no grant | **classic** PAT, `public_repo` scope only |
-| private, in an org the machine user is a member of | fine-grained, resource owner = the org, repo selected, Contents/Issues/PRs at Read | same, at Read and write |
-| private, owned by you personally | **not possible** — see below | **not possible** |
+| private, owned by an org the machine user is a *member* of | fine-grained, resource owner = **the org**, repo selected, Contents/Issues/PRs/Discussions at Read | same, at Read and write |
+| private, owned by a user other than the machine user | **not possible** — see above | **not possible** |
 
 **The rule underneath it.** A fine-grained PAT has one *resource owner* — the token holder, or an
 org they are a member of — and reaches only repositories owned by that account. A machine user that
