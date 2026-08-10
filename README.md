@@ -1,6 +1,6 @@
 # agent-sessions
 
-Tooling for handing more of a software project's routine work to an AI coding agent — and,
+An autonomy harness and skill component for handing more of a software project's routine work to an AI coding agent — and,
 just as importantly, for knowing which work you shouldn't hand over.
 
 **New here?** [docs/orientation.md](docs/orientation.md) is the full introduction, including a
@@ -44,18 +44,13 @@ Two things follow, and they're the parts most easily gotten wrong:
 
 ## What's in this repo
 
-Two separate things, with different jobs:
+A harness that drives an unattended loop, and a skill component that supplies the content for each phase:
 
-**The `agent-session` skill** (`skills/agent-session/`) — a [Claude
-Code](https://claude.com/claude-code) skill that runs the per-issue loop. It's a reusable
-artifact; you could install it in another project. It never merges anything.
+**The harness** (`driver/` + `Makefile`) — the system's autonomy infrastructure. It owns the phase state machine, priority ladder, outcome classification and merge gate (`gate.py`), distributed mutual exclusion, budget accounting, pluggable agent backends, and run provenance.
 
-**The board driver** (`driver/`) — a shell script that picks the next eligible issue, runs the
-skill on it unattended, and records what happened. This is infrastructure for *this* project's
-own workflow rather than something to reuse. It also never merges anything.
+**The `agent-session` skill component** (`skills/agent-session/`) — the instructions that govern what happens *inside* each phase.
 
-Keeping them separate is deliberate: the skill is graded by whether its wording changes agent
-behaviour, the driver by whether its tests pass. Different questions, different evidence.
+Keeping them separate is deliberate: the skill component is graded by whether its wording changes agent behaviour (via cheap classifier evals or micro-tests), while the harness is graded by whether its fixture and mutation tests pass. Different questions, different evidence.
 
 ## How the skill works
 
