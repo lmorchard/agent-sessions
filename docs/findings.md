@@ -338,6 +338,33 @@ the whole-history form, and running it is how the claim "one instance, ever" sta
 remembered. Note the shape of the fix: it does not make GitHub's parser smarter, which is impossible
 from here — it changes what we hand it, which is the lever this row's lesson identified.
 
+### 8. A diagnostic that names one cause for a symptom that has several — three instances, one file, one day
+
+`make doctor` was built to explain credential failures. Three of its remedies asserted a single cause
+for a symptom that had two or three, and each one sent the operator somewhere that could not work.
+All three were caught by somebody following the advice, not by review.
+
+| # | Symptom | What the remedy blamed | The actual cause |
+|---|---|---|---|
+| 1 | write token cannot write | missing Contents/Issues/PRs permissions | a fine-grained PAT cannot write to a repo it does not own — **no checkbox can help**, and the advice was followed twice |
+| 2 | board not visible | missing `project` scope | the board is private and the account is not on *its* collaborator list; the scope was already correct |
+| 3 | read token "correctly refused" a write | the read-only permission set working | the repo was public and *neither* token had a write grant — the write token returned the identical 403 |
+
+**Instance 3 is the sharpest, because the wrong diagnosis was a *pass*.** A check that reports success
+for the wrong reason is worse than one that fails, and here the discriminator was sitting in plain
+sight: the control case gave the same answer as the treatment.
+
+**The lesson is not "write better remedies."** In all three the API had already returned the
+discriminator and the code threw it away — GraphQL distinguishes `NOT_FOUND` from a scope error;
+403 and 404 mean different things; a token's kind is legible from its documented prefix. So:
+
+> **When a probe can fail for several reasons, the remedy must read the failure, not the check's name.**
+> A remedy that does not branch is a guess with an authoritative tone, and it will be followed.
+
+The mitigation that generalises is the one from class 7: make the *control* explicit. Instance 3
+would have been caught immediately by asking the write token the same question — which is now exactly
+what `doctor` does, as two separate assertions rather than one.
+
 ## Rules about oracles, earned from runs
 
 Each of these came out of a specific failure and still governs.
@@ -747,6 +774,11 @@ the entries most likely to be silently re-broken.**
 | **A commit message that *quotes* a closing keyword still closes the issue.** Commit messages are **not rendered as markdown**, so backticks are literal characters and protect nothing — unlike issue and PR bodies, where they do. A commit body describing a test fixture whose payload contains `Closes #7` closed live issue #7 as COMPLETED. The PR's own `closingIssuesReferences` said `[23]`, so the metadata anyone would check showed nothing wrong. | 2026-07-31, PR #38 / commit `2cbe106` |
 | **`gh` writes post as the repo owner's account.** A PR shows "review by lmorchard" for the agent's own thread reply, so **any gate row of the form "a human reviewed this" is self-satisfiable** in this setup. | move 2b |
 | **`gh project create` applies no template**, so a CLI-created board gets `Todo` / `In Progress` / `Done` — missing `Ready` and `In review`, two of the three states the skill transitions through, and wrong casing on the third. Template boards get `Backlog` / `Ready` / `In progress` / `In review` / `Done`. Measured across six boards: 3 template, 3 bare. | move 7 |
+| **`GET /repos/{o}/{r}`'s `permissions` object is the *collaborator role*, not the token's permissions.** It reported `"push": true` for a fine-grained PAT that could not create a label. There is no endpoint that reports a fine-grained token's own permission set, so **the only way to know whether a token can write is to try a write.** | 2026-08-10, machine-user setup |
+| **A write probe against a *nonexistent* target returns 404, not 403** — the existence check runs before the permission check. So `POST /repos/{o}/{r}/issues/99999999/comments` cannot distinguish "may not write" from "not found", and reads as a pass. **The safe discriminating probe is creating a label that already exists:** 422 `already_exists` when permitted, 403 when not, and nothing is written either way. | same |
+| **A fine-grained PAT reaches only repositories owned by its *resource owner*** — the token holder, or an org the holder is a **member** of (not an outside collaborator). A machine user that owns no repos therefore reaches nothing through its grant, whatever "All repositories" is set to and however it was invited to yours. **It still reads any public repo, because that needs no grant at all** — which is why such a token appears to work on a public repo and returns a bare 404 on a private one, with nothing in the UI resembling the problem. Classic PATs are *not* owner-scoped, but their scopes are coarse: `repo` is read **and** write, with no read-only-private variant. | 2026-08-10, verified by probing `torvalds/linux`, `cli/cli`, and both target repos under one token |
+| **ProjectsV2 is GraphQL-only and keeps its own collaborator list.** There is no REST endpoint — probing one returns a 404 that reads exactly like a permissions failure. Repository access does not feed into project access: an account with full write on a repo still cannot see that repo's *private* board unless added under the project's Settings → Manage access. Diagnosed by one classic token seeing public project 6 and not private project 9. | 2026-08-10 |
+| **`createDiscussionCategory` is not a mutation in GitHub's GraphQL schema.** Discussion categories have no API representation; they are created in repository settings. `discussion_manager.ensure_category` has been calling it since it was written, failing and returning `False` every time ([#211](https://github.com/lmorchard/agent-sessions/issues/211)). | 2026-08-10, live schema introspection of the `Mutation` type |
 | **`gh project field-list` does not expose option colors or descriptions.** Those need GraphQL (`projectV2.field(name:)` → `ProjectV2SingleSelectField.options { name color description }`). | move 7 |
 | **`updateProjectV2Field` replaces the single-select option set wholesale** — it accepts no option IDs, so any option not in the new list is deleted and **every item assigned to it loses its status.** Renaming columns is therefore a two-step operation: replace the option set, then reassign every item. Verify no item is left blank. | move 7, verified on board 9 |
 
