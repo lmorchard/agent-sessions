@@ -57,14 +57,14 @@ For this repo, the gated paths worth calling out by name, because the *reason* i
   run; this line is its **intake-time counterpart**, and it takes effect without any skill file
   being touched.
 
-- **`driver/gate.py` — the oracle, and therefore off-limits too.** As of 2026-07-28 this module is
+- **`src/agent_sessions/driver/gate.py` — the oracle, and therefore off-limits too.** As of 2026-07-28 this module is
   what classifies a run's outcome (`classify_pr_body`, called at `agent-session-driver.sh:485` and
   `:616`). **An issue whose work edits it is editing the code that grades its own run** — the
   implementer authoring its own oracle, one level removed from the skill. The `skills/**` rule does
   not cover it, and this line was added because the move-7 partition missed it: `driver/` was
   wholly drivable before the classifier moved there.
 
-- **`driver/router.py` and `driver/reconciler.py` — the outcome routing and reactive reconciler**, extracted per issues #182 and #185 to replace the coarse gating of `driver/agent-session-driver.sh`. The modules hold the priority ladder, reactive event handlers, and skip/unpark decision logic, so gating them isolates the routing while freeing the rest of the driver orchestration.
+- **`src/agent_sessions/driver/router.py` and `src/agent_sessions/driver/reconciler.py` — the outcome routing and reactive reconciler**, extracted per issues #182 and #185 to replace the coarse gating of `driver/agent-session-driver.sh`. The modules hold the priority ladder, reactive event handlers, and skip/unpark decision logic, so gating them isolates the routing while freeing the rest of the driver orchestration.
 
 - **`driver/credentials.py` and `driver/writes.py` — the credential split and the write
   manifest**, added per issue #191. These are not oracles; they are the *containment boundary*.
@@ -86,10 +86,10 @@ consumes its verdict. A test suite, a lint recipe or a doc-rot detector grades t
 `gate.py` and the driver's routing decide the *verdict*, and a verdict is what converts into an
 automatic merge under phase 3.
 
-So `scripts/docs_check.py` is **drivable**, and so is a future check-linter, however detector-shaped
+So `src/agent_sessions/scripts/docs_check.py` is **drivable**, and so is a future check-linter, however detector-shaped
 they look.
 
-**The residual risk, named rather than gated away.** A run that edits `docs/` *and* `scripts/docs_check.py` in one change
+**The residual risk, named rather than gated away.** A run that edits `docs/` *and* `src/agent_sessions/scripts/docs_check.py` in one change
 could weaken the detector that would have caught its own doc rot, and `make check` would still be
 green. The broad reading would close that, but it would also sweep in `driver/test-driver.sh`,
 `driver/test_gate.py`, `driver/test-park-state.sh` and the `Makefile` recipes — every one of which is
@@ -99,7 +99,7 @@ check` in every PR, and a human at the merge gate. Revisit if a run ever actuall
 
 ### Drivable (the allowlist)
 
-- **`driver/`, except `driver/gate.py`, `driver/router.py`, `driver/reconciler.py`, `driver/credentials.py`, and `driver/writes.py`** — its tests (`driver/test_*.py`), fixtures (`driver/test-*.sh`), and driver orchestration (`agent_session_driver.py`, etc.). Note what this leaves: the oracle, the outcome routing, the reconciler and the containment boundary are off-limits, while the driver script and tests are drivable.
+- **`driver/`, except `src/agent_sessions/driver/gate.py`, `src/agent_sessions/driver/router.py`, `src/agent_sessions/driver/reconciler.py`, `src/agent_sessions/driver/credentials.py`, and `src/agent_sessions/driver/writes.py`** — its tests (`driver/test_*.py`), fixtures (`driver/test-*.sh`), and driver orchestration (`agent_session_driver.py`, etc.). Note what this leaves: the oracle, the outcome routing, the reconciler and the containment boundary are off-limits, while the driver script and tests are drivable.
 - **`docs/`** — including `findings.md` and session notes.
 - **`Makefile`**.
 - **`scripts/`** — `docs_check.py` and its tests, per the narrow reading above. Added 2026-07-29; it

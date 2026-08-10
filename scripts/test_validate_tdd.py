@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
-from validate_tdd import validate_stream
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from agent_sessions.scripts.validate_tdd import validate_stream
 
 
 def test_validate_tdd_success(tmp_path: Path) -> None:

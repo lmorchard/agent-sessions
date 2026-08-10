@@ -68,11 +68,11 @@ from types import SimpleNamespace
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
-import commit_lint  # noqa: E402
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from agent_sessions.scripts import commit_lint  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = REPO_ROOT / "scripts" / "commit_lint.py"
+SCRIPT = REPO_ROOT / "src" / "agent_sessions" / "scripts" / "commit_lint.py"
 
 
 # --- fixtures, shaped like real commit messages -----------------------------

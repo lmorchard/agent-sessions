@@ -28,8 +28,8 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
-import commit_lint  # noqa: E402
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from agent_sessions.scripts import commit_lint  # noqa: E402
 
 # --- defect 1: a doubled backtick run was not recognised as quoting ----------
 

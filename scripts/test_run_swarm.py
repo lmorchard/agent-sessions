@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
-from run_swarm import run_swarm
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from agent_sessions.scripts.run_swarm import run_swarm
 
 
 def test_run_swarm_missing_args() -> None:

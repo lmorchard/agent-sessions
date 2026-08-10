@@ -10,8 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
-import board_audit  # noqa: E402
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from agent_sessions.scripts import board_audit  # noqa: E402
 
 
 @pytest.mark.parametrize(
@@ -440,7 +440,7 @@ def default_gh_responses(status="In review"):
 
 def run_cli():
     return subprocess.run(
-        [sys.executable, "scripts/board_audit.py", "--owner", "acme", "--project", "9", "--repo", "acme/widgets"],
+        [sys.executable, "src/agent_sessions/scripts/board_audit.py", "--owner", "acme", "--project", "9", "--repo", "acme/widgets"],
         capture_output=True,
         text=True,
         check=False,
@@ -560,7 +560,7 @@ def test_cli_ignores_pull_request_project_items_and_audits_issue_items(tmp_path,
 )
 def test_cli_rejects_invalid_project_and_repository_arguments(arguments):
     completed = subprocess.run(
-        [sys.executable, "scripts/board_audit.py", *arguments],
+        [sys.executable, "src/agent_sessions/scripts/board_audit.py", *arguments],
         capture_output=True,
         text=True,
         check=False,
@@ -580,7 +580,7 @@ def test_make_board_audit_binds_this_repository():
     )
 
     assert completed.stdout.split() == [
-        "python3", "scripts/board_audit.py",
+        "PYTHONPATH=src", "python3", "-m", "agent_sessions.scripts.board_audit",
         "--owner", "lmorchard", "--project", "9",
         "--repo", "lmorchard/agent-sessions",
     ]
