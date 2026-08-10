@@ -8,14 +8,15 @@ behaviour, it calls `gate`.
 """
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
-import gate  # noqa: E402
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from agent_sessions.driver import gate  # noqa: E402
 
 
 def body_with(
@@ -238,8 +239,9 @@ def test_budget_reclass(outcome, cost, budget, expected):
 # --- the CLI the driver actually calls ------------------------------------
 
 def _run(args, stdin):
-    r = subprocess.run([sys.executable, str(Path(__file__).parent / "gate.py"), *args],
-                       input=stdin, capture_output=True, text=True, check=True)
+    r = subprocess.run([sys.executable, "-m", "agent_sessions.driver.gate", *args],
+                       input=stdin, capture_output=True, text=True, check=True,
+                       env={**os.environ, "PYTHONPATH": str(Path(__file__).parent.parent / "src")})
     return json.loads(r.stdout)
 
 
@@ -261,7 +263,7 @@ def test_cli_budget_reclass():
 
 def test_module_imports_without_site_packages():
     """C5: gate.py must stay stdlib-only so the driver remains portable."""
-    d = Path(__file__).parent
+    d = Path(__file__).parent.parent / "src" / "agent_sessions" / "driver"
     subprocess.run([sys.executable, "-I", "-S", "-c",
                     f"import sys; sys.path.insert(0, {str(d)!r}); import gate"],
                    check=True, capture_output=True)

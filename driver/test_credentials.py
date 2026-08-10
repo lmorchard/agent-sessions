@@ -9,8 +9,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-import credentials  # noqa: E402
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from agent_sessions.driver import credentials  # noqa: E402
 
 READ = "ghp_read_only_token"
 WRITE = "ghp_write_capable_token"

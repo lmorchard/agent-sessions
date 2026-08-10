@@ -6,9 +6,8 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-import agent_runner  # noqa: E402
-import credentials  # noqa: E402
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from agent_sessions.driver import agent_runner, credentials  # noqa: E402
 
 
 def test_parse_result_stream_claude(tmp_path: Path):

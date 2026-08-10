@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
-import writes  # noqa: E402
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from agent_sessions.driver import writes  # noqa: E402
 
 REPO = "owner/target"
 

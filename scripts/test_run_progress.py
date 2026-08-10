@@ -20,8 +20,8 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-import run_progress  # noqa: E402
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from agent_sessions.scripts import run_progress  # noqa: E402
 
 # --- fixture builders ------------------------------------------------------
 #
@@ -174,7 +174,6 @@ def test_missing_stream_is_not_started(tmp_path):
 
 def test_missing_state_dir_is_configuration_error(tmp_path, capsys, monkeypatch):
     """C2 — a non-existent state directory is a configuration error, not a wait."""
-    import run_progress
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
 
     # State dir does not exist -> configuration error
