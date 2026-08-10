@@ -63,13 +63,13 @@ criteria), and you do the part that does (ratify). See
 
    - In your comment, explicitly ask the human to reply with 'Approved' or to provide corrections, and instruct them to **manually remove the `agent-session:needs-human` label** when they are done replying so you know to read their feedback.
 
-4. **Follow-up pass (Reading human replies).** The human has explicitly removed the `agent-session:needs-human` parking label, signaling that they have left feedback in the issue comments. **Explicitly fetch and read the comments** using `gh issue view <n> --comments`.
-   - If they explicitly approved the spec (e.g., "Approved", "Looks good", "Dependencies are fine"), proceed to Step 5.
-   - If they provided corrections, synthesize them into an updated spec. If the spec is now complete, proceed to Step 5. 
+4. **Follow-up pass (Reading human replies).** The human has left feedback or approved the proposal in the issue comments. **Explicitly fetch and read the comments** using `gh issue view <n> --comments`.
+   - If they explicitly approved the spec or ratified the risk-gated decisions (e.g., "Approved", "Looks good", "Dependencies are fine"), synthesize their approval into the spec and upgrade the tier label to `agent-session:auto-ok`. Proceed to Step 5.
+   - If they provided corrections, synthesize them into an updated spec. If the spec is now complete and all risk-gated items are approved, set the tier to `agent-session:auto-ok` and proceed to Step 5.
    - If the spec STILL needs human input after synthesizing their corrections, post a new top-level comment asking for further clarification (never edit past comments in place), RE-APPLY the `agent-session:needs-human` label using `python3 scripts/label_manager.py park --issue <n>`, and stop.
 
 5. **Write back (augment in place).** For each ratified issue, run `intake`'s file-or-update step.
-   Apply the `agent-session:spec` label using `python3 scripts/label_manager.py spec --issue <n>`.
+   Apply the `agent-session:spec` label AND the appropriate tier label (`agent-session:auto-ok` or `agent-session:needs-review`) using `gh issue edit <n> --add-label "agent-session:spec" --add-label "agent-session:auto-ok"`.
    Then the *existing-issue* path: `gh issue edit <n>` — add the verifiable criteria + tier sections, **preserving the original author's text**. Update the board if configured. Where the ratify pass settled a decision, carry `intake`'s Design-decisions step with it — the body, not a comment; comments are invisible to every downstream mode.
 
    **The `## Tier:` heading is replaced, never added twice.** An issue that already carries one — and
