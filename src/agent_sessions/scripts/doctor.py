@@ -36,6 +36,15 @@ from agent_sessions.driver import credentials  # noqa: E402
 #: ProjectsV2 has no REST representation; this is how the driver reads a board too.
 _PROJECT_QUERY = "query($o:String!,$n:Int!){user(login:$o){projectV2(number:$n){title}}}"
 
+#: Must match `discussion_manager`'s default. `test_the_notebook_category_name_matches`
+#: pins the two together rather than trusting this copy.
+NOTEBOOK_CATEGORY = "Lab Notebook"
+
+_DISCUSSION_QUERY = (
+    "query($o:String!,$r:String!){repository(owner:$o,name:$r)"
+    "{hasDiscussionsEnabled discussionCategories(first:50){nodes{name}}}}"
+)
+
 #: `fail` stops the preflight; `warn` and `skip` do not. A skip is a probe that could
 #: not be run honestly -- never rendered as a pass.
 SEVERITY = {"pass": " ok ", "fail": "FAIL", "warn": "warn", "skip": "skip"}
@@ -70,6 +79,60 @@ def _gh(runner, argv: list[str], token: str):
 def _message(res) -> str:
     text = ((getattr(res, "stderr", "") or "") + " " + (getattr(res, "stdout", "") or "")).strip()
     return " ".join(text.split())[:160]
+
+
+#: GitHub's documented token prefixes. Worth branching on, because the two kinds
+#: fail identically and are fixed completely differently.
+_TOKEN_PREFIXES = (
+    ("github_pat_", "fine-grained"),
+    ("ghp_", "classic"),
+    ("gho_", "classic"),
+    ("ghu_", "classic"),
+    ("ghs_", "app installation"),
+)
+
+
+def token_kind(token: str) -> str:
+    for prefix, kind in _TOKEN_PREFIXES:
+        if token.startswith(prefix):
+            return kind
+    return "unknown"
+
+
+def _write_remedy(repo: str, login: str, token: str) -> str:
+    """Why a write token that can *read* the repo still cannot write to it.
+
+    The trap this exists for: on a **public** repo the visibility check passes, so
+    the ownership diagnosis in `_repo_remedy` never fires -- and the obvious advice
+    ("tick Contents, Issues and Pull requests") is advice that cannot work, because
+    a fine-grained PAT's permissions apply only to repositories owned by its
+    resource owner. Public read needs no grant; public write does. That advice was
+    given twice on 2026-08-10 before anyone noticed it was impossible.
+    """
+    owner = repo.split("/")[0]
+    perms = "Contents, Issues, Pull requests and Discussions at Read and write"
+    if token_kind(token) == "fine-grained" and owner.lower() != login.lower():
+        return (
+            f"This is a fine-grained PAT owned by {login}, and its permissions only apply to "
+            f"repositories owned by {login}. {repo} is owned by {owner}, so no combination of "
+            "permission checkboxes will grant write here -- it can read the repo only because "
+            "the repo is public, which needs no grant at all. Use a *classic* PAT instead: "
+            "`public_repo` for a public repo -- which also covers repository discussions, used "
+            "for the lab-notebook trail -- plus `project` if the driver moves board cards, and "
+            "never `workflow`. For a private repo, move it into an organization the machine "
+            f"user is a member of and re-issue fine-grained tokens with the org as resource owner, "
+            "or use a GitHub App. See docs/usage.md."
+        )
+    if token_kind(token) == "classic":
+        return (
+            "This is a classic PAT, so it is not owner-scoped and the problem is a missing scope: "
+            "`public_repo` for a public repo, `repo` for a private one, plus `project` if the "
+            "driver moves board cards. Never `workflow`."
+        )
+    return (
+        f"Re-issue it with {perms}. Note that `GET /repos` reporting push:true is the collaborator "
+        "role, not this token's permissions."
+    )
 
 
 def _repo_remedy(repo: str, login: str) -> str:
@@ -219,10 +282,8 @@ def check_all(environ: dict, runner, *, repo: str, repo_path: str, board: str = 
                 Check(
                     name,
                     "fail",
-                    "this token cannot write, so every manifest write will fail",
-                    "Re-issue it with Contents, Issues and Pull requests at Read and write. "
-                    "Note that `GET /repos` reporting push:true is the collaborator role, not "
-                    "this token's permissions.",
+                    f"this {token_kind(probe.token)} token cannot write, so every manifest write will fail",
+                    _write_remedy(repo, probe.login, probe.token),
                 )
             )
 
@@ -251,6 +312,41 @@ def check_all(environ: dict, runner, *, repo: str, repo_path: str, board: str = 
                     f"{owner} at all unless {owner} is its resource owner.",
                 )
             )
+
+    if writer:
+        owner, _, name = repo.partition("/")
+        res = _gh(
+            runner,
+            ["api", "graphql", "-f", f"query={_DISCUSSION_QUERY}", "-F", f"o={owner}", "-F", f"r={name}"],
+            writer.token,
+        )
+        body = (getattr(res, "stdout", "") or "")
+        if getattr(res, "returncode", 1) != 0:
+            checks.append(Check("discussions notebook", "skip", f"could not read: {_message(res)}"))
+        elif '"hasDiscussionsEnabled":true' not in body.replace(" ", ""):
+            checks.append(
+                Check(
+                    "discussions notebook",
+                    "warn",
+                    "discussions are disabled on the repo",
+                    "The driver's start/finish notes are wrapped in try/except and will be skipped "
+                    "in silence. Enable Discussions, or accept losing that trail.",
+                )
+            )
+        elif f'"{NOTEBOOK_CATEGORY}"' not in body:
+            checks.append(
+                Check(
+                    "discussions notebook",
+                    "warn",
+                    f"no {NOTEBOOK_CATEGORY!r} category",
+                    "Create it by hand in the repo's Discussions settings. `discussion_manager."
+                    "ensure_category` calls a `createDiscussionCategory` mutation that does not "
+                    "exist in GitHub's GraphQL schema, so it fails every time and returns False "
+                    "without saying anything.",
+                )
+            )
+        else:
+            checks.append(Check("discussions notebook", "pass", f"{NOTEBOOK_CATEGORY} category present"))
 
     try:
         res = runner(
