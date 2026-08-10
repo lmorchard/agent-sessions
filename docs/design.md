@@ -233,23 +233,23 @@ readiness checklist, `file`). (3)+(4) live *above* a per-issue skill — the orc
 bookends. So "standalone skill vs dev-session phase" resolves mostly toward *extend
 dev-session*; the separate artifact is the driver + merge gate.
 
-## Two products in one repo
+## A harness with a skill component
 
-Worth stating plainly, because the docs have drifted toward describing only the first. This repo
-holds **two artifacts with different audiences and different correctness regimes**, and conflating
+Worth stating plainly, because the docs have historically drifted toward describing only the skill. This repo
+holds **a harness with a skill component inside it**, each with different responsibilities and correctness regimes. Conflating
 them is what makes "is this a skill-authoring project?" feel like a confusing question:
 
 |  | `skills/agent-session/` | `driver/` + `Makefile` |
 |---|---|---|
-| What it is | the reusable artifact — a Claude Code skill, `dev-session` lineage | this repo's autonomy infrastructure, the unattended burndown loop |
+| What it is | the skill component — a set of phase instructions, `dev-session` lineage | the harness — phase state machine, priority ladder, outcome classification, merge-gate oracle (`gate.py`), park state, distributed mutex, budget accounting, pluggable backends, run provenance |
 | Made of | markdown | bash, plus a Python parser (`driver/gate.py`) |
-| Its oracle | micro-tests and dogfooding | fixture tests and mutation testing |
-| Who reads it | any project that installs the skill | only this repo |
+| Its oracle | cheap classifier evals, micro-tests, and dogfooding | fixture tests and mutation testing |
+| Who reads it | this system's harness | target repositories and CI environments |
 
 They are deliberately separable: **the board-driver needed zero skill changes**, and
 `make skill-readonly` enforces that a hosted run may read the skill but never write it. The
 governing principle applies to both, but the *cost* of applying it differs by an order of
-magnitude — a skill-wording oracle is a micro-test at ~$50, a driver oracle is a fixture test at
+magnitude — a skill-wording oracle is a classifier eval or micro-test, while a driver oracle is a fixture test at
 zero. That asymmetry drives most of the sequencing decisions in the roadmap.
 
 This is a distinction to keep, not a project to rename.

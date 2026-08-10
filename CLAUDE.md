@@ -14,9 +14,7 @@ conventions + gotchas only.
 
 ## What this is (and isn't)
 
-- **Claude Code skill authoring**, `dev-session` lineage. The skill lives at
-  `skills/agent-session/` in *this repo* — it is NOT installed in `~/.claude/skills/`. Test
-  it by running its phase files manually (dogfooding), not via a registered skill.
+- **An autonomy harness with a skill component.** The system's orchestration lives in `driver/`; the skill component lives at `skills/agent-session/` in *this repo* — it is NOT installed in `~/.claude/skills/`. Test it by running its phase files manually (dogfooding), not via a registered skill.
 - **The reference skill it derives from** is at `~/.claude/skills/dev-session/` (phases +
   references). Adapt from it; don't edit it.
 
