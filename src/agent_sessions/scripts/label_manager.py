@@ -40,6 +40,22 @@ def ensure_label_exists(name: str, color: str, description: str, repo: str | Non
         pass
 
 
+def removable(issue: int, wanted: list[str], repo: str | None = None, override: str | None = None) -> list[str]:
+    """`wanted`, narrowed to labels the issue actually carries.
+
+    `gh issue edit --remove-label X` exits 0 when the *issue* lacks X but the repo
+    has it, which is the case findings.md records. It **errors** when the repo has
+    no such label at all -- and a target repo only has the labels something already
+    created, so removing `agent-session:needs-human-interactive` from a repo that
+    has never parked interactively fails the whole edit, including the add.
+
+    A label present on the issue necessarily exists in the repo, so filtering this
+    way is both correct and strictly cheaper than the unconditional list.
+    """
+    current = set(get_current_labels(issue, repo=repo, override=override))
+    return [label for label in wanted if label in current]
+
+
 def edit_issue_labels(issue: int, add: list[str] | None = None, remove: list[str] | None = None, repo: str | None = None) -> None:
     cmd = ["issue", "edit", str(issue)]
     if add:
@@ -121,13 +137,18 @@ def cmd_park(args: argparse.Namespace) -> None:
     if args.interactive:
         ensure_label_exists(INTERACTIVE_LABEL, "D4C5F9", "interactive CLI session required", repo=args.repo)
 
-    to_remove = [other_label] + ATTEMPT_LABELS
+    to_remove = removable(args.issue, [other_label] + ATTEMPT_LABELS, repo=args.repo,
+                          override=getattr(args, "current_labels", None))
     edit_issue_labels(args.issue, add=[target_label], remove=to_remove, repo=args.repo)
     print(f"Parked #{args.issue} with {target_label} and cleared attempt labels.")
 
 
 def cmd_unpark(args: argparse.Namespace) -> None:
-    to_remove = [PARK_LABEL, INTERACTIVE_LABEL] + ATTEMPT_LABELS
+    to_remove = removable(args.issue, [PARK_LABEL, INTERACTIVE_LABEL] + ATTEMPT_LABELS, repo=args.repo,
+                          override=getattr(args, "current_labels", None))
+    if not to_remove:
+        print(f"Unparked #{args.issue}: nothing to clear.")
+        return
     edit_issue_labels(args.issue, remove=to_remove, repo=args.repo)
     print(f"Unparked #{args.issue} and cleared parking/attempt labels.")
 
@@ -146,7 +167,12 @@ def cmd_attempt(args: argparse.Namespace) -> None:
 
 
 def cmd_clear_attempts(args: argparse.Namespace) -> None:
-    edit_issue_labels(args.issue, remove=ATTEMPT_LABELS, repo=args.repo)
+    to_remove = removable(args.issue, ATTEMPT_LABELS, repo=args.repo,
+                          override=getattr(args, "current_labels", None))
+    if not to_remove:
+        print(f"No attempt labels on #{args.issue}.")
+        return
+    edit_issue_labels(args.issue, remove=to_remove, repo=args.repo)
     print(f"Cleared attempt labels on #{args.issue}.")
 
 
