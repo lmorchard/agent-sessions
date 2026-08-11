@@ -366,23 +366,12 @@ what is not.
 PRs, six merged." That is the failure mode a hand-maintained state block always has, so this one is
 written to have less to be wrong about.)*
 
-**Proven.** All four routing paths have real-run evidence. **Its PRs land, and a human merges every
-one of them by hand** — usually within hours of the run. *(As of 2026-07-29: eight PRs, all merged.
-Dated because it is a countable fact; the durable claim is the pattern, not the number.)* The driver runs
-against two repositories including a multi-issue loop; its gate parsing and classification are an
-importable Python module whose tests import it rather than restate it. This repo now tracks its own
-backlog with its own tooling.
+**What is proven and what is not.** Run `make evidence` to see the live report of which paths have been exercised, against which repositories, and with what outcomes. That report reads the driver's ledger and is the only authoritative source for what has actually run.
 
-**Not proven:**
-
-- **Phase 3 (conditional auto-merge)** — untouched, gated on two board items plus the open decision
-  below.
-- **`ci-stale` correctly catches diverging PR heads** — verified on a real PR ([#6](https://github.com/lmorchard/agent-sessions/issues/6)).
-- **Multi-phase `execute` with real implementer subagents.** Every run so far has been small: #586
-  was two greps on a 4-line diff. decafclaw #625 is the specced vehicle, never driven
-  ([#7](https://github.com/lmorchard/agent-sessions/issues/7)). It was described here as *blocked on
-  a write-capable dispatch grant*; that was wrong — the grant was never absent. It is unattempted,
-  and what is genuinely unresolved is the verifier's containment (D2, in Resolved decisions).
+**The standing limit:** This project's own oracle is too expensive. At ~$50 and half a session per rule, the unmeasured rules will not all get measured. What remains in prose are the claims no command can print:
+- **A human merges every PR by hand.** The gate reports `eligible-for-auto-merge` as a finding, but takes no action.
+- **The verifier's local containment remains unresolved.** (See D2 in Resolved decisions).
+- **`ci-stale` catches diverging PR heads.** (Verified live in #6, but not mechanically guaranteed across all edge cases without the ITIL precondition).
 
 ## Roadmap → it lives on the board now
 
