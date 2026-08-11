@@ -92,6 +92,9 @@ skill-readonly:
 # project hit was a fact derivable from a live source, or prose duplicating one --
 # never a judgment. A CLAUDE.md rule saying "don't do that" would be an exhortation,
 # and this project is 3 for 3 on those measuring away. See scripts/docs_check.py.
+evidence:
+	@PYTHONPATH=src python3 -m agent_sessions.scripts.evidence
+
 docs-check:
 	@PYTHONPATH=src python3 -m agent_sessions.scripts.docs_check
 
