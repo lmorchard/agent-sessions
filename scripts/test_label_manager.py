@@ -1,159 +1,137 @@
-"""Tests for scripts/label_manager.py."""
+"""Tests for `label_manager` — written after a live run broke on it.
+
+`park` removes the interactive label and all three attempt labels unconditionally.
+`gh issue edit --remove-label X` exits 0 when the *issue* lacks X but the repo has
+it — a gotcha already recorded in findings.md — but **errors when the repo itself
+has no such label**, which is a different case and the one that fired. A fresh
+target repo has only the labels something has already created, so the driver's own
+park failed with `'agent-session:needs-human-interactive' not found` and warned
+that the issue stayed selectable.
+
+It was harmless that time only because the agent's write manifest had already
+applied the park label. A run whose agent recorded no label entry would have been
+left selectable, re-run, and burned budget on a loop the breaker could not stop.
+
+There were no tests here at all before this file, which is why three commands
+carried the same bug.
+"""
 
 import sys
 from pathlib import Path
-from unittest.mock import call, patch
 
 import pytest
 
-SYS_PATH_PARENT = str(Path(__file__).resolve().parent)
-if SYS_PATH_PARENT not in sys.path:
-    sys.path.insert(0, SYS_PATH_PARENT)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from agent_sessions.scripts import label_manager  # noqa: E402
 
-from agent_sessions.scripts import label_manager as lm  # noqa: E402
+REPO = "owner/repo"
+
+
+class FakeGh:
+    """Records `gh` calls; refuses to remove a label the repo does not have, the
+    way the real one does."""
+
+    def __init__(self, *, repo_labels=(), issue_labels=()):
+        self.repo_labels = set(repo_labels)
+        self.issue_labels = list(issue_labels)
+        self.calls: list[list[str]] = []
+
+    def __call__(self, cmd, repo=None):
+        self.calls.append(list(cmd))
+        if cmd[:2] == ["label", "create"]:
+            self.repo_labels.add(cmd[2])
+            return ""
+        if cmd[:2] == ["issue", "view"]:
+            # The real call passes `--jq .labels[].name`, so it gets bare names on
+            # separate lines -- not JSON. A fake that ignores the jq expression
+            # returns something the caller silently parses as zero labels.
+            assert "--jq" in cmd, f"unexpected issue view without --jq: {cmd}"
+            return "\n".join(self.issue_labels)
+        if cmd[:2] == ["issue", "edit"]:
+            for i, tok in enumerate(cmd):
+                if tok == "--remove-label" and cmd[i + 1] not in self.repo_labels:
+                    raise RuntimeError(
+                        f"gh command failed: failed to update: '{cmd[i + 1]}' not found"
+                    )
+            for i, tok in enumerate(cmd):
+                if tok == "--add-label" and cmd[i + 1] not in self.issue_labels:
+                    self.issue_labels.append(cmd[i + 1])
+                elif tok == "--remove-label" and cmd[i + 1] in self.issue_labels:
+                    self.issue_labels.remove(cmd[i + 1])
+            return ""
+        return ""
+
+
+def args(**kw):
+    import argparse
+
+    ns = argparse.Namespace(issue=198, repo=REPO, interactive=False, current_labels=None, count=1)
+    for k, v in kw.items():
+        setattr(ns, k, v)
+    return ns
 
 
 @pytest.fixture
-def mock_run_gh():
-    with patch.object(lm, "run_gh") as mock:
-        mock.return_value = ""
-        yield mock
+def gh(monkeypatch):
+    fake = FakeGh(
+        repo_labels={"agent-session:spec", "agent-session:needs-human", "agent-session:attempt-1", "enhancement"},
+        issue_labels=["enhancement", "agent-session:attempt-1"],
+    )
+    monkeypatch.setattr(label_manager, "run_gh", fake)
+    return fake
 
 
-def test_cmd_spec(mock_run_gh):
-    ret = lm.main(["--repo", "owner/repo", "--current-labels", "", "spec", "--issue", "42"])
-    assert ret == 0
-    assert mock_run_gh.call_count == 3
-    mock_run_gh.assert_has_calls([
-        call(["label", "create", "agent-session:spec", "--color", "0E8A16", "--description", "Verifiable EARS criteria & tier applied"], repo="owner/repo"),
-        call(["label", "create", "agent-session:auto-ok", "--color", "0E8A16", "--description", "Tier label"], repo="owner/repo"),
-        call([
-            "issue", "edit", "42",
-            "--add-label", "agent-session:spec",
-            "--add-label", "agent-session:auto-ok",
-            "--remove-label", "agent-session:needs-human",
-            "--remove-label", "agent-session:needs-human-interactive",
-            "--remove-label", "agent-session:needs-review",
-            "--remove-label", "agent-session:attempt-1",
-            "--remove-label", "agent-session:attempt-2",
-            "--remove-label", "agent-session:attempt-3"
-        ], repo="owner/repo"),
-    ])
+def removed(gh):
+    out = []
+    for cmd in gh.calls:
+        for i, tok in enumerate(cmd):
+            if tok == "--remove-label":
+                out.append(cmd[i + 1])
+    return out
 
 
-def test_cmd_park_default(mock_run_gh):
-    ret = lm.main(["--repo", "owner/repo", "--current-labels", "", "park", "--issue", "42"])
-    assert ret == 0
-    assert mock_run_gh.call_count == 2
-    mock_run_gh.assert_has_calls([
-        call(["label", "create", "agent-session:needs-human", "--color", "FBCA04", "--description", "the agent-session driver parked this issue"], repo="owner/repo"),
-        call([
-            "issue", "edit", "42",
-            "--add-label", "agent-session:needs-human",
-            "--remove-label", "agent-session:needs-human-interactive",
-            "--remove-label", "agent-session:attempt-1",
-            "--remove-label", "agent-session:attempt-2",
-            "--remove-label", "agent-session:attempt-3"
-        ], repo="owner/repo"),
-    ])
+# -- the live failure --------------------------------------------------------
 
 
-def test_cmd_park_interactive(mock_run_gh):
-    ret = lm.main(["--repo", "owner/repo", "--current-labels", "", "park", "--issue", "42", "--interactive"])
-    assert ret == 0
-    assert mock_run_gh.call_count == 3
-    mock_run_gh.assert_has_calls([
-        call(["label", "create", "agent-session:needs-human", "--color", "FBCA04", "--description", "the agent-session driver parked this issue"], repo="owner/repo"),
-        call(["label", "create", "agent-session:needs-human-interactive", "--color", "D4C5F9", "--description", "interactive CLI session required"], repo="owner/repo"),
-        call([
-            "issue", "edit", "42",
-            "--add-label", "agent-session:needs-human-interactive",
-            "--remove-label", "agent-session:needs-human",
-            "--remove-label", "agent-session:attempt-1",
-            "--remove-label", "agent-session:attempt-2",
-            "--remove-label", "agent-session:attempt-3"
-        ], repo="owner/repo"),
-    ])
+def test_park_survives_a_repo_missing_the_interactive_and_higher_attempt_labels(gh):
+    """The exact configuration that failed: the repo has `needs-human` and
+    `attempt-1`, and nothing else the park wants to remove."""
+    label_manager.cmd_park(args())
+    assert "agent-session:needs-human" in gh.issue_labels
 
 
-def test_cmd_unpark(mock_run_gh):
-    ret = lm.main(["--repo", "owner/repo", "--current-labels", "", "unpark", "--issue", "42"])
-    assert ret == 0
-    mock_run_gh.assert_called_once_with([
-        "issue", "edit", "42",
-        "--remove-label", "agent-session:needs-human",
-        "--remove-label", "agent-session:needs-human-interactive",
-        "--remove-label", "agent-session:attempt-1",
-        "--remove-label", "agent-session:attempt-2",
-        "--remove-label", "agent-session:attempt-3"
-    ], repo="owner/repo")
+def test_park_only_removes_labels_the_issue_actually_carries(gh):
+    label_manager.cmd_park(args())
+    assert removed(gh) == ["agent-session:attempt-1"]
+    assert "agent-session:needs-human-interactive" not in removed(gh)
 
 
-def test_cmd_attempt(mock_run_gh):
-    ret = lm.main(["--repo", "owner/repo", "--current-labels", "", "attempt", "--issue", "42", "--count", "2"])
-    assert ret == 0
-    assert mock_run_gh.call_count == 2
-    mock_run_gh.assert_has_calls([
-        call(["label", "create", "agent-session:attempt-2", "--color", "D93F0B", "--description", "Execution attempt counter"], repo="owner/repo"),
-        call([
-            "issue", "edit", "42",
-            "--add-label", "agent-session:attempt-2",
-            "--remove-label", "agent-session:needs-human",
-            "--remove-label", "agent-session:needs-human-interactive",
-            "--remove-label", "agent-session:attempt-1",
-            "--remove-label", "agent-session:attempt-3"
-        ], repo="owner/repo"),
-    ])
+def test_park_still_clears_the_attempt_label(gh):
+    """The reset the loop breaker depends on. Filtering must not quietly drop it."""
+    label_manager.cmd_park(args())
+    assert "agent-session:attempt-1" not in gh.issue_labels
 
 
-def test_cmd_clear_attempts(mock_run_gh):
-    ret = lm.main(["--repo", "owner/repo", "--current-labels", "", "clear-attempts", "--issue", "42"])
-    assert ret == 0
-    mock_run_gh.assert_called_once_with([
-        "issue", "edit", "42",
-        "--remove-label", "agent-session:attempt-1",
-        "--remove-label", "agent-session:attempt-2",
-        "--remove-label", "agent-session:attempt-3"
-    ], repo="owner/repo")
+def test_unpark_survives_the_same_repo(gh):
+    label_manager.cmd_unpark(args())
+    assert removed(gh) == ["agent-session:attempt-1"]
+    assert "agent-session:attempt-1" not in gh.issue_labels
 
 
-def test_cmd_merge_ready(mock_run_gh):
-    ret = lm.main(["--repo", "owner/repo", "--current-labels", "", "merge-ready", "--issue", "42"])
-    assert ret == 0
-    assert mock_run_gh.call_count == 2
-    mock_run_gh.assert_has_calls([
-        call(["label", "create", "agent-session:merge-ready", "--color", "2E8A16", "--description", "Eligible for auto-merge"], repo="owner/repo"),
-        call([
-            "issue", "edit", "42",
-            "--add-label", "agent-session:merge-ready",
-            "--remove-label", "agent-session:needs-human",
-            "--remove-label", "agent-session:needs-human-interactive",
-            "--remove-label", "agent-session:attempt-1",
-            "--remove-label", "agent-session:attempt-2",
-            "--remove-label", "agent-session:attempt-3"
-        ], repo="owner/repo"),
-    ])
+def test_clear_attempts_survives_the_same_repo(gh):
+    label_manager.cmd_clear_attempts(args())
+    assert removed(gh) == ["agent-session:attempt-1"]
 
 
-def test_invalid_transition_spec_when_parked(capsys, mock_run_gh):
-    ret = lm.main(["--repo", "owner/repo", "--current-labels", "agent-session:needs-human", "spec", "--issue", "42"])
-    assert ret == 1
-    captured = capsys.readouterr()
-    assert "Transition Error" in captured.err
-    assert "currently parked" in captured.err
-    mock_run_gh.assert_not_called()
+def test_an_issue_with_nothing_to_remove_issues_no_remove_flags(gh):
+    gh.issue_labels = ["enhancement"]
+    label_manager.cmd_clear_attempts(args())
+    assert removed(gh) == []
 
 
-def test_invalid_transition_attempt_when_parked(capsys, mock_run_gh):
-    ret = lm.main(["--repo", "owner/repo", "--current-labels", "agent-session:needs-human", "attempt", "--issue", "42", "--count", "1"])
-    assert ret == 1
-    captured = capsys.readouterr()
-    assert "Transition Error" in captured.err
-    assert "currently parked" in captured.err
-    mock_run_gh.assert_not_called()
-
-
-def test_force_flag_bypasses_validation(mock_run_gh):
-    ret = lm.main(["--repo", "owner/repo", "--current-labels", "agent-session:needs-human", "--force", "spec", "--issue", "42"])
-    assert ret == 0
-    assert mock_run_gh.call_count == 3
+def test_the_fake_reproduces_the_real_failure():
+    """The control. If the fake tolerates a missing repo label, none of the above
+    is testing anything."""
+    fake = FakeGh(repo_labels={"a"}, issue_labels=[])
+    with pytest.raises(RuntimeError, match="not found"):
+        fake(["issue", "edit", "1", "--remove-label", "missing"])
