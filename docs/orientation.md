@@ -323,8 +323,7 @@ about to turn this loose, read the spend column in `runs.jsonl` first.
 
 **Not proven, and the docs say so:**
 
-- **Conditional auto-merge** (the "phase 3" you'll see referenced) is designed and deliberately
-  not built. Nothing merges by machine today.
+- **Conditional auto-merge** (the "phase 3" you'll see referenced) is not pursued. The project shifted its objective to maximizing the "attention ratio" — letting the agent do everything up to the merge gate perfectly, so human attention is spent only on hard problems rather than mechanical failures.
 - **Multi-phase execution with real write-capable implementer subagents.** Every run so far has
   been small. This is blocked on a permission grant that hasn't been given.
 - **The `ci-stale` outcome fires on real PRs when the PR head diverges from the `ci:` gate row** (verified live in #6).

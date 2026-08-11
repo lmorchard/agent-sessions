@@ -129,7 +129,7 @@ produced has been merged — by a human, by hand. The driver runs, including ove
 issues, against more than one repository. This project now tracks its own backlog on [its own
 board](https://github.com/users/lmorchard/projects/9), using its own tooling.
 
-Conditional auto-merge is designed but deliberately not built.
+Conditional auto-merge is not pursued. The objective is to maximize the attention ratio: preparing everything up to the merge gate perfectly, ensuring the human is only ever interrupted for judgment rather than mechanical failures.
 
 ## Reading further
 

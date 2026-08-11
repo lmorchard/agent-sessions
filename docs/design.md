@@ -135,10 +135,7 @@ output is exactly what weak oracles produce.
 2. **Scheduled GitHub Action opening draft PRs.** Same loop, no laptop required. Branch
    protection keeps merge human-gated. Second workflow triggered on Copilot review
    addresses comments.
-3. **Conditional auto-merge.** Only `auto-ok` issues with all-green checks + no unresolved
-   review threads. auth/data/deploy/`.github`/new-deps stay human-gated (aligns with the
-   standing never-deploy-without-permission rule). Start conservative: auto-merge nothing
-   until Phase 2 has earned trust.
+3. **Conditional auto-merge (Not pursued).** See *Resolved decisions* below. The objective shifted from removing the human entirely to maximizing the attention ratio — the loop stops at the merge gate, and success is defined as only ever needing human attention for hard problems rather than mechanical failures.
 
 **Safety:** avoid `--dangerously-skip-permissions` / `bypassPermissions`. Scoped
 `--allowedTools` + `dontAsk` gets ~95% of the autonomy with a real floor under it.
@@ -413,7 +410,9 @@ questions for a human — a loop would have to pick the design rather than imple
 What stays below is what a board cannot hold: an open *decision*, and two lists whose entire purpose
 is to stop things being reopened or re-added.
 
-### The open decision
+### The open decision (Superseded)
+
+*Superseded 2026-08-10 by Decision 1 (see Resolved decisions) — phase 3 is not pursued, dissolving this question. The reasoning below is preserved as load-bearing context.*
 
 **Les's call: does the phase-3 gate list get a finite exit condition?** It has grown by roughly one gate per session —
 first the CI hole, then the merge-block hook, then the amendment policy (**now settled**, see
@@ -467,6 +466,14 @@ Two inputs for that decision, both verified from primary sources in move 7
 ## Resolved decisions
 
 Closed, but the *reasoning* is still load-bearing.
+
+- **Phase 3 (conditional auto-merge) → not pursued.** Decided 2026-08-10 by Les: auto-merge is a blue-sky endpoint the system should probably never reach. Its value was never the merging — it was that *building the conditions* for it forces the verification apparatus to be real. The forcing function is the point, and it works whether or not the endpoint is ever reached.
+  This resolves the open decision about a finite exit condition for the gate list by dissolving it. The list was only worrying because it grew toward a destination; as a forcing function it can stop wherever it stops.
+  **What this does not license.** The verification apparatus is not now optional. Its justification shifts rather than weakening: under the new objective (below), a gate verdict that cannot be trusted means every park is potentially mechanical and a human must check anyway. Frozen checks, verifier independence and the tamper diff earn their place by making the judgment/mechanical distinction reliable.
+- **The objective → reduce the questions requiring human attention to only the hardest problems.** Decided 2026-08-10 by Les, replacing conditional auto-merge as the thing the system is aiming at.
+  Chosen partly because it is **measurable in a way auto-merge never was.** Auto-merge is a binary you either reach or do not, which is why the gate list could grow indefinitely with no way to say whether progress was happening. This objective has a metric, and the data is already being collected.
+  Human attention arrives through parks, and parks divide in two. A **judgment park** means the run hit something only a human can decide — that is success. A **mechanical park** — loop breaker tripped, no PR opened, budget exhausted, driver fault, no gate block, stale CI — is a human interrupted by an operational failure rather than a hard problem. The ratio is the measure, computed by `make evidence` (#198).
+  This gives the backlog an ordering principle it did not have: work that removes mechanical parks outranks work that adds capability, because a mechanical park spends the scarcest resource on the least valuable question.
 
 - **Criteria grammar** → **EARS + Given-When-Then** (not invented); see `criteria-grammar.md`.
   Micro-tested and kept: the model knows *of* EARS but defaults nearly everything to `WHEN`.
