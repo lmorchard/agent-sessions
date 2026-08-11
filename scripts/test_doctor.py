@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from agent_sessions.driver import credentials  # noqa: E402
 from agent_sessions.scripts import doctor  # noqa: E402
 
 BOT = "agent-bot"
@@ -487,3 +488,62 @@ def test_a_wholly_clean_run_still_says_so():
     )
     assert [c.name for c in checks if c.status != "pass"] == []
     assert "all checks passed" in doctor.render(checks)
+
+
+# -- the report has to be actionable at a glance -----------------------------
+
+
+def _warned(scopes="project, repo, write:discussion", board="lmorchard/9"):
+    tok = "ghp_x"
+    return doctor.check_all(
+        env(DRIVER_GH_WRITE_TOKEN=tok),
+        FakeGh(write_token=tok, scopes=scopes, board_ok=False),
+        repo=REPO, repo_path=".", board=board,
+    )
+
+
+def test_an_action_names_the_variable_and_the_exact_scope_list():
+    """'add read:org' leaves the operator to work out which token, which kind, and
+    what the other scopes should be. Name all three."""
+    action = next(c.action for c in _warned() if c.action)
+    assert credentials.WRITE_TOKEN_VAR in action
+    assert "classic" in action
+    for scope in ("project", "read:org", "repo", "write:discussion"):
+        assert scope in action, f"{scope} missing from {action!r}"
+
+
+def test_the_suggested_scopes_keep_what_the_token_already_has():
+    """A re-issue instruction that silently drops `write:discussion` breaks the lab
+    notebook, and the operator would not know why."""
+    action = next(c.action for c in _warned(scopes="repo, write:discussion") if c.action)
+    assert "write:discussion" in action
+
+
+def test_the_suggested_scopes_never_include_a_dangerous_one():
+    action = next(c.action for c in _warned(scopes="repo, workflow, project") if c.action)
+    assert "workflow" not in action
+
+
+def test_one_root_cause_yields_one_next_step():
+    """Two checks fail for the same reason and print the same paragraph twice. The
+    summary must say it once."""
+    report = doctor.render(_warned())
+    assert report.count("Next steps") == 1
+    steps = report.split("Next steps")[1]
+    assert steps.count(credentials.WRITE_TOKEN_VAR) == 1, f"the same action was listed twice:\n{steps}"
+
+
+def test_the_next_steps_block_is_absent_when_there_is_nothing_to_do():
+    tok = "ghp_clean"
+    checks = doctor.check_all(
+        env(DRIVER_GH_WRITE_TOKEN=tok),
+        FakeGh(write_token=tok, scopes="public_repo, project, read:org"),
+        repo=REPO, repo_path=".", board="lmorchard/9",
+    )
+    assert "Next steps" not in doctor.render(checks)
+
+
+def test_the_action_line_is_short_enough_to_read():
+    for check in _warned():
+        if check.action:
+            assert len(check.action) < 160, f"not an action, a paragraph: {check.action}"
