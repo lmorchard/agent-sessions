@@ -74,9 +74,7 @@ for `needs-review`. What the tier changes is where the run **surfaces to a human
 
 - **`auto-ok`** — run straight through 2a–2i without stopping. Report the gate verdict.
 - **`needs-review`** — same run, plus a stop at each point the tier's reason implies:
-  - *A human-judgment criterion.* Produce its `EVIDENCE TO PRESENT`, then stop and ask the human
-    to grade it. Don't grade it yourself and don't record it as pending-and-fine; an ungraded
-    judgment criterion means the gate can't close.
+  - *A human-judgment criterion.* Stop and post a structured comment (or Draft PR section) containing the exact **human-run check procedure** and the **pass/fail question** for the human to answer. Don't grade it yourself and don't record it as pending-and-fine; an ungraded judgment criterion means the gate can't close.
   - *A risk-gated path* (auth, secrets, data migration/deletion, deploy/infra/CI, dependency
     changes). Present that part of the diff for human review before opening the PR.
 - **Either tier** — an amendment to a frozen check always stops for confirmation, and always
@@ -84,6 +82,15 @@ for `needs-review`. What the tier changes is where the run **surfaces to a human
 
 The gate itself is always a stop. `eligible-for-auto-merge` is a finding this mode reports, not
 an action it takes.
+
+## Resuming a Parked Session
+
+If resuming after a human reply to a human-judgment check:
+1. Read the latest comments to classify the reply.
+2. Classify it as **confirmed**, **rejected**, or **inconclusive**.
+3. If `confirmed`: Record it in `checks.md` and the gate block as a satisfied row marked `human-verified`. Then continue the run.
+4. If `rejected`: Address the feedback, fix the code, and re-park for human judgment with the updated procedure/question.
+5. If `inconclusive` (e.g. asking for clarification, non-committal): Reply to clarify, and **park the session again**. Make sure to include the word "inconclusive" in your final output verdict so the driver knows not to increment attempts.
 
 ## When to break out of autonomous mode
 
@@ -98,6 +105,7 @@ an action it takes.
 - Self-review finds a bug whose fix would change the spec's intent.
 
 In every case, stop and surface:
-1. **Record a top-level comment on the GitHub issue** by appending an `issue_comment` entry to the write manifest (`references/write-manifest.md`) explaining plainly what needs a decision, why, and what choices exist.
-2. **Record the parking label** as a `label` entry adding `agent-session:needs-human`.
-3. State the verdict plainly in your final output and exit. Asking is cheap; a run built on a wrong foundation is expensive and, worse, arrives wearing green checks.
+1. **Commit and Push WIP State:** Commit any uncommitted changes with a message like `WIP: Parked for human judgment` and record a `push` entry to push your feature branch to `origin`.
+2. **Record a Draft PR or Issue Comment:** If no PR exists, record a `pr_create` entry to open a Draft PR (tagged `[WIP]`). Include a structured `## Handoff / Parked State` section in the PR body (or issue comment if a PR exists) explaining plainly what was completed, what remains, what needs a decision, why, and what choices exist. Include the gate block with `verdict: pending`.
+3. **Record the parking label** as a `label` entry adding `agent-session:needs-human` to the issue.
+4. State the verdict plainly in your final output and exit. Asking is cheap; a run built on a wrong foundation is expensive and, worse, arrives wearing green checks.

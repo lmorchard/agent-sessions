@@ -130,11 +130,13 @@ def pr(
     changed_files=1,
     base_ref="main",
     files=None,
+    comments=(),
 ):
     return {
         "number": number,
         "title": f"PR {number}",
         "body": body,
+        "comments": list(comments),
         "headRefName": head_ref if head_ref is not None else f"feature/pr-{number}",
         "baseRefName": base_ref,
         "url": f"https://github.com/{REPO}/pull/{number}",

@@ -35,7 +35,7 @@ condition → observable-response shape that maps to an assertion. Full syntax a
    real middle rung, not a cop-out.
 3. **Human judgment** — only when 1 and 2 genuinely fail (subjective feel, aesthetic,
    product-call). Not a failure of the spec; it is the criterion *telling you* the issue belongs
-   in `needs-review`.
+   in `needs-review`. To be valid, a human judgment criterion must define a **human-run check**: an executable procedure to run plus a clear pass/fail question (e.g., "Run the app, click export, does the spinner look smooth?").
 
 ## Two tests every check must pass
 

@@ -25,7 +25,7 @@ either escalate it to a property, drop it to "What we're NOT doing", or accept t
 forces tier = needs-review.]
 
 - CRITERION: [WHEN … THE SYSTEM SHALL … | GIVEN … WHEN … THEN …]
-  CHECK: [`command / test name / assertion` that proves it]
+  CHECK: [`command / test name / assertion` that proves it OR specific human-run procedure and pass/fail question]
   VERIFIED DISCRIMINATING: [the failure observed when the check was run at intake]
 
 ## Regression guards
@@ -76,7 +76,7 @@ The spec is ready iff:
 
 1. **Every criterion names a check.** No criterion is bare prose. Each pairs with a
    concrete-test check, a property check, or is explicitly acknowledged as human-judgment
-   (which forces `needs-review`). This is the upgrade — dev-session gated on placeholders;
+   with an executable procedure and a pass/fail question (which forces `needs-review`). This is the upgrade — dev-session gated on placeholders;
    this gates on *verifiability*.
 2. **Every criterion's check was run and observed to fail**, with the failure recorded. A check
    that passes today grades nothing. If it passes, it's a guard — move it, and find the
