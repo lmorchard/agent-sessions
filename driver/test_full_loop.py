@@ -127,15 +127,21 @@ def pr(
     review_requests=0,
     reviews=0,
     head_ref=None,
+    changed_files=1,
+    base_ref="main",
+    files=None,
 ):
     return {
         "number": number,
         "title": f"PR {number}",
         "body": body,
         "headRefName": head_ref if head_ref is not None else f"feature/pr-{number}",
+        "baseRefName": base_ref,
         "url": f"https://github.com/{REPO}/pull/{number}",
         "closingIssuesReferences": [{"number": n} for n in closes],
         "headRefOid": head_oid,
+        "changedFiles": changed_files,
+        "files": files if files is not None else [{"path": "some_file.py"}],
         "checks": [{"name": name, "bucket": bucket} for name, bucket in checks],
         "reviewThreads": [{"isResolved": resolved} for resolved in threads],
         "reviewRequests": [{"login": f"reviewer-{i}"} for i in range(review_requests)],
@@ -143,8 +149,8 @@ def pr(
     }
 
 
-def comment(login, body="a comment"):
-    return {"author": {"login": login}, "body": body, "createdAt": "2026-08-10T11:00:00Z"}
+def comment(login, body="a comment", created_at="2026-08-10T11:00:00Z"):
+    return {"author": {"login": login}, "body": body, "createdAt": created_at}
 
 
 def board_item(number, *, status="Ready", priority=""):
@@ -256,8 +262,8 @@ class FakeGitHub:
         iss = self.issue_by_number(number)
         iss["labels"] = [label for label in iss["labels"] if label["name"] != name]
 
-    def add_comment(self, number, login, body="a comment"):
-        self.issue_by_number(number)["comments"].append(comment(login, body))
+    def add_comment(self, number, login, body="a comment", created_at="2026-08-10T11:00:00Z"):
+        self.issue_by_number(number)["comments"].append(comment(login, body, created_at))
 
     @property
     def label_ops(self) -> list[tuple[str, str | None, str | None]]:
@@ -761,6 +767,8 @@ def test_pass_ending_gate_eligible(loop):
             "outcome": "gate-eligible",
             "reason": "all gate rows satisfied",
             "pr": f"https://github.com/{REPO}/pull/201",
+            "changed_files": 1,
+            "base_diff_sha": f"main..{head[:8]}",
             "run_dir": str(rundir),
             "writes": {"recorded": 0, "applied": 0, "ok": True},
             "provenance": {},
@@ -788,6 +796,42 @@ def test_pass_ending_gate_eligible(loop):
     # `main()` passes the whole PR body to `gate.classify`, so `gate.yaml` is the
     # whole body rather than just the block. Pinned as behaviour; #184 is the fix.
     assert (rundir / "gate.yaml").read_text(encoding="utf-8") == gh.pr_by_number(201)["body"]
+
+
+def test_pass_with_empty_diff_is_classified_as_gate_human(loop):
+    """Issue 192: A PR with 0 changed files is classified as gate-human with empty diff reason,
+    and changed_files / base_diff_sha are recorded in runs.jsonl."""
+    head = "abc1234def5678000000000000000000000000ff"
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[
+            pr(
+                201,
+                body=gate_body(101, verdict="eligible-for-auto-merge", ci_row="2/2 pass @ abc1234"),
+                closes=[101],
+                head_oid=head,
+                checks=[("lint", "pass"), ("test", "pass")],
+                threads=[True],
+                review_requests=1,
+                reviews=1,
+                changed_files=0,
+            )
+        ],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent(stream=agent_stream(final="Graded the gate.", cost=1.23, session="sess-abc"))
+
+    code, out = loop.run(gh, agent=agent)
+
+    assert code == 0
+    assert "outcome  gate-human" in out
+    assert "empty diff" in out
+
+    (row,) = loop.rows("runs.jsonl")
+    assert row["outcome"] == "gate-human"
+    assert "empty diff" in row["reason"]
+    assert row["changed_files"] == 0
+    assert "base_diff_sha" in row
 
     # The inflight marker was written and then cleared, so the next pass does not
     # report an orphan.
@@ -892,11 +936,10 @@ def test_pass_ending_parked(loop):
         }
     ]
 
-    # The attempt counter goes up before the run and is cleared by the park, so a
-    # human comment resumes from zero rather than from a spent budget.
-    assert gh.label_ops == [("attempt", "102", "1"), ("park", "102", None), ("clear-attempts", "102", None)]
+    # The attempt counter goes up before the run and remains on the issue when parked.
+    assert gh.label_ops == [("attempt", "102", "1"), ("park", "102", None)]
     assert agent_session_driver.PARK_LABEL in gh.labels_of(102)
-    assert "agent-session:attempt-1" not in gh.labels_of(102)
+    assert "agent-session:attempt-1" in gh.labels_of(102)
 
     inbox = (loop.state_dir / "inbox.md").read_text(encoding="utf-8")
     assert f"[{FROZEN_TS}] Issue #102 escalated: parked: {row['reason']}\n" == inbox
@@ -993,7 +1036,7 @@ def test_selection_output_is_byte_identical_to_the_golden(loop):
     # A prior run's reason, so the parked skip prints history rather than the
     # "no history recorded on this host" fallback.
     loop.seed_runs([
-        {"issue": 302, "repo": REPO, "outcome": "parked", "reason": "triage could not tell which subsystem this is about"}
+        {"issue": 302, "repo": REPO, "started": FROZEN_TS, "outcome": "parked", "reason": "triage could not tell which subsystem this is about"}
     ])
 
     code, out = loop.run(gh, argv=["--dry-run"])
@@ -1064,6 +1107,42 @@ def test_agent_park_comment_under_driver_identity_does_not_unpark(loop):
     assert agent_session_driver.PARK_LABEL in gh.labels_of(102)
     # And the agent was not dispatched a second time.
     assert len(agent.calls) == 1
+
+
+def test_unpark_preserves_attempts_until_loop_breaker(loop):
+    """Issue 183 Criterion 4:
+    Unparking an issue does NOT clear attempt counters. Attempt counters accumulate
+    across retries until MAX_PHASE_ATTEMPTS is reached and the loop breaker fires.
+    """
+    gh = FakeGitHub(
+        issues=[issue(102, body="Something vague.", labels=["P2", "agent-session:attempt-2"])],
+        board_items=[board_item(102)],
+    )
+    agent = StubAgent(
+        stream=agent_stream(final="Need human input."),
+        manifest=[
+            {"kind": "issue_comment", "issue": 102, "body": "Parking."},
+            {"kind": "label", "issue": 102, "add": [agent_session_driver.PARK_LABEL]},
+        ],
+    )
+
+    # Pass 1: attempts 2 -> 3, agent runs and parks
+    code1, out1 = loop.run(gh, agent=agent, argv=["--max-phase-attempts", "3"])
+    assert code1 == 0
+    assert "agent-session:attempt-3" in gh.labels_of(102)
+
+    # Human comment unparks issue 102
+    gh.add_comment(102, "alice", "Please try again with this info.", created_at="2099-01-01T00:00:00Z")
+
+    # Pass 2: detects human comment and unparks #102
+    code2, out2 = loop.run(gh, agent=agent, argv=["--max-phase-attempts", "3"])
+    assert code2 == 0
+    assert "UNPARK  #102  new comment from @alice" in out2
+
+    # Pass 3: attempts is 3 >= max_phase_attempts (3) -> loop breaker fires
+    code3, out3 = loop.run(gh, agent=agent, argv=["--max-phase-attempts", "3"])
+    assert code3 == 0
+    assert "MAX_PHASE_ATTEMPTS (3) reached for phase triage" in out3
 
 
 # --- case 5: the credential split (#191) ------------------------------------

@@ -559,6 +559,22 @@ def test_gate_schema_parser_and_template_agreement():
         f"pr-body-template.md table fields {table_fields} disagree with gate.py ALL_FIELDS {parser_fields}"
     )
 
+def test_classify_empty_diff_requires_human():
+    """Issue 192: A PR with 0 changed files is classified as gate-human with empty diff reason."""
+    g = "## Merge gate\n\n```yaml\ntier: auto-ok\nchecks: C1 pass\ntamper: clean\nproject-gates: make check green\nthreads: 0 unresolved\nrisk-paths: none\nverdict: eligible-for-auto-merge\n```"
+    res = gate.classify(g, head_sha="abc123456789", changed_files=0)
+    assert res["outcome"] != "gate-eligible"
+    assert res["outcome"] == "gate-human"
+    assert "empty diff" in res["reason"]
+
+
+def test_classify_disjoint_criteria_paths_warns():
+    """Issue 192: A PR whose diff touches none of criteria_paths emits a warning."""
+    g = "## Merge gate\n\n```yaml\ntier: auto-ok\nchecks: C1 pass\ntamper: clean\nproject-gates: make check green\nthreads: 0 unresolved\nrisk-paths: none\nverdict: eligible-for-auto-merge\n```"
+    res = gate.classify(g, head_sha="abc123456789", changed_files=2, pr_files=["docs/README.md"], criteria_paths=["src/core.py"])
+    assert any("touches none of the criteria paths" in w for w in res["warnings"])
+
+
 
 
 
