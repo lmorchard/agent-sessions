@@ -9,6 +9,7 @@ behaviour, it calls `gate`.
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -544,6 +545,19 @@ def test_render_gate_block_golden():
     assert "verdict: eligible-for-auto-merge" in rendered
     assert "```yaml" in rendered
 
+
+def test_gate_schema_parser_and_template_agreement():
+    """Issue 194: Verify gate.py's ALL_FIELDS matches the fields documented in pr-body-template.md."""
+    template_path = Path("skills/agent-session/references/pr-body-template.md")
+    assert template_path.is_file()
+    content = template_path.read_text(encoding="utf-8")
+
+    table_fields = set(re.findall(r"^\|\s*`([a-z-]+)`\s*\|", content, re.MULTILINE))
+    parser_fields = set(gate.ALL_FIELDS)
+
+    assert table_fields == parser_fields, (
+        f"pr-body-template.md table fields {table_fields} disagree with gate.py ALL_FIELDS {parser_fields}"
+    )
 
 def test_classify_empty_diff_requires_human():
     """Issue 192: A PR with 0 changed files is classified as gate-human with empty diff reason."""
