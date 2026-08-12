@@ -127,15 +127,21 @@ def pr(
     review_requests=0,
     reviews=0,
     head_ref=None,
+    changed_files=1,
+    base_ref="main",
+    files=None,
 ):
     return {
         "number": number,
         "title": f"PR {number}",
         "body": body,
         "headRefName": head_ref if head_ref is not None else f"feature/pr-{number}",
+        "baseRefName": base_ref,
         "url": f"https://github.com/{REPO}/pull/{number}",
         "closingIssuesReferences": [{"number": n} for n in closes],
         "headRefOid": head_oid,
+        "changedFiles": changed_files,
+        "files": files if files is not None else [{"path": "some_file.py"}],
         "checks": [{"name": name, "bucket": bucket} for name, bucket in checks],
         "reviewThreads": [{"isResolved": resolved} for resolved in threads],
         "reviewRequests": [{"login": f"reviewer-{i}"} for i in range(review_requests)],
@@ -761,6 +767,8 @@ def test_pass_ending_gate_eligible(loop):
             "outcome": "gate-eligible",
             "reason": "all gate rows satisfied",
             "pr": f"https://github.com/{REPO}/pull/201",
+            "changed_files": 1,
+            "base_diff_sha": f"main..{head[:8]}",
             "run_dir": str(rundir),
             "writes": {"recorded": 0, "applied": 0, "ok": True},
             "provenance": {},
@@ -788,6 +796,42 @@ def test_pass_ending_gate_eligible(loop):
     # `main()` passes the whole PR body to `gate.classify`, so `gate.yaml` is the
     # whole body rather than just the block. Pinned as behaviour; #184 is the fix.
     assert (rundir / "gate.yaml").read_text(encoding="utf-8") == gh.pr_by_number(201)["body"]
+
+
+def test_pass_with_empty_diff_is_classified_as_gate_human(loop):
+    """Issue 192: A PR with 0 changed files is classified as gate-human with empty diff reason,
+    and changed_files / base_diff_sha are recorded in runs.jsonl."""
+    head = "abc1234def5678000000000000000000000000ff"
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[
+            pr(
+                201,
+                body=gate_body(101, verdict="eligible-for-auto-merge", ci_row="2/2 pass @ abc1234"),
+                closes=[101],
+                head_oid=head,
+                checks=[("lint", "pass"), ("test", "pass")],
+                threads=[True],
+                review_requests=1,
+                reviews=1,
+                changed_files=0,
+            )
+        ],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent(stream=agent_stream(final="Graded the gate.", cost=1.23, session="sess-abc"))
+
+    code, out = loop.run(gh, agent=agent)
+
+    assert code == 0
+    assert "outcome  gate-human" in out
+    assert "empty diff" in out
+
+    (row,) = loop.rows("runs.jsonl")
+    assert row["outcome"] == "gate-human"
+    assert "empty diff" in row["reason"]
+    assert row["changed_files"] == 0
+    assert "base_diff_sha" in row
 
     # The inflight marker was written and then cleared, so the next pass does not
     # report an orphan.
