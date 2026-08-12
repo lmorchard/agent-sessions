@@ -753,6 +753,7 @@ def test_pass_ending_gate_eligible(loop):
         {
             "issue": 101,
             "repo": REPO,
+            "phase": "grade_gate",
             "started": FROZEN_TS,
             "exit": 0,
             "cost_usd": 1.23,

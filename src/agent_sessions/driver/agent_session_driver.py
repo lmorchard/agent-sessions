@@ -1188,6 +1188,7 @@ def main(argv: list[str] | None = None) -> int:
         row = {
             "issue": int(num),
             "repo": repo,
+            "phase": phase,
             "started": ts,
             "exit": ret,
             "cost_usd": cost,
