@@ -36,8 +36,26 @@ import json
 import re
 import sys
 
-# Schema definition for gate block fields per issue #184
+# Schema definition for gate block fields per issue #184 and issue #194
 _SUBSTITUTE_MARKERS = ("-- via substitute", "clean-by-substitute", "substitute")
+
+REQUIRED_FIELDS = [
+    "tier",
+    "checks",
+    "tamper",
+    "project-gates",
+    "threads",
+    "risk-paths",
+    "verdict",
+]
+OPTIONAL_FIELDS = [
+    "guards",
+    "freeze",
+    "ci",
+    "amendments",
+    "reason",
+]
+ALL_FIELDS = REQUIRED_FIELDS + [f for f in OPTIONAL_FIELDS if f not in REQUIRED_FIELDS]
 
 def _is_substituted(val: str) -> bool:
     """Check if a field value explicitly indicates substitution using schema markers."""
@@ -53,8 +71,7 @@ def validate_gate_block(fields: dict[str, str]) -> tuple[bool, list[str]]:
     Returns (is_valid, list_of_errors).
     """
     errors: list[str] = []
-    required_fields = ["tier", "checks", "tamper", "project-gates", "threads", "risk-paths", "verdict"]
-    for f in required_fields:
+    for f in REQUIRED_FIELDS:
         if f not in fields or not fields[f].strip():
             errors.append(f"missing required field: {f}")
 

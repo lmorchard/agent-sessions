@@ -57,10 +57,10 @@ For this repo, the gated paths worth calling out by name, because the *reason* i
   run; this line is its **intake-time counterpart**, and it takes effect without any skill file
   being touched.
 
-- **`src/agent_sessions/driver/gate.py` — the oracle, and therefore off-limits too.** As of 2026-07-28 this module is
+- **`src/agent_sessions/driver/gate.py` — the oracle (and its gate block format), off-limits too.** As of 2026-07-28 this module is
   what classifies a run's outcome (`classify_pr_body`, called at `agent-session-driver.sh:485` and
   `:616`). **An issue whose work edits it is editing the code that grades its own run** — the
-  implementer authoring its own oracle, one level removed from the skill. The `skills/**` rule does
+  implementer authoring its own oracle, one level removed from the skill. The gate block schema format and `gate.py` form one contract governed by this oracle rule. The `skills/**` rule does
   not cover it, and this line was added because the move-7 partition missed it: `driver/` was
   wholly drivable before the classifier moved there.
 

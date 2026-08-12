@@ -53,7 +53,7 @@ reason: C3 awaits human grading
 
 ## The gate block
 
-Field values, so the block stays parseable:
+The gate block schema format is owned by the harness (`src/agent_sessions/driver/gate.py`).
 
 | Field | Values |
 |---|---|
