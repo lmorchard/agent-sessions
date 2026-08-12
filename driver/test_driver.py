@@ -107,8 +107,8 @@ def test_has_new_human_comment(monkeypatch):
     class MockResult:
         returncode = 0
 
-        def __init__(self, login):
-            self.stdout = json.dumps({"comments": [{"author": {"login": login}, "body": "Comment text"}]})
+        def __init__(self, login, created_at="2026-08-10T13:00:00Z"):
+            self.stdout = json.dumps({"comments": [{"author": {"login": login}, "body": "Comment text", "createdAt": created_at}]})
 
     def mock_run_human(cmd, *args, **kwargs):
         return MockResult("alice")
@@ -123,6 +123,23 @@ def test_has_new_human_comment(monkeypatch):
 
     monkeypatch.setattr("subprocess.run", mock_run_bot)
     has_human, login = agent_session_driver.has_new_human_comment(42, "owner/repo")
+    assert has_human is False
+
+    # Issue 183: Exclude driver identity and extra bot logins
+    def mock_run_driver(cmd, *args, **kwargs):
+        return MockResult("driver-account")
+
+    monkeypatch.setattr("subprocess.run", mock_run_driver)
+    bots = {"driver-account", "extra-bot"}
+    has_human, login = agent_session_driver.has_new_human_comment(42, "owner/repo", bot_logins=bots)
+    assert has_human is False
+
+    # Issue 183: Filter out comments predating park_time
+    def mock_run_predated(cmd, *args, **kwargs):
+        return MockResult("alice", created_at="2026-08-10T11:00:00Z")
+
+    monkeypatch.setattr("subprocess.run", mock_run_predated)
+    has_human, login = agent_session_driver.has_new_human_comment(42, "owner/repo", park_time="20260810T120000Z")
     assert has_human is False
 
 
