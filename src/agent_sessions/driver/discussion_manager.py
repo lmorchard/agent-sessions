@@ -29,20 +29,18 @@ def run_gh(args: list[str]) -> tuple[int, str, str]:
         return 1, "", str(e)
 
 
-def ensure_category(repo: str, category_name: str = "Lab Notebook", emoji: str = "📓") -> bool:
-    """Ensure discussion category exists using GraphQL API."""
-    if not repo:
+def check_category(repo: str, category_name: str = "Lab Notebook") -> bool:
+    """Check if discussion category exists on GitHub repo using GraphQL API."""
+    if not repo or "/" not in repo:
         return False
-    # Get repo ID
-    rc, stdout, _ = run_gh(["repo", "view", repo, "--json", "id", "--jq", ".id"])
-    if rc != 0 or not stdout.strip():
-        return False
-    repo_id = stdout.strip()
+    owner, repo_name = repo.split("/", 1)
 
-    mutation = """
-    mutation($repositoryId: ID!, $name: String!, $emoji: String!) {
-      createDiscussionCategory(input: { repositoryId: $repositoryId, name: $name, emoji: $emoji }) {
-        discussionCategory { id name }
+    query = """
+    query($owner: String!, $repo: String!) {
+      repository(owner: $owner, name: $repo) {
+        discussionCategories(first: 50) {
+          nodes { name }
+        }
       }
     }
     """
@@ -50,25 +48,35 @@ def ensure_category(repo: str, category_name: str = "Lab Notebook", emoji: str =
         [
             "api",
             "graphql",
-            "-F",
-            f"repositoryId={repo_id}",
             "-f",
-            f"query={mutation}",
+            f"query={query}",
             "-f",
-            f"name={category_name}",
+            f"owner={owner}",
             "-f",
-            f"emoji={emoji}",
+            f"repo={repo_name}",
         ]
     )
-    if rc == 0:
-        print(f"    Created '{category_name}' discussion category")
-        return True
-    elif "already exists" in stderr.lower() or "already exists" in stdout.lower():
-        print(f"    (Discussion category '{category_name}' already exists)")
-        return True
-    else:
-        print(f"    WARNING: could not create discussion category '{category_name}': {stderr.strip()}", file=sys.stderr)
-        return False
+    if rc == 0 and stdout.strip():
+        try:
+            data = json.loads(stdout)
+            nodes = data.get("data", {}).get("repository", {}).get("discussionCategories", {}).get("nodes", [])
+            names = [n.get("name") for n in nodes if isinstance(n, dict)]
+            if category_name in names:
+                return True
+        except Exception:
+            pass
+
+    print(
+        f"    WARNING: discussion category '{category_name}' is absent from {repo}. "
+        "Discussion categories must be created by hand in GitHub web settings (Settings -> Discussions).",
+        file=sys.stderr,
+    )
+    return False
+
+
+def ensure_category(repo: str, category_name: str = "Lab Notebook", emoji: str = "📓") -> bool:
+    """Check if discussion category exists. Deprecated alias for check_category."""
+    return check_category(repo, category_name)
 
 
 def get_or_create_daily_discussion(repo: str, category_name: str = "Lab Notebook") -> str:

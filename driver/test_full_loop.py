@@ -1145,6 +1145,33 @@ def test_unpark_preserves_attempts_until_loop_breaker(loop):
     assert "MAX_PHASE_ATTEMPTS (3) reached for phase triage" in out3
 
 
+def test_discussion_note_failure_is_reported_in_run_output(loop, monkeypatch):
+    """Issue 211 Criterion 3: WHEN posting a discussion note fails, THE SYSTEM
+    SHALL record the failure in the run's output rather than swallowing it."""
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[
+            pr(
+                201,
+                body=gate_body(101, verdict="eligible-for-auto-merge", ci_row="2/2 pass @ abc1234"),
+                closes=[101],
+                head_oid="abc1234def5678000000000000000000000000ff",
+                checks=[("lint", "pass"), ("test", "pass")],
+                threads=[True],
+            )
+        ],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent(stream=agent_stream(final="Graded.", cost=1.0))
+    monkeypatch.setattr("agent_sessions.driver.discussion_manager.post_start", lambda **kw: False)
+    monkeypatch.setattr("agent_sessions.driver.discussion_manager.post_finish", lambda **kw: False)
+
+    code, out = loop.run(gh, agent=agent)
+    assert code == 0
+    assert "NOTE: could not post start discussion note" in out
+    assert "NOTE: could not post finish discussion note" in out
+
+
 # --- case 5: the credential split (#191) ------------------------------------
 
 

@@ -1120,11 +1120,13 @@ def main(argv: list[str] | None = None) -> int:
 
         # Post start discussion note
         try:
-            discussion_manager.post_start(
+            ok = discussion_manager.post_start(
                 repo=repo, issue=num, phase=phase, budget=args.max_budget_usd, rundir=str(rundir)
             )
-        except Exception:
-            pass
+            if not ok:
+                say("  NOTE: could not post start discussion note to Lab Notebook")
+        except Exception as e:
+            say(f"  NOTE: failed to post start discussion note: {e}")
 
         # Write inflight marker
         inflight_file.write_text(
@@ -1287,7 +1289,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # Post finish discussion note
         try:
-            discussion_manager.post_finish(
+            ok = discussion_manager.post_finish(
                 repo=repo,
                 issue=num,
                 phase=phase,
@@ -1298,8 +1300,10 @@ def main(argv: list[str] | None = None) -> int:
                 reason=reason,
                 rundir=str(rundir),
             )
-        except Exception:
-            pass
+            if not ok:
+                say("  NOTE: could not post finish discussion note to Lab Notebook")
+        except Exception as e:
+            say(f"  NOTE: failed to post finish discussion note: {e}")
 
         if inflight_file.is_file():
             inflight_file.unlink(missing_ok=True)
