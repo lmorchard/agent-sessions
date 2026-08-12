@@ -476,9 +476,7 @@ def check_all(environ: dict, runner, *, repo: str, repo_path: str, board: str = 
                     "warn",
                     f"no {NOTEBOOK_CATEGORY!r} category",
                     "Create it by hand in the repo's Discussions settings. `discussion_manager."
-                    "ensure_category` calls a `createDiscussionCategory` mutation that does not "
-                    "exist in GitHub's GraphQL schema, so it fails every time and returns False "
-                    "without saying anything.",
+                    "check_category` reports its absence.",
                 )
             )
         else:

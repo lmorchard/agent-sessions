@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from agent_sessions.driver.discussion_manager import (
+    check_category,
     ensure_category,
     get_or_create_daily_discussion,
     post_finish,
@@ -16,28 +17,33 @@ def _today_title() -> str:
     return f"Lab Notebook: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
 
 
-def test_ensure_category_success():
+def test_check_category_present():
     def mock_run_gh(args):
-        if "repo" in args:
-            return 0, "R_123", ""
         if "graphql" in args:
-            return 0, json.dumps({"data": {"createDiscussionCategory": {"discussionCategory": {"id": "DC_1"}}}}), ""
+            return 0, json.dumps({"data": {"repository": {"discussionCategories": {"nodes": [{"name": "Lab Notebook"}]}}}}), ""
         return 1, "", "error"
 
     with patch(f"{MODULE_PATH}.run_gh", side_effect=mock_run_gh):
-        assert ensure_category("owner/repo") is True
+        assert check_category("owner/repo", "Lab Notebook") is True
+        assert ensure_category("owner/repo", "Lab Notebook") is True
 
 
-def test_ensure_category_already_exists():
+def test_check_category_absent_and_no_mutation_attempted(capsys):
+    calls = []
+
     def mock_run_gh(args):
-        if "repo" in args:
-            return 0, "R_123", ""
+        calls.append(args)
         if "graphql" in args:
-            return 1, "", "Name already exists"
+            return 0, json.dumps({"data": {"repository": {"discussionCategories": {"nodes": [{"name": "General"}]}}}}), ""
         return 1, "", "error"
 
     with patch(f"{MODULE_PATH}.run_gh", side_effect=mock_run_gh):
-        assert ensure_category("owner/repo") is True
+        assert check_category("owner/repo", "Lab Notebook") is False
+        stderr = capsys.readouterr().err
+        assert "Lab Notebook" in stderr
+        assert "created by hand" in stderr
+        # Assert no create/mutation call was issued
+        assert not any("mutation" in str(arg).lower() or "creatediscussion" in str(arg).lower() for c in calls for arg in c)
 
 
 def test_get_or_create_daily_discussion_finds_existing():

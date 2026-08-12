@@ -310,14 +310,12 @@ def test_a_present_notebook_category_passes():
     assert by_name(checks, "discussions notebook").status == "pass"
 
 
-def test_a_missing_category_names_the_mutation_that_cannot_create_it():
-    """`ensure_category` calls `createDiscussionCategory`, which is not in GitHub's
-    GraphQL schema -- so it has never worked and fails silently. An operator hitting
-    a missing category should be told to create it by hand, not left waiting."""
+def test_a_missing_category_recommends_creating_by_hand():
+    """An operator hitting a missing category should be told to create it by hand."""
     checks = run(FakeGh(categories=("General",)), repo=REPO)
     check = by_name(checks, "discussions notebook")
     assert check.status == "warn"
-    assert "createDiscussionCategory" in check.remedy
+    assert "check_category" in check.remedy
     assert "by hand" in check.remedy
 
 
