@@ -155,9 +155,12 @@ def park_label_remove(issue_number: str | int, repo: str) -> None:
 
 
 def has_new_human_comment(
-    issue_number: str | int, repo: str, bot_logins: frozenset[str] | set[str] | None = None
+    issue_number: str | int,
+    repo: str,
+    bot_logins: frozenset[str] | set[str] | None = None,
+    park_time: str = "",
 ) -> tuple[bool, str]:
-    """Check if the latest comment on a parked issue is from a human user.
+    """Check if a human user posted a comment on a parked issue AFTER it was parked.
     Returns (has_human_comment, author_login).
 
     `bot_logins` must include the driver's own login (`credentials.bot_logins`
@@ -173,14 +176,50 @@ def has_new_human_comment(
         comments = data.get("comments", [])
         if not comments:
             return False, ""
-        latest = comments[-1]
-        author = latest.get("author", {})
-        login = author.get("login", "")
-        if not login or login.endswith("[bot]") or login.lower() in known_bots:
-            return False, ""
-        return True, login
+
+        norm_park_time = park_time.replace("-", "").replace(":", "").replace(" ", "") if park_time else ""
+
+        for comment_obj in reversed(comments):
+            author = comment_obj.get("author", {}) if isinstance(comment_obj, dict) else {}
+            login = author.get("login", "") if isinstance(author, dict) else ""
+            if not login or login.endswith("[bot]") or login.lower() in known_bots:
+                continue
+
+            if norm_park_time:
+                created_at = str(comment_obj.get("createdAt", "")) if isinstance(comment_obj, dict) else ""
+                norm_created = created_at.replace("-", "").replace(":", "").replace(" ", "")
+                if norm_created and norm_created <= norm_park_time:
+                    continue
+
+            return True, login
+
+        return False, ""
     except Exception:
         return False, ""
+
+
+def get_park_time(issue_number: str | int, state_dir: Path | None) -> str:
+    """Find the latest timestamp for issue_number in parked.jsonl or runs.jsonl."""
+    if not state_dir:
+        return ""
+    last_ts = ""
+    for filename, field in (("parked.jsonl", "parked_at"), ("runs.jsonl", "started")):
+        log = state_dir / filename
+        if not log.is_file():
+            continue
+        for line in log.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+                if str(row.get("issue")) == str(issue_number):
+                    ts = str(row.get(field, ""))
+                    if ts and ts > last_ts:
+                        last_ts = ts
+            except Exception:
+                pass
+    return last_ts
 
 
 def notify_human(issue_number: str | int, reason: str, state_dir: Path | None) -> None:
@@ -237,7 +276,6 @@ def apply_park_state(
         with open(parked_log, "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
         park_label_add(iss_num, repo)
-        clear_attempt_labels(iss_num, repo)
         if not quiet:
             say(f"  parked -- excluded from future selection unless --retry {iss_num}")
         notify_human(iss_num, f"{outcome}: {reason}", state_dir)
@@ -246,7 +284,6 @@ def apply_park_state(
         with open(parked_log, "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
         park_label_add(iss_num, repo)
-        clear_attempt_labels(iss_num, repo)
         say(f"  parked for human review -- excluded from future selection unless --retry {iss_num}")
         notify_human(iss_num, f"gate-human: {reason}", state_dir)
     elif outcome == "incomplete":
@@ -977,7 +1014,8 @@ def main(argv: list[str] | None = None) -> int:
     for iss in all_issues_json:
         n = str(iss.get("number"))
         if n in parked_nums and n != args.retry:
-            has_human, login = has_new_human_comment(n, repo, driver_bots)
+            park_t = get_park_time(n, state_dir)
+            has_human, login = has_new_human_comment(n, repo, driver_bots, park_time=park_t)
             human_comments_map[n] = (has_human, login)
             if not has_human:
                 park_reasons[n] = park_reason(n, state_dir)
@@ -1022,7 +1060,6 @@ def main(argv: list[str] | None = None) -> int:
     ts_str = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     for m in sel_res["unpark_actions"]:
         park_label_remove(m, repo)
-        clear_attempt_labels(m, repo)
 
     for m, reason in sel_res["park_actions"]:
         apply_park_state(m, "parked", ts_str, f"parked by loop breaker: {reason}", repo, state_dir, parked_log, quiet=True)
