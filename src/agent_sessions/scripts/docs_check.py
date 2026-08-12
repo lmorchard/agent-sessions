@@ -286,7 +286,7 @@ def check_partition() -> None:
 
 def check_world_state_claims() -> None:
     """Any capability/world-state claim phrased as a judgment must be cited.
-    
+
     Catches phrases like 'Not proven', 'never been driven', bare repo counts, etc.
     """
     forbidden_patterns = [
@@ -295,34 +295,46 @@ def check_world_state_claims() -> None:
         (r"\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+) repositories\b", "bare repo count; use `make evidence` instead"),
         (r"\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+) PRs\b", "bare PR count; use `make evidence` instead"),
     ]
-    
+
     for p in md_files():
         if is_frozen(p):
             continue
-            
+
         content = p.read_text(encoding="utf-8")
-        
+
         # Exception block: if we're reading CLAUDE.md or design.md and talking ABOUT the phrase
         for n, line in enumerate(content.splitlines(), 1):
             line_lower = line.lower()
-            
-            # Exceptions for documentation of the rules
-            if "not proven" in line_lower and ("list survived" in line_lower or "count in disguise" in line_lower or "pointer to make evidence" in line_lower or "proven / not-proven list" in line_lower or "not-proven list" in line_lower): continue
-            if "never been driven" in line_lower and "count in disguise" in line_lower: continue
-            if "repositories" in line_lower and "runs against two repositories" in line_lower and "count in disguise" in line_lower: continue
-            if "seven prs" in line_lower and ("three moves stale" in line_lower or "six merged" in line_lower): continue
-            if "six prs" in line_lower and "across six prs, copilot returned in" in line_lower: continue
-            if "eight prs" in line_lower and "being eight prs deep with" in line_lower: continue
 
-            
+            # Exceptions for documentation of the rules
+            if "not proven" in line_lower and ("list survived" in line_lower or "count in disguise" in line_lower or "pointer to make evidence" in line_lower or "proven / not-proven list" in line_lower or "not-proven list" in line_lower):
+                continue
+            if "never been driven" in line_lower and "count in disguise" in line_lower:
+                continue
+            if "repositories" in line_lower and "runs against two repositories" in line_lower and "count in disguise" in line_lower:
+                continue
+            if "seven prs" in line_lower and ("three moves stale" in line_lower or "six merged" in line_lower):
+                continue
+            if "six prs" in line_lower and "across six prs, copilot returned in" in line_lower:
+                continue
+            if "eight prs" in line_lower and "being eight prs deep with" in line_lower:
+                continue
+
+
             # Temporary carve-out while transitioning: don't flag the literal section talking about "Not proven"
-            if "not proven" in line_lower and ("list" in line_lower or "count" in line_lower or "defect class" in line_lower): continue
-            if "not proven" in line_lower and p.name == "orientation.md": continue # We explicitly declare "Not proven, and the docs say so:"
-            
+            if "not proven" in line_lower and ("list" in line_lower or "count" in line_lower or "defect class" in line_lower):
+                continue
+            if "not proven" in line_lower and p.name == "orientation.md":
+                continue # We explicitly declare "Not proven, and the docs say so:"
+
             # The dated-fact escape hatch: if the line contains a date pattern, it's allowed.
-            if re.search(r"\d{4}-\d{2}-\d{2}", line): continue
-            
-            for pattern, reason, *cond in forbidden_patterns:
+            if re.search(r"\d{4}-\d{2}-\d{2}", line):
+                continue
+
+            for item in forbidden_patterns:
+                pattern = item[0]
+                reason = item[1]
+                cond = item[2:]
                 m = re.search(pattern, line, re.IGNORECASE)
                 if m:
                     if cond and not cond[0](m):
