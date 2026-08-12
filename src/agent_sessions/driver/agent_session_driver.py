@@ -876,20 +876,37 @@ def main(argv: list[str] | None = None) -> int:
             pr_num = matching_pr_dict.get("number") or ""
             prurl = matching_pr_dict.get("url", "")
             pr_body = matching_pr_dict.get("body", "")
+            head_sha = ""
+            changed_files = None
+            base_ref = ""
+            files_list: list[str] = []
             try:
                 res = subprocess.run(
-                    ["gh", "pr", "view", str(pr_num), "--repo", repo, "--json", "headRefOid"],
+                    ["gh", "pr", "view", str(pr_num), "--repo", repo, "--json", "headRefOid,changedFiles,baseRefName,files"],
                     capture_output=True,
                     text=True,
                     check=True,
                 )
-                head_sha = json.loads(res.stdout).get("headRefOid", "")
+                pr_data = json.loads(res.stdout)
+                head_sha = pr_data.get("headRefOid", "")
+                changed_files = pr_data.get("changedFiles", None)
+                base_ref = pr_data.get("baseRefName", "")
+                files_list = [str(f.get("path")) for f in pr_data.get("files", []) if isinstance(f, dict) and f.get("path") is not None]
             except Exception:
                 head_sha = ""
+                changed_files = None
+                base_ref = ""
+                files_list = []
 
             failed_ci, _ = check_pr_ci_status(repo, pr_num)
             ci_checks = "failed" if failed_ci > 0 else "pass"
-            outcome_res = gate.classify(pr_body, head_sha=head_sha, ci_checks=ci_checks)
+            outcome_res = gate.classify(
+                pr_body,
+                head_sha=head_sha,
+                ci_checks=ci_checks,
+                changed_files=changed_files,
+                pr_files=files_list,
+            )
             outcome = outcome_res["outcome"]
             reason = outcome_res["reason"]
 
@@ -1125,6 +1142,9 @@ def main(argv: list[str] | None = None) -> int:
 
         # Classify outcome
         prurl = ""
+        changed_files = None
+        head_sha = ""
+        base_ref = ""
         if ret == 124:
             outcome = "failed"
             reason = f"timed out after {args.timeout}s"
@@ -1155,18 +1175,35 @@ def main(argv: list[str] | None = None) -> int:
                     reason = f"no PR opened; run's own account: {final_text[:400]}"
             else:
                 prnum, prurl = prline.split("\t")[:2]
+                changed_files = None
+                base_ref = ""
+                files_list = []
                 try:
-                    res = subprocess.run(["gh", "pr", "view", prnum, "--repo", repo, "--json", "body,headRefOid"], capture_output=True, text=True, check=True)
+                    res = subprocess.run(
+                        ["gh", "pr", "view", prnum, "--repo", repo, "--json", "body,headRefOid,changedFiles,baseRefName,files"],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
                     pr_data = json.loads(res.stdout)
                     pr_body = pr_data.get("body", "")
                     head_sha = pr_data.get("headRefOid", "")
+                    changed_files = pr_data.get("changedFiles", None)
+                    base_ref = pr_data.get("baseRefName", "")
+                    files_list = [str(f.get("path")) for f in pr_data.get("files", []) if isinstance(f, dict) and f.get("path") is not None]
                 except Exception:
                     pr_body = ""
                     head_sha = ""
 
                 failed_ci, _ = check_pr_ci_status(repo, prnum)
                 ci_checks = "failed" if failed_ci > 0 else "pass"
-                outcome_res = gate.classify(pr_body, head_sha=head_sha, ci_checks=ci_checks)
+                outcome_res = gate.classify(
+                    pr_body,
+                    head_sha=head_sha,
+                    ci_checks=ci_checks,
+                    changed_files=changed_files,
+                    pr_files=files_list,
+                )
                 outcome = outcome_res["outcome"]
                 reason = outcome_res["reason"]
                 (rundir / "gate.yaml").write_text(outcome_res.get("gate", ""), encoding="utf-8")
@@ -1196,6 +1233,8 @@ def main(argv: list[str] | None = None) -> int:
             "outcome": outcome,
             "reason": reason,
             "pr": prurl,
+            "changed_files": changed_files if changed_files is not None else 0,
+            "base_diff_sha": f"{base_ref}..{head_sha[:8]}" if (base_ref and head_sha) else head_sha[:8],
             "run_dir": str(rundir),
             "writes": {
                 "recorded": len(writes_result["entries"]),

@@ -391,6 +391,9 @@ def classify(
     gate: str,
     head_sha: str = "",
     ci_checks: list[dict] | str | None = None,
+    changed_files: int | None = None,
+    pr_files: list[str] | None = None,
+    criteria_paths: list[str] | None = None,
 ) -> dict:
     """Classify a gate block into an outcome + reason.
 
@@ -422,6 +425,23 @@ def classify(
                 fields_str = ", ".join(sub_fields)
                 res["reason"] = f"gate has row(s) satisfied by substitute: {fields_str}"
         return res
+
+    if changed_files is not None and changed_files == 0:
+        result["outcome"] = "gate-human"
+        result["reason"] = "PR carries an empty diff (0 changed files) -- work is absent independently of gate block"
+        return _check_substitute_and_return(result)
+
+    if pr_files is not None and criteria_paths:
+        matched = False
+        for cp in criteria_paths:
+            cp_clean = cp.strip("`'\" ")
+            if any(cp_clean in pf or pf in cp_clean for pf in pr_files):
+                matched = True
+                break
+        if not matched:
+            result["warnings"].append(
+                f"PR diff touches none of the criteria paths ({', '.join(criteria_paths)})"
+            )
 
     if not result["has_gate"]:
         result["outcome"] = "no-gate"
