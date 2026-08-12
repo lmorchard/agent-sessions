@@ -130,6 +130,24 @@ def increment_attempts(issue_number: str | int, repo: str) -> None:
         pass
 
 
+def decrement_attempts(issue_number: str | int, repo: str) -> None:
+    count = get_attempts(issue_number, repo) - 1
+    if count < 0:
+        count = 0
+    label_mgr = Path(__file__).parent.parent / "scripts" / "label_manager.py"
+    cmd = [sys.executable, str(label_mgr)]
+    if repo:
+        cmd.extend(["--repo", repo])
+    if count == 0:
+        cmd.extend(["clear-attempts", "--issue", str(issue_number)])
+    else:
+        cmd.extend(["attempt", "--issue", str(issue_number), "--count", str(count)])
+    try:
+        subprocess.run(cmd, capture_output=True, check=True)
+    except Exception:
+        pass
+
+
 def park_label_add(issue_number: str | int, repo: str) -> None:
     label_mgr = Path(__file__).parent.parent / "scripts" / "label_manager.py"
     cmd = [sys.executable, str(label_mgr)]
@@ -440,7 +458,7 @@ def acquire_lock(issue_number: str | int, phase: str, repo_path: Path) -> bool:
             return False
 
 
-def build_prompt(url_or_number: str | int, phase: str, skill_dir: Path, writes_file: Path | str = "") -> str:
+def build_prompt(url_or_number: str | int, phase: str, skill_dir: Path, writes_file: Path | str = "", extra_context: str = "") -> str:
     if str(url_or_number).startswith("http"):
         url = str(url_or_number)
     else:
@@ -453,6 +471,10 @@ def build_prompt(url_or_number: str | int, phase: str, skill_dir: Path, writes_f
             "\nWhen viewing the issue using gh issue view, pass --comments so you read the full comment thread.\n"
         )
 
+    extra_note = ""
+    if extra_context:
+        extra_note = f"\n\nAdditional Resumed Context:\n{extra_context}\n"
+
     manifest = str(writes_file) if writes_file else f"the path in ${agent_runner.WRITES_FILE_VAR}"
 
     return f"""You are running unattended, invoked by the agent-session board-driver.
@@ -461,7 +483,7 @@ Read {skill_dir}/SKILL.md, then read {skill_dir}/{phase_file} and follow it
 exactly for this issue:
 
   {url}
-{comments_note}
+{comments_note}{extra_note}
 The skill is not installed as a registered skill. Its files live at {skill_dir} and
 you must read them from there by absolute path.
 
@@ -1107,7 +1129,47 @@ def main(argv: list[str] | None = None) -> int:
         stderr_output = rundir / "stderr.txt"
 
         writes_file = rundir / "writes.jsonl"
-        prompt = build_prompt(url, phase, skill_dir, writes_file)
+
+        extra_context = ""
+        prline = gh_query.pr_for_issue(num, open_prs)
+        if prline:
+            prnum = prline.split("\t")[0]
+            try:
+                res = subprocess.run(
+                    ["gh", "pr", "view", str(prnum), "--repo", repo, "--json", "body,comments"],
+                    capture_output=True,
+                    text=True,
+                )
+                if res.returncode == 0:
+                    pr_data = json.loads(res.stdout)
+                    pr_body = pr_data.get("body", "")
+                    if "Handoff / Parked State" in pr_body:
+                        extra_context += f"Draft PR Body (Handoff State):\n{pr_body}\n\n"
+                    pr_comments = pr_data.get("comments", [])
+                    if pr_comments:
+                        extra_context += "Recent PR Comments:\n"
+                        for c in pr_comments[-3:]:  # last 3 comments
+                            extra_context += f"- {c.get('author', {}).get('login', 'unknown')}: {c.get('body', '')}\n"
+            except Exception:
+                pass
+
+        try:
+            res = subprocess.run(
+                ["gh", "issue", "view", str(num), "--repo", repo, "--json", "comments"],
+                capture_output=True,
+                text=True,
+            )
+            if res.returncode == 0:
+                issue_data = json.loads(res.stdout)
+                issue_comments = issue_data.get("comments", [])
+                if issue_comments:
+                    extra_context += "Recent Issue Comments:\n"
+                    for c in issue_comments[-3:]:  # last 3 comments
+                        extra_context += f"- {c.get('author', {}).get('login', 'unknown')}: {c.get('body', '')}\n"
+        except Exception:
+            pass
+
+        prompt = build_prompt(url, phase, skill_dir, writes_file, extra_context=extra_context)
         prompt_file = rundir / "prompt.txt"
         prompt_file.write_text(prompt, encoding="utf-8")
 
@@ -1203,13 +1265,21 @@ def main(argv: list[str] | None = None) -> int:
                         lbls = []
                     if PARK_LABEL in lbls or INTERACTIVE_LABEL in lbls:
                         outcome = "parked"
-                        reason = f"parked by agent during {phase}: {final_text[:400]}"
+                        if "inconclusive" in final_text.lower():
+                            reason = f"parked (inconclusive reply) by agent during {phase}: {final_text[:400]}"
+                            decrement_attempts(num, repo)
+                        else:
+                            reason = f"parked by agent during {phase}: {final_text[:400]}"
                     else:
                         outcome = "incomplete"
                         reason = f"{phase} completed; issue unparked for re-evaluation: {final_text[:400]}"
                 else:
                     outcome = "parked"
-                    reason = f"no PR opened; run's own account: {final_text[:400]}"
+                    if "inconclusive" in final_text.lower():
+                        reason = f"parked (inconclusive reply); run's own account: {final_text[:400]}"
+                        decrement_attempts(num, repo)
+                    else:
+                        reason = f"no PR opened; run's own account: {final_text[:400]}"
             else:
                 prnum, prurl = prline.split("\t")[:2]
                 changed_files = None

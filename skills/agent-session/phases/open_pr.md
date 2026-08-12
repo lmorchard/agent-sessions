@@ -91,7 +91,7 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
 
    **Open with `verdict: pending`.** Two of the gate's rows — unresolved threads, and the
    verifier's post-review report — do not exist yet at this point, so any verdict written here is
-   a guess. The block is machine-readable and a board-driver may read it at any moment; a
+   a guess. For human-run checks that were confirmed, mark them as `human-verified` in the checks list. The block is machine-readable and a board-driver may read it at any moment; a
    provisional `eligible-for-auto-merge` sitting in the body through the whole review cycle is a
    window where an automated reader can act on a verdict nobody derived. Step 14 writes the real
    one.

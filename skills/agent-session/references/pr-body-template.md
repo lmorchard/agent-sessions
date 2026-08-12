@@ -58,7 +58,7 @@ The gate block schema format is owned by the harness (`src/agent_sessions/driver
 | Field | Values |
 |---|---|
 | `tier` | `auto-ok` \| `needs-review` \| `needs-review (downgraded: <reason>)` |
-| `checks` | `Cn pass` \| `Cn fail` \| `Cn human-graded` \| `Cn human-graded-pending`, `·`-separated |
+| `checks` | `Cn pass` \| `Cn fail` \| `Cn human-verified` \| `Cn human-graded-pending`, `·`-separated |
 | `guards` | `Gn pass` \| `Gn REGRESSED`, `·`-separated; `none` if the spec listed no guards |
 | `tamper` | `clean` \| `clean-by-substitute — <basis>` \| `amended (see amendments)` \| `DIRTY — unexplained diff in <path>` |
 | `freeze` | the freeze commit sha |

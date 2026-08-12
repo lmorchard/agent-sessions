@@ -50,4 +50,4 @@ AND   frees its buffers
 - Multi-step context or a flow with setup → **Given-When-Then** (the steps carry the setup).
 - Either way: the criterion is not finished until it pairs with a runnable CHECK
   (`acceptance-criteria.md`). The grammar makes it *checkable-shaped*; the CHECK makes it
-  *checked*.
+  *checked*. For human-run checks, the CHECK must contain an executable procedure and a pass/fail question.
