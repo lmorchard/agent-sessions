@@ -82,14 +82,19 @@ def test_run_agent_model_tiers(tmp_path: Path, monkeypatch):
 
     captured_cmds = []
 
-    class MockResult:
-        returncode = 0
+    class MockPopen:
+        def __init__(self, cmd, *args, **kwargs):
+            captured_cmds.append(cmd)
+            self.stdin = type("Pipe", (), {"write": lambda self, x: None, "close": lambda self: None})()
+            self.returncode = 0
 
-    def mock_run(cmd, *args, **kwargs):
-        captured_cmds.append(cmd)
-        return MockResult()
+        def wait(self, timeout=None):
+            return 0
 
-    monkeypatch.setattr("subprocess.run", mock_run)
+        def kill(self):
+            pass
+
+    monkeypatch.setattr("subprocess.Popen", MockPopen)
 
     # Test high tier model default
     agent_runner.run_agent([
@@ -124,19 +129,24 @@ def test_run_agent_model_tiers(tmp_path: Path, monkeypatch):
 
 
 def _run_and_capture_env(tmp_path: Path, monkeypatch, extra_argv=()):
-    """Invoke `run_agent` against a stubbed `subprocess.run` and return the child env."""
+    """Invoke `run_agent` against a stubbed `subprocess.Popen` and return the child env."""
     prompt = tmp_path / "prompt.txt"
     prompt.write_text("Hello", encoding="utf-8")
     captured = {}
 
-    class MockResult:
-        returncode = 0
+    class MockPopen:
+        def __init__(self, cmd, *args, **kwargs):
+            captured["env"] = kwargs.get("env")
+            self.stdin = type("Pipe", (), {"write": lambda self, x: None, "close": lambda self: None})()
+            self.returncode = 0
 
-    def mock_run(cmd, *args, **kwargs):
-        captured["env"] = kwargs.get("env")
-        return MockResult()
+        def wait(self, timeout=None):
+            return 0
 
-    monkeypatch.setattr("subprocess.run", mock_run)
+        def kill(self):
+            pass
+
+    monkeypatch.setattr("subprocess.Popen", MockPopen)
     agent_runner.run_agent([
         "--backend", "claude",
         "--repo-path", str(tmp_path),
@@ -183,3 +193,43 @@ def test_writes_file_is_exported_to_the_agent(tmp_path: Path, monkeypatch):
     env = _run_and_capture_env(tmp_path, monkeypatch, ["--writes-file", str(writes_file)])
 
     assert env[agent_runner.WRITES_FILE_VAR] == str(writes_file.resolve())
+
+
+def test_run_agent_progress_polling(tmp_path: Path, monkeypatch, capsys):
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("Hello", encoding="utf-8")
+    raw = tmp_path / "stream.jsonl"
+    stderr = tmp_path / "stderr.txt"
+
+    import subprocess
+    class MockPopen:
+        def __init__(self, cmd, *args, **kwargs):
+            self.calls = 0
+            self.stdin = type("Pipe", (), {"write": lambda self, x: None, "close": lambda self: None})()
+
+        def wait(self, timeout=None):
+            self.calls += 1
+            if self.calls == 1:
+                # Write valid stream jsonl before raising TimeoutExpired
+                raw.write_text(json.dumps({"type": "result", "total_cost_usd": 0.10, "result": "ok"}) + "\n", encoding="utf-8")
+                raise subprocess.TimeoutExpired(cmd="test", timeout=timeout)
+            return 0
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr("subprocess.Popen", MockPopen)
+
+    ret = agent_runner.run_agent([
+        "--backend", "claude",
+        "--repo-path", str(tmp_path),
+        "--skill-dir", str(tmp_path),
+        "--prompt-file", str(prompt),
+        "--raw-output", str(raw),
+        "--stderr-output", str(stderr),
+        "--progress-interval", "0.01",
+    ])
+    assert ret == 0
+    captured = capsys.readouterr()
+    # Check that progress output was printed to sys.stderr during the timeout
+    assert "run" in captured.err

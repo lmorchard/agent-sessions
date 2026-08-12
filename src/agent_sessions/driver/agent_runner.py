@@ -16,9 +16,13 @@ import sys
 from pathlib import Path
 
 try:
+    from agent_sessions.scripts import run_progress  # type: ignore[no-redef]
+
     from . import credentials
 except ImportError:  # invoked as a script rather than imported as a package
     import credentials  # type: ignore[no-redef]
+
+    from agent_sessions.scripts import run_progress  # type: ignore[no-redef]
 
 #: Where the agent records the GitHub writes it wants the driver to perform.
 WRITES_FILE_VAR = "AGENT_SESSION_WRITES"
@@ -34,6 +38,7 @@ def run_agent(argv: list[str] | None = None) -> int:
     p.add_argument("--stderr-output", required=True)
     p.add_argument("--max-budget", type=float, default=10.0)
     p.add_argument("--timeout", type=int, default=5400)
+    p.add_argument("--progress-interval", type=float, default=10.0)
     p.add_argument("--model", default="")
     p.add_argument("--high-tier-model", default="")
     p.add_argument("--low-tier-model", default="")
@@ -132,17 +137,50 @@ def run_agent(argv: list[str] | None = None) -> int:
         env["MODEL"] = args.model
 
     try:
+        import time
+        start_time = time.time()
         with open(raw_output, "wb") as out_f, open(stderr_output, "wb") as err_f:
-            res = subprocess.run(
+            process = subprocess.Popen(
                 cmd,
-                input=stdin_data,
+                stdin=subprocess.PIPE if stdin_data is not None else None,
                 stdout=out_f,
                 stderr=err_f,
                 cwd=str(repo_path),
-                timeout=args.timeout,
                 env=env,
             )
-            return res.returncode
+            if stdin_data is not None and process.stdin is not None:
+                try:
+                    process.stdin.write(stdin_data)
+                    process.stdin.close()
+                except Exception:
+                    pass
+
+            while True:
+                # Check overall timeout first
+                elapsed = time.time() - start_time
+                remaining = args.timeout - elapsed
+                if remaining <= 0:
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
+                    with open(stderr_output, "ab") as err_f:
+                        err_f.write(f"error: timed out after {args.timeout}s\n".encode("utf-8"))
+                    return 124
+
+                poll_timeout = min(args.progress_interval, remaining)
+                try:
+                    returncode = process.wait(timeout=poll_timeout)
+                    return returncode
+                except subprocess.TimeoutExpired:
+                    # Check if progress summarization can be printed to sys.stderr
+                    try:
+                        snap = run_progress.read_progress(raw_output)
+                        digest = run_progress.format_progress(snap)
+                        sys.stderr.write(f"{digest}\n")
+                        sys.stderr.flush()
+                    except Exception:
+                        pass
     except subprocess.TimeoutExpired:
         with open(stderr_output, "ab") as err_f:
             err_f.write(f"error: timed out after {args.timeout}s\n".encode("utf-8"))
