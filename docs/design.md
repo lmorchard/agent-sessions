@@ -329,12 +329,12 @@ The driver evaluates live GitHub state on every pass without historical diffing 
 2. **Async Q&A via Issue Comments**:
    - When an agent needs input or spec ratification, it appends a top-level comment detailing its proposal or question.
    - The agent applies `agent-session:needs-human` and clears any `attempt-*` labels.
-   - The human reviews asynchronously and appends a reply comment (e.g. "Approved" or feedback).
-   - The human **removes `agent-session:needs-human`**.
+   - The human reviews asynchronously and appends a reply comment (e.g. "Approved" or feedback) or adds a 👍 reaction to the proposal comment.
+   - The driver automatically detects the human reply or reaction and unparks the issue (removes `agent-session:needs-human`).
 
 3. **Stateless Resumption**:
    - When `agent-session:needs-human` is removed, the issue naturally becomes visible to the driver under **P3: Groom**.
-   - The agent reads the full comment thread (`gh issue view <n> --comments`).
+   - The agent reads the comment thread and reactions (`gh issue view <n> --json comments` or `gh api graphql`).
    - If approved: Applies `agent-session:spec` and updates the issue body.
    - If feedback given: Appends a new comment with updated criteria and re-applies `agent-session:needs-human`.
 

@@ -146,6 +146,59 @@ def test_has_new_human_comment(monkeypatch):
     assert has_human is False
 
 
+def test_has_new_human_reaction(monkeypatch):
+    class MockGraphQLResult:
+        returncode = 0
+
+        def __init__(self, user_login, created_at="2026-08-10T13:00:00Z"):
+            self.stdout = json.dumps({
+                "data": {
+                    "repository": {
+                        "issue": {
+                            "comments": {
+                                "nodes": [
+                                    {
+                                        "author": {"login": "bot-user"},
+                                        "createdAt": "2026-08-10T10:00:00Z",
+                                        "reactions": {
+                                            "nodes": [
+                                                {
+                                                    "content": "THUMBS_UP",
+                                                    "user": {"login": user_login},
+                                                    "createdAt": created_at,
+                                                }
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            })
+
+    def mock_run_human_reaction(cmd, *args, **kwargs):
+        return MockGraphQLResult("lmorchard", created_at="2026-08-10T13:00:00Z")
+
+    monkeypatch.setattr("subprocess.run", mock_run_human_reaction)
+    bots = {"bot-user"}
+    has_human, login = agent_session_driver.has_new_human_comment(
+        42, "owner/repo", bot_logins=bots, park_time="20260810T120000Z"
+    )
+    assert has_human is True
+    assert login == "lmorchard"
+
+    # Predated reaction
+    def mock_run_predated_reaction(cmd, *args, **kwargs):
+        return MockGraphQLResult("lmorchard", created_at="2026-08-10T11:00:00Z")
+
+    monkeypatch.setattr("subprocess.run", mock_run_predated_reaction)
+    has_human, login = agent_session_driver.has_new_human_comment(
+        42, "owner/repo", bot_logins=bots, park_time="20260810T120000Z"
+    )
+    assert has_human is False
+
+
 def test_is_specced():
     # Issue with label agent-session:spec but no body marker
     iss_label = {

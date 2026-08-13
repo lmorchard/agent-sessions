@@ -181,7 +181,7 @@ def has_new_human_comment(
     park_time: str = "",
     issue_updated_at: str = "",
 ) -> tuple[bool, str]:
-    """Check if a human user posted a comment on a parked issue AFTER it was parked.
+    """Check if a human user posted a comment or added a reaction on a parked issue AFTER it was parked.
     Returns (has_human_comment, author_login).
 
     `bot_logins` must include the driver's own login (`credentials.bot_logins`
@@ -190,59 +190,141 @@ def has_new_human_comment(
     just parked -- issue #183.
     """
     norm_park_time = park_time.replace("-", "").replace(":", "").replace(" ", "") if park_time else ""
-    norm_updated_at = issue_updated_at.replace("-", "").replace(":", "").replace(" ", "") if issue_updated_at else ""
-
-    if norm_park_time and norm_updated_at and norm_updated_at <= norm_park_time:
-        return False, ""
-
     known_bots = {name.lower() for name in (bot_logins or credentials.ALWAYS_BOT_LOGINS)}
+
+    if repo and "/" in repo:
+        try:
+            owner, repo_name = repo.split("/", 1)
+            query = """
+            query($owner: String!, $repo: String!, $number: Int!) {
+              repository(owner: $owner, name: $repo) {
+                issue(number: $number) {
+                  comments(last: 50) {
+                    nodes {
+                      author { login }
+                      createdAt
+                      reactions(first: 20) {
+                        nodes {
+                          content
+                          user { login }
+                          createdAt
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """
+            cmd = [
+                "gh",
+                "api",
+                "graphql",
+                "-f",
+                f"query={query}",
+                "-F",
+                f"owner={owner}",
+                "-F",
+                f"repo={repo_name}",
+                "-F",
+                f"number={issue_number}",
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0 and res.stdout.strip():
+                data = json.loads(res.stdout)
+                comments = (
+                    data.get("data", {})
+                    .get("repository", {})
+                    .get("issue", {})
+                    .get("comments", {})
+                    .get("nodes", [])
+                )
+                if isinstance(comments, list) and comments:
+                    for comment_obj in reversed(comments):
+                        if not isinstance(comment_obj, dict):
+                            continue
+                        author = comment_obj.get("author") or {}
+                        login = author.get("login", "") if isinstance(author, dict) else ""
+                        if login and not credentials.is_bot_login(login, known_bots=known_bots):
+                            created_at = str(comment_obj.get("createdAt", ""))
+                            norm_created = created_at.replace("-", "").replace(":", "").replace(" ", "")
+                            if not norm_park_time or (norm_created and norm_created > norm_park_time):
+                                return True, login
+
+                        reactions = comment_obj.get("reactions") or {}
+                        r_nodes = reactions.get("nodes", []) if isinstance(reactions, dict) else []
+                        if isinstance(r_nodes, list):
+                            for r in reversed(r_nodes):
+                                if not isinstance(r, dict):
+                                    continue
+                                user = r.get("user") or {}
+                                u_login = user.get("login", "") if isinstance(user, dict) else ""
+                                if u_login and not credentials.is_bot_login(u_login, known_bots=known_bots):
+                                    r_created = str(r.get("createdAt", ""))
+                                    norm_r_created = r_created.replace("-", "").replace(":", "").replace(" ", "")
+                                    if not norm_park_time or (norm_r_created and norm_r_created > norm_park_time):
+                                        return True, u_login
+        except Exception:
+            pass
+
     try:
         cmd = ["gh", "issue", "view", str(issue_number), "--repo", repo, "--json", "comments"]
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
         data = json.loads(res.stdout)
         comments = data.get("comments", [])
-        if not comments:
-            return False, ""
-
-        norm_park_time = park_time.replace("-", "").replace(":", "").replace(" ", "") if park_time else ""
-
-        for comment_obj in reversed(comments):
-            author = comment_obj.get("author", {}) if isinstance(comment_obj, dict) else {}
-            login = author.get("login", "") if isinstance(author, dict) else ""
-            if credentials.is_bot_login(login, known_bots=known_bots):
-                continue
-
-            if norm_park_time:
-                created_at = str(comment_obj.get("createdAt", "")) if isinstance(comment_obj, dict) else ""
-                norm_created = created_at.replace("-", "").replace(":", "").replace(" ", "")
-                if norm_created and norm_created <= norm_park_time:
+        if isinstance(comments, list) and comments:
+            for comment_obj in reversed(comments):
+                if not isinstance(comment_obj, dict):
                     continue
+                author = comment_obj.get("author") or {}
+                login = author.get("login", "") if isinstance(author, dict) else ""
+                if login and not credentials.is_bot_login(login, known_bots=known_bots):
+                    created_at = str(comment_obj.get("createdAt", "")) if isinstance(comment_obj, dict) else ""
+                    norm_created = created_at.replace("-", "").replace(":", "").replace(" ", "")
+                    if not norm_park_time or (norm_created and norm_created > norm_park_time):
+                        return True, login
 
-            return True, login
-
-        try:
-            pr_cmd = ["gh", "pr", "view", str(issue_number), "--repo", repo, "--json", "reviews"]
-            pr_res = subprocess.run(pr_cmd, capture_output=True, text=True)
-            if pr_res.returncode == 0:
-                pr_data = json.loads(pr_res.stdout)
-                reviews = pr_data.get("reviews", [])
-                for rev in reversed(reviews):
-                    author = rev.get("author", {}) if isinstance(rev, dict) else {}
-                    login = author.get("login", "") if isinstance(author, dict) else ""
-                    if credentials.is_bot_login(login, known_bots=known_bots):
-                        continue
-                    if norm_park_time:
-                        created_at = str(rev.get("submittedAt", "")) if isinstance(rev, dict) else ""
-                        norm_created = created_at.replace("-", "").replace(":", "").replace(" ", "")
-                        if norm_created and norm_created <= norm_park_time:
+                reactions = comment_obj.get("reactions") or {}
+                r_nodes = (
+                    reactions.get("nodes", [])
+                    if isinstance(reactions, dict)
+                    else (reactions if isinstance(reactions, list) else [])
+                )
+                if isinstance(r_nodes, list):
+                    for r in reversed(r_nodes):
+                        if not isinstance(r, dict):
                             continue
-                    return True, login
-        except Exception:
-            pass
-
-        return False, ""
+                        user = r.get("user") or {}
+                        u_login = user.get("login", "") if isinstance(user, dict) else ""
+                        if u_login and not credentials.is_bot_login(u_login, known_bots=known_bots):
+                            r_created = str(r.get("createdAt", "")) if isinstance(r, dict) else ""
+                            norm_r_created = r_created.replace("-", "").replace(":", "").replace(" ", "")
+                            if not norm_park_time or (norm_r_created and norm_r_created > norm_park_time):
+                                return True, u_login
     except Exception:
-        return False, ""
+        pass
+
+    try:
+        pr_cmd = ["gh", "pr", "view", str(issue_number), "--repo", repo, "--json", "reviews"]
+        pr_res = subprocess.run(pr_cmd, capture_output=True, text=True)
+        if pr_res.returncode == 0:
+            pr_data = json.loads(pr_res.stdout)
+            reviews = pr_data.get("reviews", [])
+            for rev in reversed(reviews):
+                author = rev.get("author", {}) if isinstance(rev, dict) else {}
+                login = author.get("login", "") if isinstance(author, dict) else ""
+                if credentials.is_bot_login(login, known_bots=known_bots):
+                    continue
+                if norm_park_time:
+                    created_at = str(rev.get("submittedAt", "")) if isinstance(rev, dict) else ""
+                    norm_created = created_at.replace("-", "").replace(":", "").replace(" ", "")
+                    if norm_created and norm_created <= norm_park_time:
+                        continue
+                return True, login
+    except Exception:
+        pass
+
+    return False, ""
 
 
 def get_park_time(issue_number: str | int, state_dir: Path | None) -> str:
