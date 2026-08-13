@@ -233,3 +233,4 @@ def test_run_agent_progress_polling(tmp_path: Path, monkeypatch, capsys):
     captured = capsys.readouterr()
     # Check that progress output was printed to sys.stderr during the timeout
     assert "run" in captured.err
+    assert "$0.10" in captured.err
