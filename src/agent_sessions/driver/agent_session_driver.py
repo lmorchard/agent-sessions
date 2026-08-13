@@ -212,6 +212,26 @@ def has_new_human_comment(
 
             return True, login
 
+        try:
+            pr_cmd = ["gh", "pr", "view", str(issue_number), "--repo", repo, "--json", "reviews"]
+            pr_res = subprocess.run(pr_cmd, capture_output=True, text=True)
+            if pr_res.returncode == 0:
+                pr_data = json.loads(pr_res.stdout)
+                reviews = pr_data.get("reviews", [])
+                for rev in reversed(reviews):
+                    author = rev.get("author", {}) if isinstance(rev, dict) else {}
+                    login = author.get("login", "") if isinstance(author, dict) else ""
+                    if not login or login.endswith("[bot]") or login.lower() in known_bots:
+                        continue
+                    if norm_park_time:
+                        created_at = str(rev.get("submittedAt", "")) if isinstance(rev, dict) else ""
+                        norm_created = created_at.replace("-", "").replace(":", "").replace(" ", "")
+                        if norm_created and norm_created <= norm_park_time:
+                            continue
+                    return True, login
+        except Exception:
+            pass
+
         return False, ""
     except Exception:
         return False, ""
@@ -684,17 +704,18 @@ def check_pr_ci_status(repo: str, pr_num: str | int) -> tuple[int, int]:
         return 0, 0
 
 
-def check_pr_reviews(repo: str, pr_num: str | int) -> tuple[int, int]:
-    """Returns (requested_count, reviewed_count)."""
+def check_pr_reviews(repo: str, pr_num: str | int) -> tuple[int, int, str]:
+    """Returns (requested_count, reviewed_count, reviewDecision)."""
     try:
-        cmd = ["gh", "pr", "view", str(pr_num), "--repo", repo, "--json", "reviewRequests,reviews"]
+        cmd = ["gh", "pr", "view", str(pr_num), "--repo", repo, "--json", "reviewRequests,reviews,reviewDecision"]
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
         data = json.loads(res.stdout)
         req = len(data.get("reviewRequests", []))
         rev = len(data.get("reviews", []))
-        return req, rev
+        decision = data.get("reviewDecision") or ""
+        return req, rev, decision
     except Exception:
-        return 0, 0
+        return 0, 0, ""
 
 
 def load_env_file(env_file: Path | str = ".env") -> set[str]:
@@ -1048,13 +1069,14 @@ def main(argv: list[str] | None = None) -> int:
         prnum = str(pr.get("number"))
         unresolved = check_pr_unresolved_threads(repo, prnum)
         failed_ci, pending_ci = check_pr_ci_status(repo, prnum)
-        req_rev, revd = check_pr_reviews(repo, prnum)
+        req_rev, revd, rev_decision = check_pr_reviews(repo, prnum)
         pr_details_map[prnum] = {
             "unresolved": unresolved,
             "failed_ci": failed_ci,
             "pending_ci": pending_ci,
             "req_rev": req_rev,
             "revd": revd,
+            "rev_decision": rev_decision,
             "merge_state_status": pr.get("mergeStateStatus"),
             "mergeable": pr.get("mergeable"),
         }
