@@ -218,6 +218,11 @@ def test_driver_tier_passed(tmp_path: Path, monkeypatch):
                 stdout = "agent-session-bot\n"
                 returncode = 0
             return Login()
+        if [str(c) for c in cmd][:3] == ["gh", "pr", "list"]:
+            class PRList:
+                stdout = json.dumps([{"number": 123, "closingIssuesReferences": [{"number": 42}]}])
+                returncode = 0
+            return PRList()
         return MockResult()
 
     monkeypatch.setattr("subprocess.run", mock_run)
@@ -247,7 +252,7 @@ def test_driver_tier_passed(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("agent_sessions.driver.gh_query.pr_for_issue", mock_pr_for_issue)
     monkeypatch.setattr("agent_sessions.driver.agent_session_driver.check_pr_unresolved_threads", lambda r, p: 0)
     monkeypatch.setattr("agent_sessions.driver.agent_session_driver.check_pr_ci_status", lambda r, p: (0, 0))
-    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.check_pr_reviews", lambda r, p: (1, 1))
+    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.check_pr_reviews", lambda r, p: (1, 1, "APPROVED"))
 
     ret = agent_session_driver.main(["--issue", "42"])
     assert ret == 0

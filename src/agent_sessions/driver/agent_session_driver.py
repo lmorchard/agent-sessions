@@ -1224,36 +1224,84 @@ def main(argv: list[str] | None = None) -> int:
             die(f"unknown phase: {phase}")
         tier = PHASE_TIERS[phase]
 
-        runner_args = [
-            "--backend", args.backend,
-            "--repo-path", str(repo_path),
-            "--skill-dir", str(skill_dir),
-            "--prompt-file", str(prompt_file),
-            "--raw-output", str(raw_output),
-            "--stderr-output", str(stderr_output),
-            "--max-budget", str(args.max_budget_usd),
-            "--timeout", str(args.timeout),
-            "--settings", str(hook_settings_file),
-            "--tier", tier,
-            "--writes-file", str(writes_file),
-        ]
-        if args.model:
-            runner_args.extend(["--model", args.model])
-        if args.high_tier_model:
-            runner_args.extend(["--high-tier-model", args.high_tier_model])
-        if args.low_tier_model:
-            runner_args.extend(["--low-tier-model", args.low_tier_model])
+        if phase == "request_review":
+            say("  (Executing request_review deterministically)")
+            ret = 0
+            cost = 0.0
+            cost_known = True
+            session_id = "deterministic"
+            final_text = ""
 
-        ret = agent_runner.run_agent(runner_args)
-        pid_file = rundir / "child.pid"
-        if pid_file.is_file():
-            pid_file.unlink(missing_ok=True)
+            try:
+                prs_json = gh_query.fetch_open_prs(repo)
+                prline = gh_query.pr_for_issue(num, prs_json)
+                if prline:
+                    pr_num = prline.split("\t")[0]
 
-        parsed = agent_runner.parse_result_stream(args.backend, raw_output)
-        final_text = parsed.get("final", "")
-        cost = parsed.get("total_cost_usd", 0.0)
-        session_id = parsed.get("session_id", "")
-        cost_known = parsed.get("cost_known", False)
+                    res_owner = subprocess.run(
+                        ["gh", "repo", "view", repo, "--json", "owner"],
+                        capture_output=True, text=True, check=True
+                    )
+                    owner = json.loads(res_owner.stdout).get("owner", {}).get("login", "lmorchard")
+
+                    manifest_entry = {
+                        "action": "pr_edit",
+                        "pr_number": pr_num,
+                        "add_reviewer": [owner]
+                    }
+                    with open(writes_file, "a") as wf:
+                        wf.write(json.dumps(manifest_entry) + "\n")
+
+                    final_text = f"Requested review deterministically from {owner} on PR {pr_num}."
+                    raw_output.write_text(final_text, encoding="utf-8")
+                else:
+                    ret = 1
+                    final_text = "No open PR found for this issue."
+                    raw_output.write_text(final_text, encoding="utf-8")
+
+            except Exception as e:
+                ret = 1
+                final_text = f"Deterministic request_review failed: {e}"
+                raw_output.write_text(final_text, encoding="utf-8")
+
+            parsed = {
+                "final": final_text,
+                "total_cost_usd": cost,
+                "session_id": session_id,
+                "cost_known": cost_known
+            }
+        else:
+            runner_args = [
+                "--backend", args.backend,
+                "--repo-path", str(repo_path),
+                "--skill-dir", str(skill_dir),
+                "--prompt-file", str(prompt_file),
+                "--raw-output", str(raw_output),
+                "--stderr-output", str(stderr_output),
+                "--max-budget", str(args.max_budget_usd),
+                "--timeout", str(args.timeout),
+                "--settings", str(hook_settings_file),
+                "--tier", tier,
+                "--writes-file", str(writes_file),
+            ]
+            if args.model:
+                runner_args.extend(["--model", args.model])
+            if args.high_tier_model:
+                runner_args.extend(["--high-tier-model", args.high_tier_model])
+            if args.low_tier_model:
+                runner_args.extend(["--low-tier-model", args.low_tier_model])
+
+            ret = agent_runner.run_agent(runner_args)
+            pid_file = rundir / "child.pid"
+            if pid_file.is_file():
+                pid_file.unlink(missing_ok=True)
+
+            parsed = agent_runner.parse_result_stream(args.backend, raw_output)
+            final_text = parsed.get("final", "")
+            cost = parsed.get("total_cost_usd", 0.0)
+            session_id = parsed.get("session_id", "")
+            cost_known = parsed.get("cost_known", False)
+
 
         (rundir / "parsed.json").write_text(json.dumps(parsed, indent=2), encoding="utf-8")
         (rundir / "final.txt").write_text(final_text, encoding="utf-8")
@@ -1389,7 +1437,7 @@ def main(argv: list[str] | None = None) -> int:
                 issue=num,
                 phase=phase,
                 outcome=outcome,
-                cost=cost,
+                cost=str(cost),
                 session=session_id or "none",
                 prurl=prurl or "none",
                 reason=reason,
