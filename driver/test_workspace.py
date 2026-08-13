@@ -94,3 +94,38 @@ def test_clean_stale_workspaces(dummy_git_repo: Path, tmp_path: Path):
     assert ws_101.exists()
     assert not ws_102.exists()
     assert ws_102 in removed
+
+
+def test_ensure_workspace_recreates_corrupted_directory(dummy_git_repo: Path, tmp_path: Path):
+    ws_path = tmp_path / "workspaces" / "issue-150"
+    ws_path.mkdir(parents=True, exist_ok=True)
+    (ws_path / "stale_file.txt").write_text("corrupted", encoding="utf-8")
+
+    # Directory exists without .git file; ensure_workspace must recover and create valid worktree
+    created_path = ensure_workspace(
+        repo_path=dummy_git_repo,
+        workspace_path=ws_path,
+        branch_name="issue-150",
+        base_ref="main",
+    )
+
+    assert created_path == ws_path
+    assert (ws_path / ".git").exists()
+    assert (ws_path / "README.md").read_text(encoding="utf-8") == "hello"
+
+
+def test_remove_workspace_symlink(dummy_git_repo: Path, tmp_path: Path):
+    ws_path = tmp_path / "workspaces" / "issue-symlink"
+    target_dir = tmp_path / "target_dir"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "keep_me.txt").write_text("don't delete", encoding="utf-8")
+
+    ws_path.parent.mkdir(parents=True, exist_ok=True)
+    ws_path.symlink_to(target_dir)
+
+    remove_workspace(dummy_git_repo, ws_path)
+
+    # Symlink is removed, but symlink target directory remains intact
+    assert not ws_path.is_symlink()
+    assert target_dir.exists()
+    assert (target_dir / "keep_me.txt").read_text(encoding="utf-8") == "don't delete"

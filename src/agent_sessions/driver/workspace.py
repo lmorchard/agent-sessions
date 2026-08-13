@@ -21,7 +21,14 @@ def ensure_workspace(
 ) -> Path:
     """Ensure git worktree exists at workspace_path, creating it if needed."""
     repo_path = repo_path.resolve()
-    workspace_path = workspace_path.resolve()
+
+    if workspace_path.is_symlink():
+        workspace_path.unlink()
+
+    # Check if workspace exists and is a valid git worktree
+    is_valid_worktree = workspace_path.exists() and (workspace_path / ".git").exists()
+    if workspace_path.exists() and not is_valid_worktree:
+        remove_workspace(repo_path, workspace_path)
 
     if not workspace_path.exists():
         workspace_path.parent.mkdir(parents=True, exist_ok=True)
@@ -52,11 +59,15 @@ def ensure_workspace(
 def remove_workspace(repo_path: Path, workspace_path: Path) -> None:
     """Remove git worktree if workspace_path exists."""
     repo_path = repo_path.resolve()
-    workspace_path = workspace_path.resolve()
+
+    if workspace_path.is_symlink():
+        workspace_path.unlink()
+        return
 
     if workspace_path.exists():
+        resolved_ws = workspace_path.resolve()
         subprocess.run(
-            ["git", "-C", str(repo_path), "worktree", "remove", "--force", str(workspace_path)],
+            ["git", "-C", str(repo_path), "worktree", "remove", "--force", str(resolved_ws)],
             check=False,
             capture_output=True,
         )
@@ -65,9 +76,9 @@ def remove_workspace(repo_path: Path, workspace_path: Path) -> None:
             check=False,
             capture_output=True,
         )
-        if workspace_path.exists():
+        if resolved_ws.exists():
             import shutil
-            shutil.rmtree(workspace_path, ignore_errors=True)
+            shutil.rmtree(resolved_ws, ignore_errors=True)
 
 
 def clean_stale_workspaces(

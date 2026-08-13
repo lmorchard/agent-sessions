@@ -826,6 +826,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resumed-from", default="")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--allow-nested-skill-dir", action="store_true")
+    parser.add_argument("--allow-nested-workspaces-dir", action="store_true")
     parser.add_argument("--all-issues", action="store_true")
     parser.add_argument(
         "--workspaces-dir", default=os.environ.get("WORKSPACES_DIR") or os.environ.get("DRIVER_WORKSPACES_DIR") or ""
@@ -922,6 +923,19 @@ def main(argv: list[str] | None = None) -> int:
         if nested and not args.allow_nested_skill_dir:
             die(
                 f"error: --skill-dir ({skill_dir}) resolves inside --repo-path ({repo_path}); pass --allow-nested-skill-dir to proceed"
+            )
+
+    # Check nested workspaces dir
+    if args.workspaces_dir:
+        ws_dir = abspath(args.workspaces_dir)
+        try:
+            ws_dir.relative_to(repo_path)
+            nested_ws = True
+        except ValueError:
+            nested_ws = False
+        if nested_ws and not is_git_ignored(ws_dir, repo_path) and not args.allow_nested_workspaces_dir:
+            die(
+                f"error: --workspaces-dir ({ws_dir}) resolves inside --repo-path ({repo_path}) and is not git-ignored; pass --allow-nested-workspaces-dir to proceed"
             )
 
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -1197,9 +1211,9 @@ def main(argv: list[str] | None = None) -> int:
     say(f"eligible: {c_count} ({eligible_str})")
 
     if args.clean_workspaces:
-        ws_dir = Path(args.workspaces_dir).resolve() if args.workspaces_dir else None
+        clean_ws_dir: Path | None = Path(args.workspaces_dir).resolve() if args.workspaces_dir else None
         active = {num for num, _ in locked_candidates}
-        removed = workspace.clean_stale_workspaces(state_dir, repo_path, active, ws_dir)
+        removed = workspace.clean_stale_workspaces(state_dir, repo_path, active, clean_ws_dir)
         say(f"cleaned {len(removed)} stale workspace(s)")
 
     if args.dry_run:
@@ -1271,8 +1285,8 @@ def main(argv: list[str] | None = None) -> int:
             pass
 
         if not args.no_workspace_isolation:
-            ws_dir = Path(args.workspaces_dir).resolve() if args.workspaces_dir else None
-            ws_path = workspace.get_workspace_path(state_dir, num, ws_dir)
+            run_ws_dir: Path | None = Path(args.workspaces_dir).resolve() if args.workspaces_dir else None
+            ws_path = workspace.get_workspace_path(state_dir, num, run_ws_dir)
             run_repo_path = workspace.ensure_workspace(
                 repo_path=repo_path,
                 workspace_path=ws_path,
