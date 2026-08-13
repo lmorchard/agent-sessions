@@ -221,11 +221,13 @@ def select(
             pr_data = pr_details_map.get(prnum, {})
             pr_evt = reconciler.PollingAdapter.synthesize_pr_event(issue_override, prnum, pr_data)
             dec = reconciler.handle_pr_reconcile(pr_evt)
-            phase = dec.phase
-
-        if phase == "wait_ci":
-            messages.append(f"PR for #{issue_override} CI is still pending; waiting...")
-            all_candidates = []
+            if dec.action == "skip":
+                messages.append(f"PR for #{issue_override}: {dec.reason}")
+                all_candidates = []
+            else:
+                phase = dec.phase
+                messages.append("  eligibility check bypassed by --issue")
+                all_candidates = [(issue_override, phase)]
         else:
             messages.append("  eligibility check bypassed by --issue")
             all_candidates = [(issue_override, phase)]
