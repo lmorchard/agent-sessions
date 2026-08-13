@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from agent_sessions.driver import credentials
+
 
 @dataclass
 class ReconcilerEvent:
@@ -26,8 +28,10 @@ class ReconcilerEvent:
     pending_ci: int = 0
     review_requests: int = 0
     reviews: int = 0
+    review_decision: str = ""
     author_login: str = ""
     is_bot: bool = False
+    has_new_human_comment: bool = False
     timestamp: str = ""
     has_conflict: bool = False
     raw_payload: dict[str, Any] = field(default_factory=dict)
@@ -71,13 +75,19 @@ def handle_pr_reconcile(event: ReconcilerEvent) -> ReconcilerDecision:
             phase="fix_conflict",
             reason=f"PR #{event.pr_number} has a merge conflict",
         )
-    if event.unresolved_threads > 0:
+    if event.unresolved_threads > 0 or event.review_decision == "CHANGES_REQUESTED" or event.has_new_human_comment:
+        if event.unresolved_threads > 0:
+            reason = f"PR #{event.pr_number} has {event.unresolved_threads} unresolved thread(s)"
+        elif event.review_decision == "CHANGES_REQUESTED":
+            reason = f"PR #{event.pr_number} has changes requested"
+        else:
+            reason = f"PR #{event.pr_number} has a new human comment"
         return ReconcilerDecision(
             action="eligible",
             issue_number=event.issue_number,
             pr_number=event.pr_number,
             phase="address_comments",
-            reason=f"PR #{event.pr_number} has {event.unresolved_threads} unresolved thread(s)",
+            reason=reason,
         )
     if event.failed_ci > 0:
         return ReconcilerDecision(
@@ -148,11 +158,7 @@ def parse_webhook_event(event_type: str, payload: dict[str, Any]) -> ReconcilerE
         author = comment.get("user", {}) or comment.get("author", {})
         login = author.get("login", "")
         user_type = author.get("type", "")
-        is_bot = (
-            user_type == "Bot"
-            or login.endswith("[bot]")
-            or login in ("github-actions", "agent-session")
-        )
+        is_bot = credentials.is_bot_login(login, user_type)
         return ReconcilerEvent(
             event_type="issue_comment",
             issue_number=str(iss.get("number", "")),
@@ -214,11 +220,7 @@ class PollingAdapter:
         latest = comments[-1]
         author = latest.get("author", {}) or latest.get("user", {})
         login = author.get("login", "")
-        is_bot = (
-            not login
-            or login.endswith("[bot]")
-            or login in ("github-actions", "agent-session")
-        )
+        is_bot = credentials.is_bot_login(login)
         return ReconcilerEvent(
             event_type="issue_comment",
             issue_number=str(issue_number),
@@ -232,6 +234,7 @@ class PollingAdapter:
         issue_number: str,
         pr_number: str,
         pr_details: dict[str, Any],
+        has_new_human_comment: bool = False,
     ) -> ReconcilerEvent:
         has_conflict = False
         merge_state_status = pr_details.get("merge_state_status")
@@ -248,7 +251,9 @@ class PollingAdapter:
             pending_ci=pr_details.get("pending_ci", 0),
             review_requests=pr_details.get("req_rev", 0),
             reviews=pr_details.get("revd", 0),
+            review_decision=pr_details.get("rev_decision") or "",
             has_conflict=has_conflict,
+            has_new_human_comment=has_new_human_comment,
         )
 
 

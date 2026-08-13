@@ -143,8 +143,8 @@ def select(
         tier = gate.tier_of(body)
 
         is_parked = n in parked_nums and n != retry
+        has_human, human_login = human_comments_map.get(n, (False, ""))
         if is_parked:
-            has_human, human_login = human_comments_map.get(n, (False, ""))
             if has_human:
                 messages.append(f"  UNPARK  #{n}  new comment from @{human_login} detected -- removing {PARK_LABEL}")
                 unpark_actions.append(n)
@@ -158,7 +158,9 @@ def select(
         if prline:
             prnum = prline.split("\t")[0]
             pr_data = pr_details_map.get(prnum, {})
-            pr_evt = reconciler.PollingAdapter.synthesize_pr_event(n, prnum, pr_data)
+            pr_evt = reconciler.PollingAdapter.synthesize_pr_event(
+                n, prnum, pr_data, has_new_human_comment=has_human
+            )
             dec = reconciler.handle_pr_reconcile(pr_evt)
             if dec.action == "skip":
                 messages.append(f"  SKIP    #{n}  {dec.reason}")

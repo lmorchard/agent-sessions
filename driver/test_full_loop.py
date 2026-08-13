@@ -150,6 +150,7 @@ def pr(
         "reviewThreads": [{"isResolved": resolved} for resolved in threads],
         "reviewRequests": [{"login": f"reviewer-{i}"} for i in range(review_requests)],
         "reviews": [{"state": "COMMENTED"} for _ in range(reviews)],
+        "reviewDecision": "",
         "mergeStateStatus": merge_state_status,
         "mergeable": mergeable,
     }
