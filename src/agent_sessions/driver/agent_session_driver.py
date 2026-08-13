@@ -201,7 +201,7 @@ def has_new_human_comment(
         for comment_obj in reversed(comments):
             author = comment_obj.get("author", {}) if isinstance(comment_obj, dict) else {}
             login = author.get("login", "") if isinstance(author, dict) else ""
-            if not login or login.endswith("[bot]") or login.lower() in known_bots:
+            if credentials.is_bot_login(login, known_bots=known_bots):
                 continue
 
             if norm_park_time:
@@ -221,7 +221,7 @@ def has_new_human_comment(
                 for rev in reversed(reviews):
                     author = rev.get("author", {}) if isinstance(rev, dict) else {}
                     login = author.get("login", "") if isinstance(author, dict) else ""
-                    if not login or login.endswith("[bot]") or login.lower() in known_bots:
+                    if credentials.is_bot_login(login, known_bots=known_bots):
                         continue
                     if norm_park_time:
                         created_at = str(rev.get("submittedAt", "")) if isinstance(rev, dict) else ""

@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from agent_sessions.driver import credentials
+
 
 @dataclass
 class ReconcilerEvent:
@@ -156,11 +158,7 @@ def parse_webhook_event(event_type: str, payload: dict[str, Any]) -> ReconcilerE
         author = comment.get("user", {}) or comment.get("author", {})
         login = author.get("login", "")
         user_type = author.get("type", "")
-        is_bot = (
-            user_type == "Bot"
-            or login.endswith("[bot]")
-            or login in ("github-actions", "agent-session")
-        )
+        is_bot = credentials.is_bot_login(login, user_type)
         return ReconcilerEvent(
             event_type="issue_comment",
             issue_number=str(iss.get("number", "")),
@@ -222,11 +220,7 @@ class PollingAdapter:
         latest = comments[-1]
         author = latest.get("author", {}) or latest.get("user", {})
         login = author.get("login", "")
-        is_bot = (
-            not login
-            or login.endswith("[bot]")
-            or login in ("github-actions", "agent-session")
-        )
+        is_bot = credentials.is_bot_login(login)
         return ReconcilerEvent(
             event_type="issue_comment",
             issue_number=str(issue_number),

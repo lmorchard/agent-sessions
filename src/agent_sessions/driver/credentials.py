@@ -281,6 +281,18 @@ def bot_logins(creds: Credentials) -> frozenset[str]:
     return frozenset(logins)
 
 
+def is_bot_login(login: str, user_type: str = "", known_bots: frozenset[str] | set[str] | None = None) -> bool:
+    """Consolidated logic for determining if a user is a bot."""
+    if user_type == "Bot":
+        return True
+    if not login:
+        return True
+    if login.endswith("[bot]"):
+        return True
+    bots = known_bots if known_bots is not None else ALWAYS_BOT_LOGINS
+    return login.lower() in bots
+
+
 def remote_warning(remote_url: str) -> str:
     """Non-empty when `git push` will not go through the token at all.
 
