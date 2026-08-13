@@ -4,10 +4,10 @@ A stateless phase for the unattended agent-session driver. It takes a `tier: nee
 
 ## Process
 
-1. **Understand the intent & check comments.** Read the target issue body and comments (`gh issue view <n> --comments`). Understand *why* it is currently `needs-review`. Look for subjective criteria or high-risk paths (dependencies, migrations). Check if the human explicitly approved the risk-gated decision in the comments (e.g., "Adding dependencies is fine", "Approved").
+1. **Understand the intent & check comments/reactions.** Read the target issue body and comments (`gh issue view <n> --json comments` or `gh api graphql`). Understand *why* it is currently `needs-review`. Look for subjective criteria or high-risk paths (dependencies, migrations). Check if the human explicitly approved the risk-gated decision in the comments or via a 👍 reaction on the proposal comment (e.g., 👍 reaction, "Adding dependencies is fine", "Approved").
 
 2. **Evaluate automatability & human approval.**
-   - **Approved by human:** If the human explicitly approved the risk-gated path in the comments, or if the criteria can be replaced by runnable test commands (`pytest`, `make test`, `bash`), upgrade the issue to `auto-ok`.
+   - **Approved by human:** If the human explicitly approved the risk-gated path in the comments or via a 👍 reaction on the proposal comment, or if the criteria can be replaced by runnable test commands (`pytest`, `make test`, `bash`), upgrade the issue to `auto-ok`.
    - **Unapproved High-Risk/Subjective:** Stop immediately. Output a summary stating that the issue requires human judgment/review and cannot be automated. Record a `label` entry ensuring `agent-session:needs-review` is set.
 
 3. **Verify the new checks.** If you drafted new checks, verify that they are runnable *right now* and fail (because the issue is not implemented yet).
