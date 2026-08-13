@@ -391,6 +391,15 @@ class FakeGitHub:
         if rest[:2] == ["project", "item-list"]:
             return _Result(0, json.dumps({"items": self.board_items}))
 
+        if rest[:2] == ["project", "view"]:
+            return _Result(0, json.dumps({"id": "PVT_kwHNVLfOAXqLIg"}))
+
+        if rest[:2] == ["project", "field-list"]:
+            return _Result(0, json.dumps({"fields": [{"id": "PVTSSF_lAHNVLfOAXqLIs4WQWjt", "name": "Status", "options": [{"id": "a8efeb1f", "name": "In progress"}]}]}))
+
+        if rest[:2] == ["project", "item-edit"]:
+            return _Result(0, "")
+
         if rest[:2] == ["api", "graphql"]:
             # The GraphQL query text is not parsed; only the `-F pr=` variable is
             # read and the response envelope is hand-shaped. A change to which
