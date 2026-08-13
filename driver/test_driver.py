@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 from agent_sessions.driver import agent_session_driver
@@ -260,4 +263,36 @@ def test_driver_tier_passed(tmp_path: Path, monkeypatch):
     assert "--tier" in captured_args[0]
     tier_idx = captured_args[0].index("--tier")
     assert captured_args[0][tier_idx + 1] == "low"
+
+
+def test_check_and_handle_rate_limit_ok(monkeypatch):
+    monkeypatch.setattr("agent_sessions.driver.gh_query.check_rate_limit", lambda env=None: (4000, 5000, 1700000000))
+    messages = []
+    agent_session_driver.check_and_handle_rate_limit(say_fn=messages.append)
+    assert len(messages) == 0
+
+
+def test_check_and_handle_rate_limit_backoff(monkeypatch):
+    calls = [0]
+
+    def mock_check(env=None):
+        calls[0] += 1
+        if calls[0] == 1:
+            return (5, 5000, int(time.time()) + 2)
+        return (5000, 5000, int(time.time()) + 3600)
+
+    monkeypatch.setattr("agent_sessions.driver.gh_query.check_rate_limit", mock_check)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    messages = []
+    agent_session_driver.check_and_handle_rate_limit(min_headroom=20, max_wait_seconds=600, say_fn=messages.append)
+    assert len(messages) == 2
+    assert "RATE LIMIT: GraphQL points low" in messages[0]
+    assert "Resuming run after rate limit backoff" in messages[1]
+
+
+def test_check_and_handle_rate_limit_die(monkeypatch):
+    monkeypatch.setattr("agent_sessions.driver.gh_query.check_rate_limit", lambda env=None: (0, 5000, int(time.time()) + 1800))
+    messages = []
+    with pytest.raises(SystemExit):
+        agent_session_driver.check_and_handle_rate_limit(min_headroom=20, max_wait_seconds=300, say_fn=messages.append)
 

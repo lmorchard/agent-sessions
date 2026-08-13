@@ -53,3 +53,15 @@ def test_pr_for_issue():
 
     prs_head = [{"number": 46, "url": "url", "headRefName": "issue-7-fix"}]
     assert gh_query.pr_for_issue("7", prs_head) == "46\turl"
+
+
+def test_check_rate_limit(monkeypatch):
+    def mock_run(cmd, *args, **kwargs):
+        class MockResult:
+            stdout = '{"resources": {"graphql": {"limit": 5000, "remaining": 4500, "reset": 1700000000}}}'
+        return MockResult()
+    monkeypatch.setattr(subprocess, "run", mock_run)
+    remaining, limit, reset = gh_query.check_rate_limit()
+    assert remaining == 4500
+    assert limit == 5000
+    assert reset == 1700000000
