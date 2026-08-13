@@ -86,6 +86,14 @@ def handle_pr_reconcile(event: ReconcilerEvent) -> ReconcilerDecision:
             phase="wait_ci",
             reason=f"PR #{event.pr_number} CI is still pending; waiting...",
         )
+    if event.review_requests > 0 and event.reviews == 0:
+        return ReconcilerDecision(
+            action="skip",
+            issue_number=event.issue_number,
+            pr_number=event.pr_number,
+            phase="wait_review",
+            reason=f"PR #{event.pr_number} is waiting for review",
+        )
     if event.review_requests == 0 and event.reviews == 0:
         return ReconcilerDecision(
             action="eligible",
