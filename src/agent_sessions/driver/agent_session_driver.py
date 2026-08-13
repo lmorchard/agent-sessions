@@ -649,6 +649,62 @@ def fetch_board_json(board: str) -> list[dict]:
         return []
 
 
+_BOARD_METADATA_CACHE: dict[str, dict | None] = {}
+
+def get_board_metadata(board: str) -> dict | None:
+    if board in _BOARD_METADATA_CACHE:
+        return _BOARD_METADATA_CACHE[board]
+
+    try:
+        owner, number = board.split("/", 1)
+        res = subprocess.run(["gh", "project", "view", number, "--owner", owner, "--format", "json"], capture_output=True, text=True, check=True)
+        project_id = json.loads(res.stdout)["id"]
+
+        res = subprocess.run(["gh", "project", "field-list", number, "--owner", owner, "--format", "json"], capture_output=True, text=True, check=True)
+        fields = json.loads(res.stdout).get("fields", [])
+        status_field = next((f for f in fields if f.get("name") == "Status"), None)
+        if not status_field:
+            return None
+
+        field_id = status_field["id"]
+        in_progress_opt = next((o for o in status_field.get("options", []) if o.get("name") == "In progress"), None)
+        if not in_progress_opt:
+            return None
+
+        option_id = in_progress_opt["id"]
+
+        meta = {
+            "project_id": project_id,
+            "field_id": field_id,
+            "option_id": option_id
+        }
+        _BOARD_METADATA_CACHE[board] = meta
+        return meta
+    except Exception as e:
+        log(f"failed to get board metadata for {board}: {e}")
+        _BOARD_METADATA_CACHE[board] = None
+        return None
+
+
+def mark_board_in_progress(board: str, item_id: str) -> bool:
+    meta = get_board_metadata(board)
+    if not meta:
+        return False
+
+    try:
+        subprocess.run([
+            "gh", "project", "item-edit",
+            "--id", item_id,
+            "--project-id", str(meta["project_id"]),
+            "--field-id", str(meta["field_id"]),
+            "--single-select-option-id", str(meta["option_id"])
+        ], capture_output=True, text=True, check=True)
+        return True
+    except Exception as e:
+        log(f"failed to mark item {item_id} in progress: {e}")
+        return False
+
+
 def check_pr_unresolved_threads(repo: str, pr_num: str | int) -> int:
     parts = repo.split("/")
     if len(parts) != 2:
@@ -1014,14 +1070,19 @@ def main(argv: list[str] | None = None) -> int:
         log(f"failed to list open issues: {e}")
         open_issues = []
 
-    board_nums = set()
+    board_nums: set[str] = set()
+    board_item_ids: dict[str, str] = {}
     for item in board_items:
         st = item.get("status", "")
         prio = item.get("priority", "")
-        if st == "Ready" or prio in ("P0", "P1"):
-            content = item.get("content", {})
-            if isinstance(content, dict) and "number" in content:
-                board_nums.add(str(content["number"]))
+        content = item.get("content", {})
+        if isinstance(content, dict) and "number" in content:
+            num_str = str(content["number"])
+            item_id = str(item.get("id") or "")
+            if item_id:
+                board_item_ids[num_str] = item_id
+            if st == "Ready" or prio in ("P0", "P1"):
+                board_nums.add(num_str)
 
     if not args.all_issues:
         filtered_issues = []
@@ -1214,6 +1275,11 @@ def main(argv: list[str] | None = None) -> int:
                 say("  NOTE: could not post start discussion note to Lab Notebook")
         except Exception as e:
             say(f"  NOTE: failed to post start discussion note: {e}")
+
+        # Update board status to "In progress" for execute phase
+        if phase == "execute" and args.board and num in board_item_ids:
+            if mark_board_in_progress(args.board, board_item_ids[num]):
+                say(f"  NOTE: moved issue #{num} to 'In progress' on board {args.board}")
 
         # Write inflight marker
         inflight_file.write_text(
