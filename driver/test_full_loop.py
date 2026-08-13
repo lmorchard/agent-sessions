@@ -510,6 +510,17 @@ class FakeGitHub:
 
         if rest[:1] == ["rev-parse"]:
             return _Result(0, ".git\n")
+        if rest[:1] == ["show-ref"]:
+            return _Result(1, "")
+        if rest[:1] == ["worktree"]:
+            if len(rest) >= 3 and rest[1] in ("add", "remove"):
+                for arg in rest[2:]:
+                    p = Path(arg)
+                    if p.is_absolute() or "state/workspaces" in arg or "workspaces" in arg:
+                        if rest[1] == "add":
+                            p.mkdir(parents=True, exist_ok=True)
+                        break
+            return _Result(0, "")
         if rest[:2] == ["remote", "get-url"]:
             return _Result(0, f"git@github.com:{REPO}.git\n")
         if rest[:1] == ["commit-tree"]:

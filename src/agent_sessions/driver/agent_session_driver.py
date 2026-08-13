@@ -27,6 +27,7 @@ from agent_sessions.driver import (
     gate,
     gh_query,
     router,
+    workspace,
     writes,
 )
 
@@ -825,7 +826,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resumed-from", default="")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--allow-nested-skill-dir", action="store_true")
+    parser.add_argument("--allow-nested-workspaces-dir", action="store_true")
     parser.add_argument("--all-issues", action="store_true")
+    parser.add_argument(
+        "--workspaces-dir", default=os.environ.get("WORKSPACES_DIR") or os.environ.get("DRIVER_WORKSPACES_DIR") or ""
+    )
+    parser.add_argument("--no-workspace-isolation", action="store_true")
+    parser.add_argument(
+        "--setup-hook", default=os.environ.get("SETUP_HOOK") or os.environ.get("DRIVER_SETUP_HOOK") or ""
+    )
+    parser.add_argument("--clean-workspaces", action="store_true")
 
     args = parser.parse_args(argv)
 
@@ -913,6 +923,19 @@ def main(argv: list[str] | None = None) -> int:
         if nested and not args.allow_nested_skill_dir:
             die(
                 f"error: --skill-dir ({skill_dir}) resolves inside --repo-path ({repo_path}); pass --allow-nested-skill-dir to proceed"
+            )
+
+    # Check nested workspaces dir
+    if args.workspaces_dir:
+        ws_dir = abspath(args.workspaces_dir)
+        try:
+            ws_dir.relative_to(repo_path)
+            nested_ws = True
+        except ValueError:
+            nested_ws = False
+        if nested_ws and not is_git_ignored(ws_dir, repo_path) and not args.allow_nested_workspaces_dir:
+            die(
+                f"error: --workspaces-dir ({ws_dir}) resolves inside --repo-path ({repo_path}) and is not git-ignored; pass --allow-nested-workspaces-dir to proceed"
             )
 
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -1187,6 +1210,12 @@ def main(argv: list[str] | None = None) -> int:
     eligible_str = f"{locked_candidates[0][0]}:{locked_candidates[0][1]}" if locked_candidates else ""
     say(f"eligible: {c_count} ({eligible_str})")
 
+    if args.clean_workspaces:
+        clean_ws_dir: Path | None = Path(args.workspaces_dir).resolve() if args.workspaces_dir else None
+        active = {num for num, _ in locked_candidates}
+        removed = workspace.clean_stale_workspaces(state_dir, repo_path, active, clean_ws_dir)
+        say(f"cleaned {len(removed)} stale workspace(s)")
+
     if args.dry_run:
         say("\ndry run -- no claude invocation.")
         return 0
@@ -1255,6 +1284,18 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             pass
 
+        if not args.no_workspace_isolation:
+            run_ws_dir: Path | None = Path(args.workspaces_dir).resolve() if args.workspaces_dir else None
+            ws_path = workspace.get_workspace_path(state_dir, num, run_ws_dir)
+            run_repo_path = workspace.ensure_workspace(
+                repo_path=repo_path,
+                workspace_path=ws_path,
+                branch_name=f"issue-{num}",
+                setup_hook=args.setup_hook or None,
+            )
+        else:
+            run_repo_path = repo_path
+
         prompt = build_prompt(url, phase, skill_dir, writes_file, extra_context=extra_context)
         prompt_file = rundir / "prompt.txt"
         prompt_file.write_text(prompt, encoding="utf-8")
@@ -1262,7 +1303,7 @@ def main(argv: list[str] | None = None) -> int:
         say("")
         say(f"== invoke #{num} ==")
         say(f"  issue    {url}")
-        say(f"  cwd      {repo_path}")
+        say(f"  cwd      {run_repo_path}")
         say(f"  budget   ${args.max_budget_usd}   timeout {args.timeout}s")
         say(f"  run dir  {rundir}")
 
@@ -1339,7 +1380,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             runner_args = [
                 "--backend", args.backend,
-                "--repo-path", str(repo_path),
+                "--repo-path", str(run_repo_path),
                 "--skill-dir", str(skill_dir),
                 "--prompt-file", str(prompt_file),
                 "--raw-output", str(raw_output),
@@ -1376,7 +1417,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # Perform the agent's GitHub writes, with the driver's credential. This has
         # to happen before classification: the PR the gate reads is one of them.
-        writes_result = perform_writes(writes_file, repo, repo_path, rundir, args.board)
+        writes_result = perform_writes(writes_file, repo, run_repo_path, rundir, args.board)
         for line in writes_result["messages"]:
             say(line)
 
