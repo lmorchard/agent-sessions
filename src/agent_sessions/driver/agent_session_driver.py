@@ -1416,8 +1416,8 @@ def main(argv: list[str] | None = None) -> int:
                         owner = "lmorchard"
 
                     manifest_entry = {
-                        "action": "pr_edit",
-                        "pr_number": pr_num,
+                        "kind": "pr_edit",
+                        "pr": int(pr_num) if str(pr_num).isdigit() else pr_num,
                         "add_reviewer": [owner]
                     }
                     with open(writes_file, "a") as wf:
