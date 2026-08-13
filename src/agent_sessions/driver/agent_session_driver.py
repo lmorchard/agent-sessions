@@ -179,6 +179,7 @@ def has_new_human_comment(
     repo: str,
     bot_logins: frozenset[str] | set[str] | None = None,
     park_time: str = "",
+    issue_updated_at: str = "",
 ) -> tuple[bool, str]:
     """Check if a human user posted a comment on a parked issue AFTER it was parked.
     Returns (has_human_comment, author_login).
@@ -188,6 +189,12 @@ def has_new_human_comment(
     driver's own park explanation reads as a human reply and unparks the issue it
     just parked -- issue #183.
     """
+    norm_park_time = park_time.replace("-", "").replace(":", "").replace(" ", "") if park_time else ""
+    norm_updated_at = issue_updated_at.replace("-", "").replace(":", "").replace(" ", "") if issue_updated_at else ""
+
+    if norm_park_time and norm_updated_at and norm_updated_at <= norm_park_time:
+        return False, ""
+
     known_bots = {name.lower() for name in (bot_logins or credentials.ALWAYS_BOT_LOGINS)}
     try:
         cmd = ["gh", "issue", "view", str(issue_number), "--repo", repo, "--json", "comments"]
@@ -1086,7 +1093,7 @@ def main(argv: list[str] | None = None) -> int:
     board_items = fetch_board_json(args.board) if args.board and not args.all_issues else []
 
     try:
-        cmd = ["gh", "issue", "list", "--repo", repo, "--state", "open", "--limit", "500", "--json", "number,title,body,labels,url"]
+        cmd = ["gh", "issue", "list", "--repo", repo, "--state", "open", "--limit", "500", "--json", "number,title,body,labels,url,updatedAt"]
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
         open_issues = json.loads(res.stdout)
     except Exception as e:
@@ -1139,21 +1146,37 @@ def main(argv: list[str] | None = None) -> int:
     human_comments_map = {}
     pr_details_map = {}
 
+    open_issues_map = {str(iss.get("number")): str(iss.get("updatedAt", "")) for iss in open_issues if isinstance(iss, dict)}
+
     for iss in all_issues_json:
         n = str(iss.get("number"))
         if n in parked_nums and n != args.retry:
             park_t = get_park_time(n, state_dir)
-            has_human, login = has_new_human_comment(n, repo, driver_bots, park_time=park_t)
+            updated_at = open_issues_map.get(n, "")
+            has_human, login = has_new_human_comment(n, repo, driver_bots, park_time=park_t, issue_updated_at=updated_at)
             human_comments_map[n] = (has_human, login)
             if not has_human:
                 park_reasons[n] = park_reason(n, state_dir)
         attempts_map[n] = get_attempts(n, repo, issues_json=all_issues_json)
 
+    unresolved_map = gh_query.fetch_unresolved_threads_for_all_prs(repo)
+
     for pr in open_prs:
         prnum = str(pr.get("number"))
-        unresolved = check_pr_unresolved_threads(repo, prnum)
-        failed_ci, pending_ci = check_pr_ci_status(repo, prnum)
-        req_rev, revd, rev_decision = check_pr_reviews(repo, prnum)
+        unresolved = unresolved_map.get(prnum)
+        if unresolved is None:
+            unresolved = check_pr_unresolved_threads(repo, prnum)
+
+        if "statusCheckRollup" in pr:
+            failed_ci, pending_ci = gh_query.parse_pr_ci_status(pr)
+        else:
+            failed_ci, pending_ci = check_pr_ci_status(repo, prnum)
+
+        if "reviewRequests" in pr or "reviews" in pr or "reviewDecision" in pr:
+            req_rev, revd, rev_decision = gh_query.parse_pr_reviews(pr)
+        else:
+            req_rev, revd, rev_decision = check_pr_reviews(repo, prnum)
+
         pr_details_map[prnum] = {
             "unresolved": unresolved,
             "failed_ci": failed_ci,
@@ -1340,7 +1363,7 @@ def main(argv: list[str] | None = None) -> int:
             final_text = ""
 
             try:
-                prs_json = gh_query.fetch_open_prs(repo)
+                prs_json = open_prs
                 prline = gh_query.pr_for_issue(num, prs_json)
                 if prline:
                     pr_num = prline.split("\t")[0]
@@ -1349,7 +1372,11 @@ def main(argv: list[str] | None = None) -> int:
                         ["gh", "repo", "view", repo, "--json", "owner"],
                         capture_output=True, text=True, check=True
                     )
-                    owner = json.loads(res_owner.stdout).get("owner", {}).get("login", "lmorchard")
+                    try:
+                        owner_data = json.loads(res_owner.stdout)
+                        owner = owner_data.get("owner", {}).get("login", "lmorchard") if isinstance(owner_data, dict) else "lmorchard"
+                    except Exception:
+                        owner = "lmorchard"
 
                     manifest_entry = {
                         "action": "pr_edit",
@@ -1436,7 +1463,11 @@ def main(argv: list[str] | None = None) -> int:
             outcome = "failed"
             reason = f"{args.backend} exited {ret}" if cost_known else f"{args.backend} exited {ret}; cost undetermined"
         else:
-            prs_json = gh_query.fetch_open_prs(repo)
+            try:
+                prs_json = gh_query.fetch_open_prs(repo) if writes_result.get("applied") else open_prs
+            except Exception as e:
+                log(f"warning: failed to refresh PRs during classification: {e}")
+                prs_json = open_prs
             prline = gh_query.pr_for_issue(num, prs_json)
             if not prline:
                 if phase in ("triage", "refine"):
@@ -1484,7 +1515,11 @@ def main(argv: list[str] | None = None) -> int:
                     pr_body = ""
                     head_sha = ""
 
-                failed_ci, _ = check_pr_ci_status(repo, prnum)
+                matching_pr_dict = next((p for p in prs_json if isinstance(p, dict) and str(p.get("number")) == str(prnum)), None)
+                if matching_pr_dict and "statusCheckRollup" in matching_pr_dict:
+                    failed_ci, _ = gh_query.parse_pr_ci_status(matching_pr_dict)
+                else:
+                    failed_ci, _ = check_pr_ci_status(repo, prnum)
                 ci_checks = "failed" if failed_ci > 0 else "pass"
                 outcome_res = gate.classify(
                     pr_body,

@@ -105,7 +105,7 @@ class FrozenDatetime:
 # fixture record is deliberately *wider* than any single response.
 
 
-def issue(number, *, body="", labels=(), title=None, comments=()):
+def issue(number, *, body="", labels=(), title=None, comments=(), updated_at="2026-08-10T12:00:00Z"):
     return {
         "number": number,
         "title": title if title is not None else f"Issue {number}",
@@ -113,6 +113,7 @@ def issue(number, *, body="", labels=(), title=None, comments=()):
         "labels": [{"name": n} for n in labels],
         "url": f"https://github.com/{REPO}/issues/{number}",
         "comments": list(comments),
+        "updatedAt": updated_at,
     }
 
 
@@ -134,6 +135,12 @@ def pr(
     merge_state_status="CLEAN",
     mergeable="MERGEABLE",
 ):
+    check_rollup = []
+    for name, bucket in checks:
+        conc = "SUCCESS" if bucket == "pass" else ("NEUTRAL" if bucket in ("skipping", "neutral") else "FAILURE")
+        st = "IN_PROGRESS" if bucket == "pending" else "COMPLETED"
+        check_rollup.append({"__typename": "CheckRun", "name": name, "status": st, "conclusion": conc})
+
     return {
         "number": number,
         "title": f"PR {number}",
@@ -147,6 +154,7 @@ def pr(
         "changedFiles": changed_files,
         "files": files if files is not None else [{"path": "some_file.py"}],
         "checks": [{"name": name, "bucket": bucket} for name, bucket in checks],
+        "statusCheckRollup": check_rollup,
         "reviewThreads": [{"isResolved": resolved} for resolved in threads],
         "reviewRequests": [{"login": f"reviewer-{i}"} for i in range(review_requests)],
         "reviews": [{"state": "COMMENTED"} for _ in range(reviews)],
@@ -270,7 +278,9 @@ class FakeGitHub:
         iss["labels"] = [label for label in iss["labels"] if label["name"] != name]
 
     def add_comment(self, number, login, body="a comment", created_at="2026-08-10T11:00:00Z"):
-        self.issue_by_number(number)["comments"].append(comment(login, body, created_at))
+        iss = self.issue_by_number(number)
+        iss["comments"].append(comment(login, body, created_at))
+        iss["updatedAt"] = created_at
 
     @property
     def label_ops(self) -> list[tuple[str, str | None, str | None]]:
