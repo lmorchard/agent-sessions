@@ -25,7 +25,7 @@ def fetch_prs(repo: str, state: str = "open") -> list[dict]:
         "--limit",
         "200",
         "--json",
-        "number,title,body,headRefName,url,closingIssuesReferences",
+        "number,title,body,headRefName,url,closingIssuesReferences,mergeStateStatus,mergeable",
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -74,7 +74,7 @@ def pr_for_issue(issue_number: str, open_prs: list[dict]) -> str | None:
 
 
 def _main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    p = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
 
     f = sub.add_parser("fetch-open-prs", help="Fetch PRs for a repo")
