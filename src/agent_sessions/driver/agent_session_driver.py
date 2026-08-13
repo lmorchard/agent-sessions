@@ -801,6 +801,39 @@ def load_env_file(env_file: Path | str = ".env") -> set[str]:
     return keys
 
 
+def check_and_handle_rate_limit(
+    env: dict | None = None,
+    min_headroom: int = 20,
+    max_wait_seconds: int = 300,
+    say_fn=print,
+) -> None:
+    """Check GitHub GraphQL rate limit at startup. Back off and wait if reset is soon,
+    or die cleanly if reset is too far in the future.
+    """
+    remaining, limit, reset = gh_query.check_rate_limit(env)
+    if remaining >= min_headroom:
+        return
+
+    now_epoch = int(datetime.now(timezone.utc).timestamp())
+    wait_sec = max(1, reset - now_epoch + 2) if reset > now_epoch else 1
+    reset_dt = datetime.fromtimestamp(reset, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if reset else "soon"
+
+    if wait_sec <= max_wait_seconds:
+        say_fn(
+            f"RATE LIMIT: GraphQL points low ({remaining}/{limit}). "
+            f"Backing off for {wait_sec}s until reset at {reset_dt}..."
+        )
+        time.sleep(wait_sec)
+        rem2, lim2, _ = gh_query.check_rate_limit(env)
+        say_fn(f"Resuming run after rate limit backoff: {rem2}/{lim2} GraphQL points available.")
+    else:
+        wait_min = round(wait_sec / 60)
+        die(
+            f"refusing to start: GitHub GraphQL API rate limit exhausted ({remaining}/{limit} remaining). "
+            f"Resets in ~{wait_min}m at {reset_dt}."
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     env_file = Path(".env")
     env_file_keys = load_env_file(env_file)
@@ -907,6 +940,10 @@ def main(argv: list[str] | None = None) -> int:
     if remote_warning:
         say(remote_warning)
     credentials.apply_driver_env(creds)
+    check_and_handle_rate_limit(
+        env=credentials.agent_env(dict(os.environ), creds),
+        say_fn=say,
+    )
 
     state_dir_str = args.state_dir
     if not state_dir_str:

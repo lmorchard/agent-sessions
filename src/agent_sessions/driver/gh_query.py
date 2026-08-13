@@ -12,6 +12,23 @@ import subprocess
 import sys
 
 
+def check_rate_limit(env: dict | None = None) -> tuple[int, int, int]:
+    """Check remaining GraphQL rate limit points.
+    Returns (remaining, limit, reset_epoch).
+    """
+    try:
+        cmd = ["gh", "api", "rate_limit"]
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env)
+        data = json.loads(res.stdout)
+        graphql = data.get("resources", {}).get("graphql", {})
+        remaining = int(graphql.get("remaining", 5000))
+        limit = int(graphql.get("limit", 5000))
+        reset = int(graphql.get("reset", 0))
+        return remaining, limit, reset
+    except Exception:
+        return 5000, 5000, 0
+
+
 def fetch_prs(repo: str, state: str = "open") -> list[dict]:
     """Fetch PRs from GitHub for the given repo."""
     cmd = [

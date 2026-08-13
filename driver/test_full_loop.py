@@ -423,6 +423,16 @@ class FakeGitHub:
                 json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": nodes}}}}}),
             )
 
+        if rest[:2] == ["api", "rate_limit"]:
+            return _Result(
+                0,
+                json.dumps({
+                    "resources": {
+                        "graphql": {"limit": 5000, "remaining": 5000, "reset": 1700000000}
+                    }
+                }),
+            )
+
         if rest[:2] == ["api", "user"]:
             # The driver's startup identity assertion: one call per token, each under
             # the environment that token lives in. Answering from `logins` rather than
