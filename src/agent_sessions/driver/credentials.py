@@ -45,6 +45,17 @@ CONFIG_FILE_VAR = "DRIVER_CREDENTIALS_FILE"
 #: identity varies by deployment -- see issue #183.
 BOT_LOGINS_VAR = "DRIVER_BOT_LOGINS"
 
+#: Git committer and author identity variables.
+GIT_AUTHOR_NAME_VAR = "GIT_AUTHOR_NAME"
+DRIVER_GIT_AUTHOR_NAME_VAR = "DRIVER_GIT_AUTHOR_NAME"
+GIT_AUTHOR_EMAIL_VAR = "GIT_AUTHOR_EMAIL"
+DRIVER_GIT_AUTHOR_EMAIL_VAR = "DRIVER_GIT_AUTHOR_EMAIL"
+
+GIT_COMMITTER_NAME_VAR = "GIT_COMMITTER_NAME"
+DRIVER_GIT_COMMITTER_NAME_VAR = "DRIVER_GIT_COMMITTER_NAME"
+GIT_COMMITTER_EMAIL_VAR = "GIT_COMMITTER_EMAIL"
+DRIVER_GIT_COMMITTER_EMAIL_VAR = "DRIVER_GIT_COMMITTER_EMAIL"
+
 #: Always machines, whatever else is configured.
 ALWAYS_BOT_LOGINS = frozenset({"github-actions", "github-actions[bot]", "agent-session"})
 
@@ -69,6 +80,10 @@ class Credentials:
     write_token: str = ""
     login: str = ""
     extra_bot_logins: tuple[str, ...] = ()
+    git_author_name: str = ""
+    git_author_email: str = ""
+    git_committer_name: str = ""
+    git_committer_email: str = ""
     #: Problems resolving a `<VAR>_CMD`. Surfaced by `config_error`; never the output.
     errors: tuple[str, ...] = ()
 
@@ -123,12 +138,42 @@ def resolve(env: dict[str, str] | None = None, runner=None) -> Credentials:
         if error:
             errors.append(f"{var}{CMD_SUFFIX}: {error}")
 
+    login = (src.get(LOGIN_VAR) or "").strip()
+
+    git_author_name = (
+        src.get(GIT_AUTHOR_NAME_VAR) or src.get(DRIVER_GIT_AUTHOR_NAME_VAR) or ""
+    ).strip()
+    if not git_author_name and login:
+        git_author_name = login
+
+    git_author_email = (
+        src.get(GIT_AUTHOR_EMAIL_VAR) or src.get(DRIVER_GIT_AUTHOR_EMAIL_VAR) or ""
+    ).strip()
+    if not git_author_email and login:
+        git_author_email = f"{login}@users.noreply.github.com"
+
+    git_committer_name = (
+        src.get(GIT_COMMITTER_NAME_VAR)
+        or src.get(DRIVER_GIT_COMMITTER_NAME_VAR)
+        or git_author_name
+    ).strip()
+
+    git_committer_email = (
+        src.get(GIT_COMMITTER_EMAIL_VAR)
+        or src.get(DRIVER_GIT_COMMITTER_EMAIL_VAR)
+        or git_author_email
+    ).strip()
+
     extras = [p.strip() for p in (src.get(BOT_LOGINS_VAR) or "").split(",")]
     return Credentials(
         read_token=tokens[READ_TOKEN_VAR],
         write_token=tokens[WRITE_TOKEN_VAR],
-        login=(src.get(LOGIN_VAR) or "").strip(),
+        login=login,
         extra_bot_logins=tuple(p for p in extras if p),
+        git_author_name=git_author_name,
+        git_author_email=git_author_email,
+        git_committer_name=git_committer_name,
+        git_committer_email=git_committer_email,
         errors=tuple(errors),
     )
 
@@ -167,6 +212,14 @@ def agent_env(env: dict[str, str], creds: Credentials) -> dict[str, str]:
     child = dict(env)
     for var in TOKEN_VARS:
         child.pop(var, None)
+    if creds.git_author_name:
+        child["GIT_AUTHOR_NAME"] = creds.git_author_name
+    if creds.git_author_email:
+        child["GIT_AUTHOR_EMAIL"] = creds.git_author_email
+    if creds.git_committer_name:
+        child["GIT_COMMITTER_NAME"] = creds.git_committer_name
+    if creds.git_committer_email:
+        child["GIT_COMMITTER_EMAIL"] = creds.git_committer_email
     if not creds.read_token:
         return child
     for var in AGENT_TOKEN_VARS:
@@ -181,6 +234,14 @@ def driver_env(env: dict[str, str], creds: Credentials) -> dict[str, str]:
     so this only strips the read token back out rather than inventing anything.
     """
     parent = dict(env)
+    if creds.git_author_name:
+        parent["GIT_AUTHOR_NAME"] = creds.git_author_name
+    if creds.git_author_email:
+        parent["GIT_AUTHOR_EMAIL"] = creds.git_author_email
+    if creds.git_committer_name:
+        parent["GIT_COMMITTER_NAME"] = creds.git_committer_name
+    if creds.git_committer_email:
+        parent["GIT_COMMITTER_EMAIL"] = creds.git_committer_email
     if not creds.write_token:
         for var in AGENT_TOKEN_VARS:
             if parent.get(var) and parent[var] == creds.read_token:
@@ -199,6 +260,11 @@ def apply_driver_env(creds: Credentials, env: dict[str, str] | None = None) -> N
     target = os.environ if env is None else env
     desired = driver_env(dict(target), creds)
     for var in AGENT_TOKEN_VARS:
+        if var in desired:
+            target[var] = desired[var]
+        else:
+            target.pop(var, None)
+    for var in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
         if var in desired:
             target[var] = desired[var]
         else:

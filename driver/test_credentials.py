@@ -442,3 +442,74 @@ def test_an_owner_only_credentials_file_is_accepted(tmp_path: Path):
 
 def test_a_missing_credentials_file_is_not_an_error(tmp_path: Path):
     assert credentials.file_mode_error(tmp_path / "nope.env") == ""
+
+
+# -- git author & committer credentials ---------------------------------------
+
+
+def test_resolve_defaults_git_author_and_committer_from_login():
+    creds = credentials.resolve({credentials.LOGIN_VAR: "my-bot"})
+    assert creds.git_author_name == "my-bot"
+    assert creds.git_author_email == "my-bot@users.noreply.github.com"
+    assert creds.git_committer_name == "my-bot"
+    assert creds.git_committer_email == "my-bot@users.noreply.github.com"
+
+
+def test_resolve_explicit_git_author_and_committer_vars():
+    env = {
+        credentials.GIT_AUTHOR_NAME_VAR: "Custom Author",
+        credentials.GIT_AUTHOR_EMAIL_VAR: "author@example.com",
+        credentials.GIT_COMMITTER_NAME_VAR: "Custom Committer",
+        credentials.GIT_COMMITTER_EMAIL_VAR: "committer@example.com",
+    }
+    creds = credentials.resolve(env)
+    assert creds.git_author_name == "Custom Author"
+    assert creds.git_author_email == "author@example.com"
+    assert creds.git_committer_name == "Custom Committer"
+    assert creds.git_committer_email == "committer@example.com"
+
+
+def test_resolve_driver_prefix_git_vars():
+    env = {
+        credentials.DRIVER_GIT_AUTHOR_NAME_VAR: "Driver Author",
+        credentials.DRIVER_GIT_AUTHOR_EMAIL_VAR: "driver-author@example.com",
+        credentials.DRIVER_GIT_COMMITTER_NAME_VAR: "Driver Committer",
+        credentials.DRIVER_GIT_COMMITTER_EMAIL_VAR: "driver-committer@example.com",
+    }
+    creds = credentials.resolve(env)
+    assert creds.git_author_name == "Driver Author"
+    assert creds.git_author_email == "driver-author@example.com"
+    assert creds.git_committer_name == "Driver Committer"
+    assert creds.git_committer_email == "driver-committer@example.com"
+
+
+def test_agent_env_installs_git_author_and_committer():
+    base = split_env(**{credentials.LOGIN_VAR: "agent-bot"})
+    creds = credentials.resolve(base)
+    env = credentials.agent_env(base, creds)
+    assert env["GIT_AUTHOR_NAME"] == "agent-bot"
+    assert env["GIT_AUTHOR_EMAIL"] == "agent-bot@users.noreply.github.com"
+    assert env["GIT_COMMITTER_NAME"] == "agent-bot"
+    assert env["GIT_COMMITTER_EMAIL"] == "agent-bot@users.noreply.github.com"
+
+
+def test_driver_env_installs_git_author_and_committer():
+    base = split_env(**{credentials.LOGIN_VAR: "driver-bot"})
+    creds = credentials.resolve(base)
+    env = credentials.driver_env(base, creds)
+    assert env["GIT_AUTHOR_NAME"] == "driver-bot"
+    assert env["GIT_AUTHOR_EMAIL"] == "driver-bot@users.noreply.github.com"
+    assert env["GIT_COMMITTER_NAME"] == "driver-bot"
+    assert env["GIT_COMMITTER_EMAIL"] == "driver-bot@users.noreply.github.com"
+
+
+def test_apply_driver_env_installs_git_vars_in_target():
+    base = split_env(**{credentials.LOGIN_VAR: "apply-bot"})
+    creds = credentials.resolve(base)
+    target = {}
+    credentials.apply_driver_env(creds, target)
+    assert target["GIT_AUTHOR_NAME"] == "apply-bot"
+    assert target["GIT_AUTHOR_EMAIL"] == "apply-bot@users.noreply.github.com"
+    assert target["GIT_COMMITTER_NAME"] == "apply-bot"
+    assert target["GIT_COMMITTER_EMAIL"] == "apply-bot@users.noreply.github.com"
+
