@@ -175,7 +175,7 @@ def run_agent(argv: list[str] | None = None) -> int:
                 except subprocess.TimeoutExpired:
                     # Check if progress summarization can be printed to sys.stderr
                     try:
-                        snap = run_progress.read_progress(raw_output)
+                        snap = run_progress.read_progress(raw_output.parent)
                         digest = run_progress.format_progress(snap)
                         sys.stderr.write(f"{digest}\n")
                         sys.stderr.flush()
