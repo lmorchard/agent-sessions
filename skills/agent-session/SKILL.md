@@ -23,6 +23,7 @@ which mode, or assess the current session state and suggest one.
 |---|---|---|
 | `intake` | `phases/intake.md` | Interview a new request *or* existing issue → spec with verifiable acceptance criteria → file/update the issue with a tier label |
 | `triage` | `phases/triage.md` | Batch: scan a repo/board for under-specified issues, score them (subagent fan-out), propose criteria, augment the weak ones |
+| `rethink` | `phases/rethink.md` | Retire a failed execution attempt, tombstone the old spec, and pivot back into `intake` to rethink the approach |
 | `plan` | `phases/plan.md` | Freeze the acceptance checks, then plan vertical slices against current code |
 | `execute` | `phases/execute.md` | Execute the plan; the criteria's checks are the gate, graded by a context that didn't write the code |
 | `express` | `phases/express.md` | Consume a specified issue autonomously through PR; the tier sets the autonomy |
