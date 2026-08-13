@@ -25,7 +25,7 @@ def fetch_prs(repo: str, state: str = "open") -> list[dict]:
         "--limit",
         "200",
         "--json",
-        "number,title,body,headRefName,url,closingIssuesReferences,mergeStateStatus,mergeable",
+        "number,title,body,headRefName,url,closingIssuesReferences,mergeStateStatus,mergeable,reviewDecision,reviewRequests,reviews,statusCheckRollup",
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -35,6 +35,97 @@ def fetch_prs(repo: str, state: str = "open") -> list[dict]:
         return data if isinstance(data, list) else []
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"gh command failed: {e.stderr}") from e
+
+
+def fetch_unresolved_threads_for_all_prs(repo: str) -> dict[str, int]:
+    """Fetch counts of unresolved review threads for all open PRs in a single GraphQL query.
+    Returns mapping of pr_number (str) -> unresolved_thread_count (int).
+    """
+    if not repo or "/" not in repo:
+        return {}
+    owner, repo_name = repo.split("/", 1)
+    query = """
+    query($owner: String!, $repo: String!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequests(first: 100, states: OPEN) {
+          nodes {
+            number
+            reviewThreads(first: 50) {
+              nodes { isResolved }
+            }
+          }
+        }
+      }
+    }
+    """
+    cmd = [
+        "gh",
+        "api",
+        "graphql",
+        "-f",
+        f"query={query}",
+        "-F",
+        f"owner={owner}",
+        "-F",
+        f"repo={repo_name}",
+    ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        data = json.loads(res.stdout)
+        prs = (
+            data.get("data", {})
+            .get("repository", {})
+            .get("pullRequests", {})
+            .get("nodes", [])
+        )
+        counts = {}
+        for pr in prs:
+            if not isinstance(pr, dict):
+                continue
+            pr_num = str(pr.get("number"))
+            threads = pr.get("reviewThreads", {}).get("nodes", [])
+            unresolved = sum(1 for t in threads if isinstance(t, dict) and not t.get("isResolved"))
+            counts[pr_num] = unresolved
+        return counts
+    except Exception:
+        return {}
+
+
+def parse_pr_ci_status(pr: dict) -> tuple[int, int]:
+    """Parse (failed_count, pending_count) directly from PR dict statusCheckRollup."""
+    rollup = pr.get("statusCheckRollup") or []
+    if not isinstance(rollup, list):
+        return 0, 0
+    failed = 0
+    pending = 0
+    for c in rollup:
+        if not isinstance(c, dict):
+            continue
+        typename = c.get("__typename")
+        if typename == "CheckRun":
+            st = c.get("status")
+            conc = c.get("conclusion")
+            if st in ("IN_PROGRESS", "QUEUED", "REQUESTED", "WAITING", "PENDING"):
+                pending += 1
+            elif conc not in ("SUCCESS", "SKIPPED", "NEUTRAL", "PASS"):
+                failed += 1
+        elif typename == "StatusContext":
+            state = c.get("state")
+            if state in ("PENDING", "EXPECTED"):
+                pending += 1
+            elif state not in ("SUCCESS",):
+                failed += 1
+    return failed, pending
+
+
+def parse_pr_reviews(pr: dict) -> tuple[int, int, str]:
+    """Parse (requested_count, reviewed_count, reviewDecision) directly from PR dict."""
+    req_list = pr.get("reviewRequests") or []
+    rev_list = pr.get("reviews") or []
+    decision = pr.get("reviewDecision") or ""
+    req = len(req_list) if isinstance(req_list, list) else 0
+    rev = len(rev_list) if isinstance(rev_list, list) else 0
+    return req, rev, str(decision)
 
 
 def fetch_open_prs(repo: str) -> list[dict]:
