@@ -131,6 +131,8 @@ def pr(
     base_ref="main",
     files=None,
     comments=(),
+    merge_state_status="CLEAN",
+    mergeable="MERGEABLE",
 ):
     return {
         "number": number,
@@ -148,6 +150,8 @@ def pr(
         "reviewThreads": [{"isResolved": resolved} for resolved in threads],
         "reviewRequests": [{"login": f"reviewer-{i}"} for i in range(review_requests)],
         "reviews": [{"state": "COMMENTED"} for _ in range(reviews)],
+        "mergeStateStatus": merge_state_status,
+        "mergeable": mergeable,
     }
 
 
@@ -1468,3 +1472,23 @@ def test_the_agent_still_never_gets_the_write_token_from_that_env(loop):
     child = credentials.agent_env(agent.env_at_call, credentials.resolve(agent.env_at_call))
     assert child["GH_TOKEN"] == READ_TOKEN
     assert WRITE_TOKEN not in child.values()
+
+def test_pr_with_merge_conflict_is_eligible_for_fix_conflict(loop):
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[
+            pr(
+                201,
+                closes=[101],
+                merge_state_status="DIRTY",
+                mergeable="CONFLICTING",
+            )
+        ],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent(stream=agent_stream(final="Fixed conflict.", cost=1.23))
+
+    code, out = loop.run(gh, agent=agent)
+
+    assert code == 0
+    assert "ELIGIBLE #101  tier: auto-ok (Priority 1: Unblock - fix_conflict)" in out

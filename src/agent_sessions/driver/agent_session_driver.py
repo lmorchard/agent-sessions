@@ -42,6 +42,7 @@ PHASE_TIERS = {
     "execute": "high",
     "address_comments": "high",
     "fix_ci": "high",
+    "fix_conflict": "high",
     "request_review": "low",
     "grade_gate": "low",
 }
@@ -1054,6 +1055,8 @@ def main(argv: list[str] | None = None) -> int:
             "pending_ci": pending_ci,
             "req_rev": req_rev,
             "revd": revd,
+            "merge_state_status": pr.get("mergeStateStatus"),
+            "mergeable": pr.get("mergeable"),
         }
 
     config = {

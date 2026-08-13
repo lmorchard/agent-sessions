@@ -29,6 +29,7 @@ class ReconcilerEvent:
     author_login: str = ""
     is_bot: bool = False
     timestamp: str = ""
+    has_conflict: bool = False
     raw_payload: dict[str, Any] = field(default_factory=dict)
 
 
@@ -62,6 +63,14 @@ def handle_issue_comment(event: ReconcilerEvent) -> ReconcilerDecision:
 
 def handle_pr_reconcile(event: ReconcilerEvent) -> ReconcilerDecision:
     """Handle reactive PR state transitions (threads, CI status, reviews)."""
+    if event.has_conflict:
+        return ReconcilerDecision(
+            action="eligible",
+            issue_number=event.issue_number,
+            pr_number=event.pr_number,
+            phase="fix_conflict",
+            reason=f"PR #{event.pr_number} has a merge conflict",
+        )
     if event.unresolved_threads > 0:
         return ReconcilerDecision(
             action="eligible",
@@ -224,6 +233,12 @@ class PollingAdapter:
         pr_number: str,
         pr_details: dict[str, Any],
     ) -> ReconcilerEvent:
+        has_conflict = False
+        merge_state_status = pr_details.get("merge_state_status")
+        mergeable = pr_details.get("mergeable")
+        if merge_state_status == "DIRTY" or mergeable == "CONFLICTING":
+            has_conflict = True
+
         return ReconcilerEvent(
             event_type="pull_request",
             issue_number=str(issue_number),
@@ -233,6 +248,7 @@ class PollingAdapter:
             pending_ci=pr_details.get("pending_ci", 0),
             review_requests=pr_details.get("req_rev", 0),
             reviews=pr_details.get("revd", 0),
+            has_conflict=has_conflict,
         )
 
 
