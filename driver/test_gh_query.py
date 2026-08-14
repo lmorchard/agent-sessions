@@ -58,10 +58,20 @@ def test_pr_for_issue():
 def test_check_rate_limit(monkeypatch):
     def mock_run(cmd, *args, **kwargs):
         class MockResult:
-            stdout = '{"resources": {"graphql": {"limit": 5000, "remaining": 4500, "reset": 1700000000}}}'
+            stdout = '{"resources": {"graphql": {"limit": 5000, "remaining": 4500, "reset": 1700000000}, "core": {"limit": 5000, "remaining": 200, "reset": 1700000100}}}'
         return MockResult()
     monkeypatch.setattr(subprocess, "run", mock_run)
     remaining, limit, reset = gh_query.check_rate_limit()
-    assert remaining == 4500
+    assert remaining == 200
     assert limit == 5000
-    assert reset == 1700000000
+    assert reset == 1700000100
+
+
+def test_check_rate_limit_error(monkeypatch):
+    def mock_run(cmd, *args, **kwargs):
+        raise subprocess.CalledProcessError(1, cmd="gh", stderr="API rate limit exceeded")
+    monkeypatch.setattr(subprocess, "run", mock_run)
+    remaining, limit, reset = gh_query.check_rate_limit()
+    assert remaining == 0
+    assert limit == 5000
+    assert reset > 0
