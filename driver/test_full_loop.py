@@ -132,6 +132,7 @@ def pr(
     base_ref="main",
     files=None,
     comments=(),
+    commits=(),
     merge_state_status="CLEAN",
     mergeable="MERGEABLE",
 ):
@@ -146,6 +147,7 @@ def pr(
         "title": f"PR {number}",
         "body": body,
         "comments": list(comments),
+        "commits": list(commits),
         "headRefName": head_ref if head_ref is not None else f"feature/pr-{number}",
         "baseRefName": base_ref,
         "url": f"https://github.com/{REPO}/pull/{number}",
