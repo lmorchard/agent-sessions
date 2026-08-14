@@ -342,12 +342,20 @@ def check_world_state_claims() -> None:
                     rel = p.relative_to(ROOT)
                     failures.append(f"{rel}:{n}: {m.group(0)} -- {reason}")
 
+def check_state_diagram() -> None:
+    """Assert README.md state diagram matches programmatic generator."""
+    from agent_sessions.scripts import state_diagram
+    readme = ROOT / "README.md"
+    if not state_diagram.check_readme(readme):
+        failures.append("README.md state diagram is out of sync with generator (run state_diagram.py --update)")
+
 def main() -> int:
     check_links()
     check_tables()
     check_counts()
     check_partition()
     check_world_state_claims()
+    check_state_diagram()
 
     for s in skips:
         print(f"  SKIP  {s}")
