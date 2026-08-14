@@ -86,6 +86,69 @@ migration, CI config, or dependencies, it's `needs-review` — however good the 
 The tier controls **where the run surfaces to a human**, not whether it runs. A `needs-review`
 issue still gets worked end to end; it just can't clear the merge gate on its own.
 
+## Issue & PR state flow
+
+The system's selection, PR reconciliation, gate classification, and park/unpark transitions flow through this state machine:
+
+<!-- BEGIN ISSUE_PR_STATE_DIAGRAM -->
+
+```mermaid
+flowchart TD
+    subgraph Backlog ["1. Issue Selection & Intake"]
+        OpenIssue["Open Issue"] --> HasSpec{"Has spec marker?"}
+        HasSpec -- No --> PhaseTriage["triage phase (P3: Groom)"]
+        PhaseTriage --> StampedSpec["Stamp spec marker & Tier"]
+
+        HasSpec -- Yes --> CheckTier{"Check Tier (gate.tier_of)"}
+        CheckTier -- auto-ok --> PhaseExecute["execute phase (P2: Execute)"]
+        CheckTier -- needs-review --> PhaseRefine["refine phase (P3: Groom)"]
+        CheckTier -- conflict / invalid --> SkipTier["Skip (Invalid Tier)"]
+
+        StampedSpec --> HasSpec
+    end
+
+    subgraph Working ["2. PR Reconciler & Phases"]
+        PhaseExecute --> OpenPR["Open PR with Merge Gate"]
+        PhaseRefine --> HumanSpecReview["Human Spec Review"]
+
+        OpenPR --> PRReconcile{"reconciler.handle_pr_reconcile()"}
+        PRReconcile -- Conflict --> PhaseFixConflict["fix_conflict phase (P1: Unblock)"]
+        PRReconcile -- Threads / Changes --> PhaseAddressComments["address_comments phase (P1: Unblock)"]
+        PRReconcile -- CI Fail --> PhaseFixCI["fix_ci phase (P1: Unblock)"]
+        PRReconcile -- CI Pending --> WaitCI["wait_ci (Skip / Wait)"]
+        PRReconcile -- Review Pending --> WaitReview["wait_review (Skip / Wait)"]
+        PRReconcile -- No Reviews --> PhaseReqReview["request_review phase (P1: Unblock)"]
+        PRReconcile -- Clean & Ready --> PhaseGradeGate["grade_gate phase (P1: Unblock)"]
+    end
+
+    subgraph Gate ["3. Gate Classification & Verdicts"]
+        PhaseGradeGate --> GateClassify{"gate.classify()"}
+        GateClassify -- All Rows Pass --> GateEligible["gate-eligible (auto-merge eligible)"]
+        GateClassify -- Human Action Required --> GateHuman["gate-human (human-merge-required)"]
+        GateClassify -- Head Moved --> CIStale["ci-stale (Stale CI SHA)"]
+        GateClassify -- Pending --> Incomplete["incomplete (Wait)"]
+        GateClassify -- Max Attempts / Error --> Parked["Parked (agent-session:needs-human)"]
+
+        GateEligible --> HumanMerge["Human Merge (Main)"]
+    end
+
+    subgraph ParkRecovery ["4. Park & Recovery"]
+        Parked --> HumanComment{"New Human Comment?"}
+        HumanComment -- Yes --> Unpark["Unpark (Remove agent-session:needs-human)"]
+        Unpark --> HasSpec
+    end
+
+    classDef eligible fill:#d4edda,stroke:#28a745,color:#155724;
+    classDef human fill:#fff3cd,stroke:#ffc107,color:#856404;
+    classDef parked fill:#f8d7da,stroke:#dc3545,color:#721c24;
+
+    class GateEligible eligible;
+    class GateHuman,HumanMerge,HumanSpecReview human;
+    class Parked parked;
+```
+
+<!-- END ISSUE_PR_STATE_DIAGRAM -->
+
 ## Using it
 
 Run a mode against an issue (from a Claude Code session):
