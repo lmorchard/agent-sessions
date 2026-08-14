@@ -349,3 +349,84 @@ def test_check_and_handle_rate_limit_die(monkeypatch):
     with pytest.raises(SystemExit):
         agent_session_driver.check_and_handle_rate_limit(min_headroom=20, max_wait_seconds=300, say_fn=messages.append)
 
+
+def test_mark_board_in_progress_retry_success(monkeypatch):
+    agent_session_driver._BOARD_METADATA_CACHE.clear()
+    attempts = [0]
+
+    class MockResView:
+        stdout = json.dumps({"id": "PVT_123"})
+
+    class MockResFields:
+        stdout = json.dumps({
+            "fields": [
+                {
+                    "name": "Status",
+                    "id": "FLD_456",
+                    "options": [{"name": "In progress", "id": "OPT_789"}]
+                }
+            ]
+        })
+
+    class MockResEdit:
+        stdout = ""
+
+    def mock_run(cmd, *args, **kwargs):
+        cmd_str = [str(c) for c in cmd]
+        if cmd_str[:2] == ["gh", "project"] and cmd_str[2] == "view":
+            return MockResView()
+        if cmd_str[:2] == ["gh", "project"] and cmd_str[2] == "field-list":
+            return MockResFields()
+        if cmd_str[:2] == ["gh", "project"] and cmd_str[2] == "item-edit":
+            attempts[0] += 1
+            if attempts[0] == 1:
+                raise subprocess.CalledProcessError(1, cmd, stderr="GraphQL: temporary timeout")
+            return MockResEdit()
+        raise ValueError(f"unexpected cmd: {cmd}")
+
+    monkeypatch.setattr("subprocess.run", mock_run)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    ok = agent_session_driver.mark_board_in_progress("owner/6", "ITEM_1", retries=3)
+    assert ok is True
+    assert attempts[0] == 2
+
+
+def test_mark_board_in_progress_failure_logs_stderr(monkeypatch):
+    agent_session_driver._BOARD_METADATA_CACHE.clear()
+    logs = []
+
+    class MockResView:
+        stdout = json.dumps({"id": "PVT_123"})
+
+    class MockResFields:
+        stdout = json.dumps({
+            "fields": [
+                {
+                    "name": "Status",
+                    "id": "FLD_456",
+                    "options": [{"name": "In progress", "id": "OPT_789"}]
+                }
+            ]
+        })
+
+    def mock_run(cmd, *args, **kwargs):
+        cmd_str = [str(c) for c in cmd]
+        if cmd_str[:2] == ["gh", "project"] and cmd_str[2] == "view":
+            return MockResView()
+        if cmd_str[:2] == ["gh", "project"] and cmd_str[2] == "field-list":
+            return MockResFields()
+        if cmd_str[:2] == ["gh", "project"] and cmd_str[2] == "item-edit":
+            raise subprocess.CalledProcessError(1, cmd, stderr="GraphQL: Could not resolve item\n")
+        raise ValueError(f"unexpected cmd: {cmd}")
+
+    monkeypatch.setattr("subprocess.run", mock_run)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.log", logs.append)
+
+    ok = agent_session_driver.mark_board_in_progress("owner/6", "ITEM_1", retries=2)
+    assert ok is False
+    assert len(logs) == 1
+    assert "failed to mark item ITEM_1 in progress: GraphQL: Could not resolve item" in logs[0]
+
+
