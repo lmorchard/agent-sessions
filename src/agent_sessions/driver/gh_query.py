@@ -42,7 +42,7 @@ def fetch_prs(repo: str, state: str = "open") -> list[dict]:
         "--limit",
         "200",
         "--json",
-        "number,title,body,headRefName,url,closingIssuesReferences,mergeStateStatus,mergeable,reviewDecision,reviewRequests,reviews,statusCheckRollup",
+        "number,title,body,headRefName,url,closingIssuesReferences,mergeStateStatus,mergeable,reviewDecision,reviewRequests,reviews,statusCheckRollup,commits",
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -140,6 +140,25 @@ def parse_pr_reviews(pr: dict) -> tuple[int, int, str]:
     req_list = pr.get("reviewRequests") or []
     rev_list = pr.get("reviews") or []
     decision = pr.get("reviewDecision") or ""
+
+    if decision == "CHANGES_REQUESTED":
+        latest_commit_date = ""
+        for commit in pr.get("commits", []):
+            if isinstance(commit, dict):
+                cd = commit.get("committedDate", "")
+                if cd and cd > latest_commit_date:
+                    latest_commit_date = cd
+
+        latest_review_date = ""
+        for review in rev_list:
+            if isinstance(review, dict) and review.get("state") == "CHANGES_REQUESTED":
+                rd = review.get("submittedAt", "")
+                if rd and rd > latest_review_date:
+                    latest_review_date = rd
+
+        if latest_commit_date and latest_review_date and latest_commit_date > latest_review_date:
+            decision = "STALE_CHANGES_REQUESTED"
+
     req = len(req_list) if isinstance(req_list, list) else 0
     rev = len(rev_list) if isinstance(rev_list, list) else 0
     return req, rev, str(decision)
