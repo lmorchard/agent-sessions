@@ -51,6 +51,7 @@ STREAM_NAME = "stream.jsonl"
 #: block can be many paragraphs, so it is collapsed and cut to this width.
 LAST_TEXT_WIDTH = 100
 MAX_TEXT_BLOCKS = 20
+MAX_ACTIONS = 20
 
 
 @dataclass
@@ -74,6 +75,8 @@ class Progress:
     #: Complete records read, and lines that would not parse.
     records: int = 0
     skipped: int = 0
+    #: Recent tool action summaries.
+    actions: list[str] = field(default_factory=list)
 
 
 def read_records(path: Path | str) -> tuple[list[dict], int]:
@@ -119,6 +122,76 @@ def _add_text_block(snap: Progress, text: str) -> None:
     if len(snap.text_blocks) > MAX_TEXT_BLOCKS:
         snap.text_blocks.pop(0)
     snap.last_text = text
+
+
+def _add_action(snap: Progress, action: str) -> None:
+    snap.actions.append(action)
+    if len(snap.actions) > MAX_ACTIONS:
+        snap.actions.pop(0)
+
+
+def _extract_action(tool_name: str, input_data: object = None, title: object = None) -> str:
+    detail = None
+    if isinstance(input_data, dict):
+        tn = tool_name.lower()
+        if tn == "bash":
+            cmd = input_data.get("command") or input_data.get("cmd")
+            if isinstance(cmd, str) and cmd.strip():
+                detail = cmd.strip()
+        elif tn in ("read", "edit", "write"):
+            fp = (
+                input_data.get("filePath")
+                or input_data.get("file_path")
+                or input_data.get("path")
+                or input_data.get("file")
+            )
+            if isinstance(fp, str) and fp.strip():
+                detail = fp.strip()
+        elif tn in ("glob", "grep"):
+            pat = input_data.get("pattern") or input_data.get("path")
+            if isinstance(pat, str) and pat.strip():
+                detail = pat.strip()
+        elif tn == "task":
+            desc = input_data.get("description") or input_data.get("prompt")
+            if isinstance(desc, str) and desc.strip():
+                detail = desc.strip()
+        elif tn == "skill":
+            name = input_data.get("name")
+            if isinstance(name, str) and name.strip():
+                detail = name.strip()
+        elif tn == "webfetch":
+            url = input_data.get("url") or input_data.get("uri")
+            if isinstance(url, str) and url.strip():
+                detail = url.strip()
+
+        if not detail:
+            for k in [
+                "command",
+                "filePath",
+                "file_path",
+                "pattern",
+                "description",
+                "prompt",
+                "url",
+                "path",
+                "file",
+                "query",
+                "name",
+            ]:
+                v = input_data.get(k)
+                if isinstance(v, str) and v.strip():
+                    detail = v.strip()
+                    break
+
+    elif isinstance(input_data, str) and input_data.strip():
+        detail = input_data.strip()
+
+    if not detail and isinstance(title, str) and title.strip():
+        detail = title.strip()
+
+    if detail:
+        return f"{tool_name}: {detail}"
+    return tool_name
 
 
 def _blocks(record: dict) -> list:
@@ -177,8 +250,10 @@ def read_progress(run_dir: Path | str) -> Progress:
                     continue
                 if block.get("type") == "tool_use":
                     name = block.get("name")
+                    inp = block.get("input") or block.get("args")
                     if isinstance(name, str):
                         snap.tools[name] += 1
+                        _add_action(snap, _extract_action(name, inp))
                 elif block.get("type") == "text":
                     text = block.get("text")
                     # Most recent *text block*, not the last record's text: a
@@ -194,12 +269,23 @@ def read_progress(run_dir: Path | str) -> Progress:
         elif kind in ("tool_use", "tool_call"):
             part = record.get("part")
             name = None
+            inp = None
+            title = None
             if isinstance(part, dict):
                 name = part.get("tool") or part.get("name")
+                title = part.get("title")
+                state = part.get("state")
+                if isinstance(state, dict):
+                    inp = state.get("input")
+                if not inp:
+                    inp = part.get("input") or part.get("args")
             if not name:
                 name = record.get("name") or record.get("tool")
+            if not inp:
+                inp = record.get("input") or record.get("args")
             if isinstance(name, str):
                 snap.tools[name] += 1
+                _add_action(snap, _extract_action(name, inp, title))
 
         elif kind == "text":
             part = record.get("part")
@@ -378,6 +464,10 @@ def format_progress(snap: Progress) -> str:
             for name, count in sorted(snap.tools.items(), key=lambda kv: (-kv[1], kv[0]))
         )
         lines.append(f"  tools  {tally}")
+    if snap.actions:
+        lines.append("  actions:")
+        for a in snap.actions[-5:]:
+            lines.append(f"    - {_one_line(a)}")
     if snap.text_blocks:
         lines.append("  last:")
         for t in snap.text_blocks[-8:]:

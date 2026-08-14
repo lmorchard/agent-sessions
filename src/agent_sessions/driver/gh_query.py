@@ -10,21 +10,41 @@ import json
 import re
 import subprocess
 import sys
+import time
 
 
 def check_rate_limit(env: dict | None = None) -> tuple[int, int, int]:
-    """Check remaining GraphQL rate limit points.
+    """Check remaining rate limit points across REST core and GraphQL resources.
     Returns (remaining, limit, reset_epoch).
     """
     try:
         cmd = ["gh", "api", "rate_limit"]
         res = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env)
         data = json.loads(res.stdout)
-        graphql = data.get("resources", {}).get("graphql", {})
-        remaining = int(graphql.get("remaining", 5000))
-        limit = int(graphql.get("limit", 5000))
-        reset = int(graphql.get("reset", 0))
-        return remaining, limit, reset
+        if not isinstance(data, dict):
+            return 5000, 5000, 0
+        resources = data.get("resources", {})
+        if not isinstance(resources, dict):
+            return 5000, 5000, 0
+
+        targets = []
+        if "graphql" in resources and isinstance(resources["graphql"], dict):
+            g = resources["graphql"]
+            targets.append((int(g.get("remaining", 5000)), int(g.get("limit", 5000)), int(g.get("reset", 0))))
+        if "core" in resources and isinstance(resources["core"], dict):
+            c = resources["core"]
+            targets.append((int(c.get("remaining", 5000)), int(c.get("limit", 5000)), int(c.get("reset", 0))))
+
+        if not targets:
+            return 5000, 5000, 0
+
+        targets.sort(key=lambda t: t[0])
+        return targets[0]
+    except subprocess.CalledProcessError as e:
+        stderr = (e.stderr or "").lower()
+        if "rate limit" in stderr or "403" in stderr or "429" in stderr:
+            return 0, 5000, int(time.time()) + 300
+        return 5000, 5000, 0
     except Exception:
         return 5000, 5000, 0
 

@@ -228,7 +228,7 @@ def test_opencode_stream_progress(tmp_path):
     assert snap.turns == 2
     assert dict(snap.tools) == {"read": 1, "bash": 1}
     assert snap.last_text == "Analyzing the code..."
-    assert abs(snap.cost_usd - 0.040) < 1e-6
+    assert snap.cost_usd is not None and abs(snap.cost_usd - 0.040) < 1e-6
     assert snap.is_error is False
 
 
@@ -246,4 +246,79 @@ def test_find_latest_overall_run(tmp_path, monkeypatch):
     assert latest is not None
     # Both exist, repo_b was created second so st_mtime is equal or higher
     assert latest in (repo_a, repo_b)
+
+
+def test_extract_actions_claude(tmp_path):
+    """Actions with inputs are formatted cleanly for Claude streams."""
+    records = [
+        assistant(
+            {"type": "tool_use", "name": "Bash", "input": {"command": "git status"}},
+            {"type": "tool_use", "name": "read", "input": {"filePath": "src/main.py"}},
+        ),
+        assistant(
+            {"type": "tool_use", "name": "edit", "input": {"filePath": "src/main.py", "oldString": "a", "newString": "b"}},
+            {"type": "tool_use", "name": "glob", "input": {"pattern": "*.py"}},
+        ),
+    ]
+    run_dir = write(tmp_path / "run", records)
+    snap = run_progress.read_progress(run_dir)
+
+    assert snap.actions == [
+        "Bash: git status",
+        "read: src/main.py",
+        "edit: src/main.py",
+        "glob: *.py",
+    ]
+
+
+def test_extract_actions_opencode(tmp_path):
+    """Actions with part/state inputs are formatted cleanly for Opencode streams."""
+    records = [
+        {
+            "type": "tool_use",
+            "part": {
+                "tool": "bash",
+                "state": {"input": {"command": "pytest tests/"}},
+            },
+        },
+        {
+            "type": "tool_use",
+            "part": {
+                "tool": "read",
+                "state": {"input": {"filePath": "README.md"}},
+            },
+        },
+    ]
+    run_dir = write(tmp_path / "run", records)
+    snap = run_progress.read_progress(run_dir)
+
+    assert snap.actions == [
+        "bash: pytest tests/",
+        "read: README.md",
+    ]
+
+
+def test_format_progress_shows_last_5_actions(tmp_path):
+    """format_progress includes an actions section listing the last 5 actions."""
+    records = [
+        assistant(
+            {"type": "tool_use", "name": "Bash", "input": {"command": f"echo action {i}"}}
+        )
+        for i in range(1, 8)
+    ]
+    run_dir = write(tmp_path / "run", records)
+    snap = run_progress.read_progress(run_dir)
+
+    assert len(snap.actions) == 7
+    digest = run_progress.format_progress(snap)
+
+    assert "  actions:" in digest
+    assert "    - Bash: echo action 3" in digest
+    assert "    - Bash: echo action 4" in digest
+    assert "    - Bash: echo action 5" in digest
+    assert "    - Bash: echo action 6" in digest
+    assert "    - Bash: echo action 7" in digest
+    assert "echo action 1" not in digest
+    assert "echo action 2" not in digest
+
 

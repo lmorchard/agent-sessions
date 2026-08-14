@@ -1400,6 +1400,11 @@ def main(argv: list[str] | None = None) -> int:
             say("\nreached --max-issues; stopping with issues still eligible.")
             break
 
+        check_and_handle_rate_limit(
+            env=credentials.agent_env(dict(os.environ), creds),
+            say_fn=say,
+        )
+
         increment_attempts(num, repo)
         url = f"https://github.com/{repo}/issues/{num}"
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
