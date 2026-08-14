@@ -25,9 +25,9 @@ criteria), and you do the part that does (ratify). See
 2. **Fan out assessment (subagents, parallel).** One subagent per issue (batched to a sane
    concurrency). Each subagent, in its own context:
    - reads the issue body,
-   - scores spec-completeness: does it have a clear goal? verifiable acceptance criteria?
-     is it already marked with the `agent-session:spec` label?
-   - if under-specified, does light codebase research and **drafts *proposed* criteria +
+   - scores spec-completeness: does it have a clear goal? verifiable acceptance criteria? is it already marked with the `agent-session:spec` label?
+   - **Evaluates baseline detail:** Is the issue detailed enough to even attempt drafting criteria? If it is just a vague title (e.g. "Fix login") or a one-liner lacking necessary context, the subagent flags it as `insufficient_detail` and skips drafting criteria.
+   - if under-specified but actionable, does light codebase research and **drafts *proposed* criteria +
      checks + guards + a tier** per `acceptance-criteria.md` — a proposal, not a commitment,
    - **runs each proposed check** and records what it observed, so the ratify pass knows which
      proposals discriminate (fail today = criterion) and which don't (pass today = guard). A
@@ -56,7 +56,10 @@ criteria), and you do the part that does (ratify). See
    scanner has no business editing the repo it's scoring.
 
 3. **Headless proposal (Async ratify pass).** Because you are running autonomously, there is no user to pick from a table interactively. Instead, for the issue you scanned:
-   - **Record your proposed EARS criteria, checks, and tier as a new top-level comment on the GitHub issue** — an `issue_comment` entry in the write manifest (`references/write-manifest.md`). Never edit past comments in place.
+   - **If flagged as `insufficient_detail`:** Record a comment asking the human for the missing context.
+   - **Ensure the details label exists:** record a `label_create` entry for `agent-session:needs-details`, colour `FBCA04`.
+   - Record a `label` entry adding BOTH `agent-session:needs-human` and `agent-session:needs-details`. Stop execution.
+   - **Otherwise (Criteria drafted):** Record your proposed EARS criteria, checks, and tier as a new top-level comment on the GitHub issue — an `issue_comment` entry in the write manifest (`references/write-manifest.md`). Never edit past comments in place.
    - Record a `label` entry adding `agent-session:needs-human` so the human knows they need to review it.
    - Do NOT apply the `agent-session:spec` label yet, because the human hasn't ratified the criteria.
    - Stop execution here. Do not edit the issue body yet.
@@ -91,7 +94,7 @@ criteria), and you do the part that does (ratify). See
 Every escalation below is two manifest entries — an `issue_comment` and a `label` — never a
 `gh` command. See `references/write-manifest.md`.
 
-- An issue's intent is genuinely unclear (not just under-specified) → record a new top-level comment explaining the ambiguity (never edit past comments in place), record the `agent-session:needs-human` label, and stop.
+- An issue's intent is genuinely unclear or lacking baseline detail (not just under-specified) → record a new top-level comment explaining the ambiguity, record the `agent-session:needs-human` and `agent-session:needs-details` labels, and stop.
 - The scan surfaces duplicate/obsolete issues → record a new top-level comment suggesting closure (never edit past comments in place), record the `agent-session:needs-human` label, and stop.
 - An issue requires subjective visual/aesthetic iteration (like layout density, game feel, or UI design) → record the `agent-session:interactive` label instead. These cannot be handled asynchronously; they require an interactive prototype session in the CLI.
 - A subagent can't tell what "done" would mean → record a new top-level comment asking the human for direction (never edit past comments in place), record the `agent-session:needs-human` label, and stop.
