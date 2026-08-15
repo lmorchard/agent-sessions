@@ -49,7 +49,7 @@ def check_rate_limit(env: dict | None = None) -> tuple[int, int, int]:
         return 5000, 5000, 0
 
 
-def fetch_prs(repo: str, state: str = "open") -> list[dict]:
+def fetch_prs(repo: str, state: str = "open", limit: int = 30) -> list[dict]:
     """Fetch PRs from GitHub for the given repo."""
     cmd = [
         "gh",
@@ -60,7 +60,7 @@ def fetch_prs(repo: str, state: str = "open") -> list[dict]:
         "--state",
         state,
         "--limit",
-        "200",
+        str(limit),
         "--json",
         "number,title,body,headRefName,url,closingIssuesReferences,mergeStateStatus,mergeable,reviewDecision,reviewRequests,reviews,statusCheckRollup,commits",
     ]
@@ -71,6 +71,9 @@ def fetch_prs(repo: str, state: str = "open") -> list[dict]:
         data = json.loads(result.stdout)
         return data if isinstance(data, list) else []
     except subprocess.CalledProcessError as e:
+        stderr = (e.stderr or "").lower()
+        if ("exceeds" in stderr or "possible nodes" in stderr) and limit > 10:
+            return fetch_prs(repo, state=state, limit=limit // 2)
         raise RuntimeError(f"gh command failed: {e.stderr}") from e
 
 
