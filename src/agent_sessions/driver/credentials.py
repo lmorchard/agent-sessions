@@ -402,14 +402,14 @@ def identity_error(creds: Credentials, read_login: str, write_login: str) -> str
     An empty one means the lookup failed, which is refused rather than assumed: an
     unverifiable identity is the thing this check exists to rule out.
     """
-    expected = creds.login.strip().lower()
+    expected = creds.login.strip().lower().removesuffix("[bot]")
     problems = []
     for name, var, actual in (
         ("read", READ_TOKEN_VAR, read_login),
         ("write", WRITE_TOKEN_VAR, write_login),
     ):
-        resolved = (actual or "").strip().lower()
-        if not resolved:
+        resolved = (actual or "").strip().lower().removesuffix("[bot]")
+        if not (actual or "").strip():
             problems.append(f"could not resolve the account behind {var}")
         elif resolved != expected:
             problems.append(f"{var} belongs to {actual.strip()!r}, not {creds.login!r}")

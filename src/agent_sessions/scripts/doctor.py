@@ -330,7 +330,11 @@ def check_all(environ: dict, runner, *, repo: str, repo_path: str, board: str = 
     probes = [_Probe("read", creds.read_token), _Probe("write", creds.write_token)]
 
     for probe in probes:
-        res = _gh(runner, ["api", "user", "--jq", ".login"], probe.token)
+        if token_kind(probe.token) == "app installation" or probe.token.startswith("ghs_"):
+            res = _gh(runner, ["api", "graphql", "-f", "query={ viewer { login } }", "--jq", ".data.viewer.login"], probe.token)
+        else:
+            res = _gh(runner, ["api", "user", "--jq", ".login"], probe.token)
+
         if getattr(res, "returncode", 1) != 0:
             probe.error = _message(res)
             checks.append(
@@ -343,7 +347,9 @@ def check_all(environ: dict, runner, *, repo: str, repo_path: str, board: str = 
             )
             continue
         probe.login = (getattr(res, "stdout", "") or "").strip()
-        if probe.login.lower() != creds.login.lower():
+        expected = creds.login.strip().lower().removesuffix("[bot]")
+        actual = probe.login.strip().lower().removesuffix("[bot]")
+        if actual != expected:
             checks.append(
                 Check(
                     f"{probe.label} token identity",
@@ -375,7 +381,7 @@ def check_all(environ: dict, runner, *, repo: str, repo_path: str, board: str = 
     visible = [p for p in usable if not p.error]
     label = _existing_label(runner, visible[0].token, repo) if visible else ""
 
-    expected = {"read": "refused", "write": "permitted"}
+    expected_write_verdict = {"read": "refused", "write": "permitted"}
     for probe in visible:
         name = f"{probe.label} token {'cannot write' if probe.label == 'read' else 'can write'}"
         if not label:
@@ -391,7 +397,7 @@ def check_all(environ: dict, runner, *, repo: str, repo_path: str, board: str = 
         verdict, text = _probe_write(runner, probe.token, repo, label)
         if verdict == "unknown":
             checks.append(Check(name, "skip", f"could not tell: {text}"))
-        elif verdict == expected[probe.label]:
+        elif verdict == expected_write_verdict[probe.label]:
             checks.append(Check(name, "pass", "refused (403)" if verdict == "refused" else "permitted (422 no-op)"))
         elif probe.label == "read":
             checks.append(

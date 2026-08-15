@@ -640,6 +640,22 @@ def is_git_ignored(path: Path | str, repo_path: Path | str) -> bool:
 
 def whoami(env: dict[str, str]) -> str:
     """The GitHub login a token authenticates as, or "" if it cannot be resolved."""
+    token = env.get("GH_TOKEN") or env.get("GITHUB_TOKEN") or ""
+    if token.startswith("ghs_"):
+        try:
+            res = subprocess.run(
+                ["gh", "api", "graphql", "-f", "query={ viewer { login } }", "--jq", ".data.viewer.login"],
+                capture_output=True,
+                text=True,
+                check=True,
+                env=env,
+            )
+            out = res.stdout.strip()
+            if out and not out.startswith("{") and not out.startswith("["):
+                return out
+        except Exception:
+            pass
+
     try:
         res = subprocess.run(
             ["gh", "api", "user", "--jq", ".login"],
@@ -648,9 +664,12 @@ def whoami(env: dict[str, str]) -> str:
             check=True,
             env=env,
         )
-        return res.stdout.strip()
+        out = res.stdout.strip()
+        if out and not out.startswith("{") and not out.startswith("["):
+            return out
     except Exception:
-        return ""
+        pass
+    return ""
 
 
 def perform_writes(writes_file: Path, repo: str, repo_path: Path, rundir: Path, board: str = "") -> dict:
