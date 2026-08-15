@@ -80,10 +80,12 @@ def test_resolve_github_app_tokens(tmp_path):
         credentials.APP_INSTALLATION_ID_VAR: "789012",
         credentials.APP_PRIVATE_KEY_FILE_VAR: str(key_file),
         credentials.LOGIN_VAR: "agent-bot",
+        credentials.BOARD_TOKEN_VAR: "ghp_board_token_123",
     }
     creds = credentials.resolve(env, runner=mock_runner, http_post=mock_http_post)
     assert creds.read_token == "ghs_app_token_read"
     assert creds.write_token == "ghs_app_token_write"
+    assert creds.board_token == "ghp_board_token_123"
     assert creds.split is True
 
 

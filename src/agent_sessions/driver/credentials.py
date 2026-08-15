@@ -30,6 +30,9 @@ READ_TOKEN_VAR = "AGENT_GH_READ_TOKEN"
 #: file inside the agent's repo path -- see `exposure_error`.
 WRITE_TOKEN_VAR = "DRIVER_GH_WRITE_TOKEN"
 
+#: Optional board credential for GitHub Projects V2 mutations (e.g. user-owned projects).
+BOARD_TOKEN_VAR = "DRIVER_GH_BOARD_TOKEN"
+
 #: The GitHub login both tokens must resolve to. Required, and checked against a live
 #: `gh api user`: without it the driver can only assume whose account it is spending,
 #: and "assumed" is exactly what this module exists to stop.
@@ -87,6 +90,7 @@ AGENT_TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN")
 class Credentials:
     read_token: str = ""
     write_token: str = ""
+    board_token: str = ""
     login: str = ""
     extra_bot_logins: tuple[str, ...] = ()
     git_author_name: str = ""
@@ -217,7 +221,7 @@ def resolve(env: dict[str, str] | None = None, runner=None, http_post=None) -> C
                 tokens[READ_TOKEN_VAR] = fetch_app_installation_token(
                     jwt_token,
                     app_inst_id,
-                    permissions={"contents": "read", "issues": "read", "pull_requests": "read"},
+                    permissions={"contents": "read", "issues": "read", "pull_requests": "read", "discussions": "read"},
                     http_post=http_post,
                 )
             if not tokens.get(WRITE_TOKEN_VAR):
@@ -229,6 +233,16 @@ def resolve(env: dict[str, str] | None = None, runner=None, http_post=None) -> C
                 )
         except Exception as e:
             errors.append(f"GitHub App token resolution failed: {e}")
+
+    board_token = (src.get(BOARD_TOKEN_VAR) or "").strip()
+    if not board_token:
+        spec = (src.get(BOARD_TOKEN_VAR + CMD_SUFFIX) or "").strip()
+        if spec:
+            board_token, error = _from_command(spec, runner)
+            if error:
+                errors.append(f"{BOARD_TOKEN_VAR}{CMD_SUFFIX}: {error}")
+    if not board_token:
+        board_token = tokens.get(WRITE_TOKEN_VAR, "")
 
     login = (src.get(LOGIN_VAR) or "").strip()
 
@@ -260,6 +274,7 @@ def resolve(env: dict[str, str] | None = None, runner=None, http_post=None) -> C
     return Credentials(
         read_token=tokens[READ_TOKEN_VAR],
         write_token=tokens[WRITE_TOKEN_VAR],
+        board_token=board_token,
         login=login,
         extra_bot_logins=tuple(p for p in extras if p),
         git_author_name=git_author_name,
@@ -343,6 +358,16 @@ def driver_env(env: dict[str, str], creds: Credentials) -> dict[str, str]:
     for var in AGENT_TOKEN_VARS:
         parent[var] = creds.write_token
     return parent
+
+
+def board_env(base_env: dict[str, str], creds: Credentials) -> dict[str, str]:
+    """Environment for executing gh project board operations."""
+    env = dict(base_env)
+    token = creds.board_token or creds.write_token
+    if token:
+        env["GH_TOKEN"] = token
+        env["GITHUB_TOKEN"] = token
+    return env
 
 
 def apply_driver_env(creds: Credentials, env: dict[str, str] | None = None) -> None:
