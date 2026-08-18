@@ -57,7 +57,6 @@ where a presence-grep stands in for behaviour. Flagging it would be a false
 positive. Widening the scope is a separate call for a human, not a drift to
 discover in a diff (issue #28, first design decision).
 
-Stdlib only, to match `docs_check.py` and stay portable to a GHA runner.
 """
 
 from __future__ import annotations

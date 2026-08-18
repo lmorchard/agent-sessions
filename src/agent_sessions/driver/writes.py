@@ -10,7 +10,6 @@ trust model is unchanged -- but the *capability* is the driver's, and it will on
 spend that capability on a kind named in `KINDS`, aimed at the configured repo.
 There is deliberately no kind that merges.
 
-Stdlib only, importable and testable with pytest.
 """
 
 from __future__ import annotations

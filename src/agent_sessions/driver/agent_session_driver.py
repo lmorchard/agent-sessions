@@ -3,7 +3,6 @@
 
 Stateless state machine that evaluates GitHub repository state (issues, PRs,
 review comments, CI status) and dispatches tightly-scoped, short-lived LLM agents.
-Stdlib only, importable and testable with pytest.
 """
 
 from __future__ import annotations
@@ -18,6 +17,8 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
 from agent_sessions.driver import (
@@ -840,7 +841,81 @@ def mark_board_in_progress(board: str, item_id: str, retries: int = 3) -> bool:
     return False
 
 
-def check_pr_unresolved_threads(repo: str, pr_num: str | int) -> int:
+
+def get_pr_unresolved_threads_text(repo: str, pr_num: str | int, token: str) -> str:
+    parts = repo.split("/")
+    if len(parts) != 2:
+        return ""
+    owner, repo_name = parts
+    query = """query($owner:String!,$repo:String!,$pr:Int!){
+      repository(owner:$owner,name:$repo){
+        pullRequest(number:$pr){
+          reviewThreads(first:100){
+            nodes{
+              isResolved
+              comments(first: 50){
+                nodes{
+                  author { login }
+                  body
+                  path
+                  line
+                }
+              }
+            }
+          }
+        }
+      }
+    }"""
+    try:
+        res = requests.post(
+            "https://api.github.com/graphql",
+            json={
+                "query": query,
+                "variables": {
+                    "owner": owner,
+                    "repo": repo_name,
+                    "pr": int(pr_num) if str(pr_num).isdigit() else pr_num
+                }
+            },
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            timeout=10,
+        )
+        res.raise_for_status()
+        data = res.json()
+        nodes = (
+            data.get("data", {})
+            .get("repository", {})
+            .get("pullRequest", {})
+            .get("reviewThreads", {})
+            .get("nodes", [])
+        )
+
+        text = ""
+        # Cap to latest 10 threads
+        unresolved_threads = [t for t in nodes if isinstance(t, dict) and not t.get("isResolved")]
+        for i, thread in enumerate(unresolved_threads[-10:]):
+            comments = thread.get("comments", {}).get("nodes", [])
+            if comments:
+                first_c = comments[0]
+                path = first_c.get("path", "unknown")
+                line = first_c.get("line", "unknown")
+                text += f"Unresolved Review Thread #{i+1} on {path} line {line}:\n"
+                # Cap to latest 5 comments per thread
+                for c in comments[-5:]:
+                    author = c.get("author", {}).get("login", "unknown") if c.get("author") else "unknown"
+                    body = c.get("body", "")
+                    if len(body) > 500:
+                        body = body[:500] + "... [truncated]"
+                    text += f"  - {author}: {body}\n"
+                text += "\n"
+        return text
+    except Exception:
+        return ""
+
+def check_pr_unresolved_threads(repo: str, pr_num: str | int, token: str) -> int:
     parts = repo.split("/")
     if len(parts) != 2:
         return 0
@@ -855,21 +930,24 @@ def check_pr_unresolved_threads(repo: str, pr_num: str | int) -> int:
       }
     }"""
     try:
-        cmd = [
-            "gh",
-            "api",
-            "graphql",
-            "-f",
-            f"query={query}",
-            "-F",
-            f"owner={owner}",
-            "-F",
-            f"repo={repo_name}",
-            "-F",
-            f"pr={pr_num}",
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        data = json.loads(res.stdout)
+        res = requests.post(
+            "https://api.github.com/graphql",
+            json={
+                "query": query,
+                "variables": {
+                    "owner": owner,
+                    "repo": repo_name,
+                    "pr": int(pr_num) if str(pr_num).isdigit() else pr_num
+                }
+            },
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            timeout=10,
+        )
+        res.raise_for_status()
+        data = res.json()
         nodes = (
             data.get("data", {})
             .get("repository", {})
@@ -1329,7 +1407,7 @@ def main(argv: list[str] | None = None) -> int:
         prnum = str(pr.get("number"))
         unresolved = unresolved_map.get(prnum)
         if unresolved is None:
-            unresolved = check_pr_unresolved_threads(repo, prnum)
+            unresolved = check_pr_unresolved_threads(repo, prnum, creds.read_token)
 
         if "statusCheckRollup" in pr:
             failed_ci, pending_ci = gh_query.parse_pr_ci_status(pr)
@@ -1457,6 +1535,12 @@ def main(argv: list[str] | None = None) -> int:
                         extra_context += "Recent PR Comments:\n"
                         for c in pr_comments[-3:]:  # last 3 comments
                             extra_context += f"- {c.get('author', {}).get('login', 'unknown')}: {c.get('body', '')}\n"
+
+                    unresolved_text = get_pr_unresolved_threads_text(repo, prnum, creds.read_token)
+                    if unresolved_text:
+                        extra_context += "Unresolved Review Threads:\n"
+                        extra_context += unresolved_text
+
             except Exception:
                 pass
 

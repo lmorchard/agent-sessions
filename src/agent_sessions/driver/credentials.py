@@ -7,7 +7,6 @@ token cannot merge, cannot rewrite an issue body and cannot force-push, whatever
 it decides to run. This module owns the two tokens and the two environments built
 from them.
 
-Stdlib only, importable and testable with pytest.
 """
 
 from __future__ import annotations

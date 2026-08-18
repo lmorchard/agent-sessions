@@ -28,7 +28,6 @@ It checks three things, each motivated by a defect actually found:
     findings.md, leaving two rows to render headerless;
   * claimed assertion counts match reality -- the "49-assertion" class.
 
-Stdlib only, and it **reports a skipped check as skipped, never as a pass** --
 this project's most-repeated lesson is that a null must not render as a positive,
 and a checker that quietly skips is the same defect one level up.
 """
@@ -66,7 +65,6 @@ def under_nested_worktree(p: Path) -> bool:
     be right: `.worktrees/` is the fallback this repo never uses, while Claude Code
     actually creates them at `.claude/worktrees/`. Enumerating spellings is the
     hand-maintained-inventory shape issue #50 argued against; this identifies the
-    class instead. Stdlib only, no subprocess.
 
     **ROOT is excluded from the walk, and that is a requirement rather than an
     optimisation.** ROOT always carries a `.git` entry of its own -- a directory in

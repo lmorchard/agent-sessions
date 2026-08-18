@@ -53,6 +53,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DISCUSSION_MANAGER_PY="${DISCUSSION_MANAGER_PY:-$SCRIPT_DIR/../driver/discussion_manager.py}"
 
 echo "==> Ensuring 'Lab Notebook' discussion category exists..."
-"${PYTHON_BIN:-python3}" "$DISCUSSION_MANAGER_PY" ensure-category --repo "$REPO" || true
+uv run python "$DISCUSSION_MANAGER_PY" ensure-category --repo "$REPO" || true
 
 echo "==> Done. $REPO is ready for agent-sessions."

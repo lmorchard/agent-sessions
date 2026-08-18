@@ -102,7 +102,6 @@ and has not yet merged. History is immutable and already contains the one known
 instance; re-reporting it forever would train the operator to ignore the check.
 ``--all`` scans everything, which is how the regression guard is run by hand.
 
-Stdlib only, and invoked with plain ``python3``, to match ``docs_check.py`` and
 ``assertion_lint.py`` and stay portable to a GHA runner.
 """
 

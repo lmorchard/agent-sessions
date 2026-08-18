@@ -18,7 +18,6 @@ actually worth:
   repos read fine, which is what made this look like a permissions problem for an
   hour. `_repo_remedy` is where that distinction is written down.
 
-Stdlib only, importable and testable with pytest.
 """
 
 from __future__ import annotations
