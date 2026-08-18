@@ -10,8 +10,6 @@ is a **reader**, not new instrumentation: the signal is already complete, and
 emitting progress from inside the run would let the run narrate its own progress.
 See issue #42.
 
-`docs_check.py` -- no virtualenv between an operator and "is it still alive?".
-
 Three details are load-bearing, each of them a way a naive reader gets it wrong:
 
   * **A partial final line is normal, not an error.** A live stream is appended
