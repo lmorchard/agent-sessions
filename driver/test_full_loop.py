@@ -331,10 +331,16 @@ class FakeGitHub:
         if url == "https://api.github.com/graphql":
             json_payload = kwargs.get("json", {})
             variables = json_payload.get("variables", {})
-            pr_number = variables.get("pr")
-            pull = self.pr_by_number(pr_number)
-            nodes = [{"isResolved": t["isResolved"]} for t in (pull["reviewThreads"] if pull else [])]
-            return FakeResponse(200, {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": nodes}}}}})
+
+            if "pullRequest(number:$pr)" in json_payload.get("query", ""):
+                pr_number = variables.get("pr")
+                pull = self.pr_by_number(pr_number)
+                nodes = [{"isResolved": t["isResolved"]} for t in (pull["reviewThreads"] if pull else [])]
+                return FakeResponse(200, {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": nodes}}}}})
+            elif "issue(number:$issue)" in json_payload.get("query", ""):
+
+                # For test purposes, return an empty comments nodes list
+                return FakeResponse(200, {"data": {"repository": {"issue": {"comments": {"nodes": []}}}}})
         raise NotImplementedError(f"Mock for {url} not implemented")
 
     def run(self, cmd, **kwargs):

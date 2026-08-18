@@ -867,7 +867,7 @@ def get_pr_unresolved_threads_text(repo: str, pr_num: str | int, token: str) -> 
       }
     }"""
     try:
-        res = requests.post(
+        req_res = requests.post(
             "https://api.github.com/graphql",
             json={
                 "query": query,
@@ -883,8 +883,8 @@ def get_pr_unresolved_threads_text(repo: str, pr_num: str | int, token: str) -> 
             },
             timeout=10,
         )
-        res.raise_for_status()
-        data = res.json()
+        req_res.raise_for_status()
+        data = req_res.json()
         nodes = (
             data.get("data", {})
             .get("repository", {})
@@ -930,7 +930,7 @@ def check_pr_unresolved_threads(repo: str, pr_num: str | int, token: str) -> int
       }
     }"""
     try:
-        res = requests.post(
+        req_res = requests.post(
             "https://api.github.com/graphql",
             json={
                 "query": query,
@@ -946,8 +946,8 @@ def check_pr_unresolved_threads(repo: str, pr_num: str | int, token: str) -> int
             },
             timeout=10,
         )
-        res.raise_for_status()
-        data = res.json()
+        req_res.raise_for_status()
+        data = req_res.json()
         nodes = (
             data.get("data", {})
             .get("repository", {})
@@ -1546,12 +1546,23 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             res = subprocess.run(
-                ["gh", "issue", "view", str(num), "--repo", repo, "--json", "comments"],
+                ["gh", "issue", "view", str(num), "--repo", repo, "--json", "title,body,comments,labels"],
                 capture_output=True,
                 text=True,
             )
             if res.returncode == 0:
                 issue_data = json.loads(res.stdout)
+
+                extra_context += f"Issue Title: {issue_data.get('title', '')}\n"
+
+                labels = [l.get('name') for l in issue_data.get('labels', []) if isinstance(l, dict) and l.get('name')]
+                if labels:
+                    extra_context += f"Issue Labels: {', '.join(labels)}\n"
+
+                body = issue_data.get("body", "")
+                if body:
+                    extra_context += f"\nIssue Body:\n{body}\n\n"
+
                 issue_comments = issue_data.get("comments", [])
                 if issue_comments:
                     extra_context += "Recent Issue Comments:\n"
@@ -1559,6 +1570,72 @@ def main(argv: list[str] | None = None) -> int:
                         extra_context += f"- {c.get('author', {}).get('login', 'unknown')}: {c.get('body', '')}\n"
         except Exception:
             pass
+
+        if phase == "triage":
+            query = """query($owner:String!,$repo:String!,$issue:Int!){
+              repository(owner:$owner,name:$repo){
+                issue(number:$issue){
+                  comments(last:50){
+                    nodes{
+                      author { login }
+                      body
+                      reactions(first:10){
+                        nodes{
+                          content
+                          user{login}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }"""
+            parts = repo.split("/")
+            if len(parts) == 2:
+                owner, repo_name = parts
+                try:
+                    req_res = requests.post(
+                        "https://api.github.com/graphql",
+                        json={
+                            "query": query,
+                            "variables": {
+                                "owner": owner,
+                                "repo": repo_name,
+                                "issue": int(num) if str(num).isdigit() else num
+                            }
+                        },
+                        headers={
+                            "Authorization": f"Bearer {creds.read_token}",
+                            "Content-Type": "application/json",
+                        },
+                        timeout=10,
+                    )
+                    req_res.raise_for_status()
+                    data = req_res.json()
+
+                    nodes = (
+                        data.get("data", {})
+                        .get("repository", {})
+                        .get("issue", {})
+                        .get("comments", {})
+                        .get("nodes", [])
+                    )
+
+                    if nodes:
+                        extra_context += "\nIssue Comments with Reactions:\n"
+                        for c in nodes[-5:]:  # Limit to 5 most recent
+                            author = c.get("author", {}).get("login", "unknown") if c.get("author") else "unknown"
+                            body = c.get("body", "")
+                            if len(body) > 500:
+                                body = body[:500] + "... [truncated]"
+                            reactions = c.get("reactions", {}).get("nodes", [])
+                            reactions_text = ""
+                            if reactions:
+                                reactions_list = [f"{r.get('content')} by {r.get('user', {}).get('login', 'unknown')}" for r in reactions]
+                                reactions_text = f" (Reactions: {', '.join(reactions_list)})"
+                            extra_context += f"  - {author}{reactions_text}: {body}\n"
+                except Exception:
+                    pass
 
         if not args.no_workspace_isolation:
             run_ws_dir: Path | None = Path(args.workspaces_dir).resolve() if args.workspaces_dir else None
