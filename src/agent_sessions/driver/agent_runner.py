@@ -26,6 +26,44 @@ except ImportError:  # invoked as a script rather than imported as a package
 #: Where the agent records the GitHub writes it wants the driver to perform.
 WRITES_FILE_VAR = "AGENT_SESSION_WRITES"
 
+DEFAULT_ALLOWED_TOOLS = (
+    "Read", "Write", "Edit", "Glob", "Grep", "Task", "TodoWrite",
+    "BashOutput", "KillShell", "NotebookEdit", "Bash(*)",
+)
+
+BASE_DENIED_TOOLS = (
+    "Bash(gh pr merge:*)",
+    "Bash(gh pr merge *)",
+    "Bash(git push --force:*)",
+    "Bash(gh repo delete:*)",
+)
+
+
+def compose_allowed_tools(requested: str = "") -> str:
+    if not requested:
+        return ",".join(DEFAULT_ALLOWED_TOOLS)
+
+    rules = requested.split(",")
+    unsupported = [rule for rule in rules if rule not in DEFAULT_ALLOWED_TOOLS]
+    if unsupported:
+        raise ValueError(
+            "--allowed-tools may only narrow the default; unsupported rule(s): "
+            + ", ".join(unsupported)
+        )
+    return requested
+
+
+def mandatory_disallowed_tools(skill_dir: Path) -> tuple[str, ...]:
+    return BASE_DENIED_TOOLS + tuple(
+        f"{tool}(/{skill_dir}/**)" for tool in ("Edit", "Write", "NotebookEdit")
+    )
+
+
+def compose_disallowed_tools(skill_dir: Path, additional: str = "") -> str:
+    rules = [*mandatory_disallowed_tools(skill_dir)]
+    rules.extend(rule for rule in additional.split(",") if rule)
+    return ",".join(rules)
+
 
 def run_agent(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Run agent backend")
@@ -58,9 +96,12 @@ def run_agent(argv: list[str] | None = None) -> int:
     prompt_file = Path(args.prompt_file).resolve()
     raw_output = Path(args.raw_output).resolve()
     stderr_output = Path(args.stderr_output).resolve()
+    stderr_output.parent.mkdir(parents=True, exist_ok=True)
 
     if not prompt_file.is_file():
-        stderr_output.write_text(f"error: prompt file not found: {prompt_file}\n")
+        stderr_output.write_text(
+            f"error: prompt file not found: {prompt_file}\n", encoding="utf-8"
+        )
         return 2
 
     prompt_text = prompt_file.read_text(encoding="utf-8")
@@ -79,6 +120,12 @@ def run_agent(argv: list[str] | None = None) -> int:
             target_model = os.environ.get("MODEL", "")
 
     if args.backend == "claude":
+        try:
+            allowed_tools = compose_allowed_tools(args.allowed_tools)
+        except ValueError as e:
+            stderr_output.write_text(f"error: {e}\n", encoding="utf-8")
+            return 2
+
         cmd = [
             "claude",
             "-p",
@@ -88,9 +135,9 @@ def run_agent(argv: list[str] | None = None) -> int:
             "--permission-mode",
             "dontAsk",
             "--allowedTools",
-            args.allowed_tools,
+            allowed_tools,
             "--disallowedTools",
-            args.disallowed_tools,
+            compose_disallowed_tools(skill_dir, args.disallowed_tools),
             "--settings",
             args.settings,
             "--max-budget-usd",
@@ -120,7 +167,6 @@ def run_agent(argv: list[str] | None = None) -> int:
         return 2
 
     raw_output.parent.mkdir(parents=True, exist_ok=True)
-    stderr_output.parent.mkdir(parents=True, exist_ok=True)
 
     # The agent's credential, not the driver's: `agent_env` installs the read-scoped
     # token and strips every write-capable one. This is the containment layer --

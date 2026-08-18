@@ -12,12 +12,12 @@ help:
 	@echo "lint             run ruff linter"
 	@echo "typecheck        run mypy type checker"
 	@echo "board-audit      audit this repo's live GitHub project (read-only)"
-	@echo "driver-check     assert the driver has no executable merge path"
-	@echo "driver-test      bash fixture tests (runs gate-test first)"
-	@echo "gate-test        pytest over the Python modules -- imports them, never restates"
+	@echo "driver-check     scan the Bash compatibility launcher for merge commands"
+	@echo "driver-test      Python harness and fixture tests (alias of gate-test)"
+	@echo "gate-test        pytest over the Python harness and detector suites"
 	@echo "park-test        frozen acceptance checks for #5 (park state as a label)"
 	@echo "skill-readonly   assert the hosted run cannot write to the skill directory"
-	@echo "docs-check       detect doc rot: dead links, split tables, stale counts"
+	@echo "docs-check       detect doc rot: links, tables, counts, risk-policy drift"
 	@echo "assertion-lint   detect presence-grep assertions -- a spelling check, not a test"
 	@echo "guard-lint       detect pinned test count guards in issue bodies"
 	@echo "commit-lint      detect a commit message that QUOTES a closing keyword"
@@ -49,17 +49,18 @@ typecheck:
 board-audit:
 	@uv run python -m agent_sessions.scripts.board_audit --owner lmorchard --project 9 --repo lmorchard/agent-sessions
 
-# C1. Kept separate from driver-test so it can be cited as its own check.
+# C1. This checks only the compatibility launcher; issue #248 owns coverage of
+# the shipping Python coordinator. Kept separate so it can be cited directly.
 driver-check:
 	@matches=$$(grep -nE '^[^#]*(gh pr merge|gh api[^|]*merge|--auto\b)' $(DRIVER) \
 	    | grep -v 'DENIED_TOOLS=' | grep -v 'Bash(gh pr merge' || true); \
 	if [ -n "$$matches" ]; then \
 	  echo "FAIL: driver contains an executable merge path:"; echo "$$matches"; exit 1; \
 	fi; \
-	echo "driver-check: no executable merge path in $(DRIVER)"
+	echo "driver-check: no executable merge path in compatibility launcher $(DRIVER)"
 
-# `uv` runs the tests; the driver itself calls plain `uv run python`, because gate.py is
-# stdlib-only and must stay portable to a GHA runner.
+# The harness and detector suites are Python tests; `gate-test` imports shipping
+# modules rather than carrying hand-copied implementations.
 driver-test: gate-test
 
 gate-test:
@@ -74,24 +75,19 @@ park-test: gate-test
 # ongoing invariant instead of the frozen fact.
 #
 # The invariant: --add-dir grants the hosted run access to the skill directory, so
-# without a deny rule the run could edit the instructions grading it. That is the
-# implementer authoring its own oracle -- the one failure this system exists to
-# prevent. Verified that `Edit(//abs/**)` blocks and `Edit(/abs/**)` does NOT.
+# without a deny rule the run could edit the instructions grading it. The named
+# tests capture the command at the Popen boundary and assert the runtime policy,
+# including the required double-slash absolute path form.
 skill-readonly:
-	@for tool in Edit Write NotebookEdit; do \
-	  grep -qF ",$$tool(/\$$SKILL_DIR/**)" $(DRIVER) || { \
-	    echo "FAIL: $(DRIVER) does not deny $$tool on the skill dir."; \
-	    echo "      The hosted run could edit the instructions that grade it."; exit 1; }; \
-	done; \
-	if grep -nE '^[^#]*Edit\(//' $(DRIVER); then \
-	  echo "FAIL: hardcoded // path in a deny rule; must interpolate SKILL_DIR"; exit 1; \
-	fi; \
-	echo "skill-readonly: driver denies Edit/Write/NotebookEdit on the skill dir"
+	@uv run pytest -q \
+	  driver/test_agent_runner.py::test_claude_command_restores_mandatory_permission_policy \
+	  driver/test_agent_runner.py::test_caller_rules_cannot_replace_mandatory_denials
 
 # Documentation rot is mechanical, so detect it mechanically. Every doc defect this
 # project hit was a fact derivable from a live source, or prose duplicating one --
-# never a judgment. A CLAUDE.md rule saying "don't do that" would be an exhortation,
-# and this project is 3 for 3 on those measuring away. See scripts/docs_check.py.
+# never a judgment. An instruction-file rule saying "don't do that" would be an
+# exhortation, and this project is 3 for 3 on those measuring away. See
+# src/agent_sessions/scripts/docs_check.py.
 evidence:
 	@uv run python -m agent_sessions.scripts.evidence
 
@@ -103,10 +99,8 @@ docs-check:
 # next to eight live instances for two days without preventing a ninth. So: a
 # detector, not an exhortation. Same reasoning as docs-check above.
 #
-# Scope is driver/test-*.sh. This Makefile's own `grep -qF` guards are excluded on
-# purpose -- skill-readonly asserts a deny rule is literally PRESENT in the driver,
-# so there presence is the property being tested, not a stand-in for behaviour.
-# See issue #28 and scripts/assertion_lint.py.
+# Scope is driver/test_*.py. See issue #28 and
+# src/agent_sessions/scripts/assertion_lint.py.
 assertion-lint:
 	@uv run python -m agent_sessions.scripts.assertion_lint
 
@@ -121,8 +115,9 @@ assertion-lint:
 #
 # Scope is the commits this branch adds on top of origin/main. History is
 # immutable and already holds the one known instance, so re-reporting it forever
-# would train the operator to ignore the check -- `uv run python scripts/commit_lint.py
-# --all` is how the regression guard gets run by hand. Same detector-not-
+# would train the operator to ignore the check --
+# `uv run python -m agent_sessions.scripts.commit_lint --all` is how the regression
+# guard gets run by hand. Same detector-not-
 # exhortation reasoning as docs-check and assertion-lint above. See issue #47.
 commit-lint:
 	@uv run python -m agent_sessions.scripts.commit_lint
@@ -191,10 +186,12 @@ watch-self:
 # exists to catch a *typo* in --skill-dir, and a named target is not a typo. The
 # nested configuration is safe here for two independent reasons, neither of which
 # depends on remembering anything:
-#   1. skills/** and driver/gate.py are risk-gated in CLAUDE.md, so intake tiers
-#      any issue touching them needs-review and selection skips it;
-#   2. DENIED_TOOLS blocks Edit/Write/NotebookEdit on $(SKILL) regardless of
-#      nesting, so a run could not write the skill even if it were selected.
+#   1. skills/** and the shipping coordinator, gate, and compatibility launcher
+#      are risk-gated in the instruction files, so intake tiers any issue touching
+#      them needs-review and selection skips it;
+#   2. agent_runner's mandatory Claude policy blocks Edit/Write/NotebookEdit on
+#      $(SKILL) regardless of nesting, so a run could not write the skill even if
+#      it were selected.
 # Verified 2026-07-29: without the flag this exits 2; with it, selection runs.
 run-self:
 	@bash $(DRIVER) --repo lmorchard/agent-sessions --board lmorchard/9 \

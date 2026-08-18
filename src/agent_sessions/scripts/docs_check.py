@@ -16,17 +16,18 @@ Nothing that rotted was a judgment or a rule. `findings.md`'s rules are as true 
 the day they were written; its *counts* drifted. So the rule is: **a document
 should not state a fact a command can print.**
 
-A CLAUDE.md line saying that would be an exhortation, and this project is 3 for 3
-on added rules measuring away (see docs/findings.md defect class 4). Mechanical
-detectors have worked every time. So this is a detector.
+An instruction-file line saying that would be an exhortation, and this project is
+3 for 3 on added rules measuring away (see docs/findings.md defect class 4).
+Mechanical detectors have worked every time. So this is a detector.
 
-It checks three things, each motivated by a defect actually found:
+It includes these checks, each motivated by a defect actually found:
 
   * every relative markdown link resolves  -- caught real breakage twice while
     relocating docs into archive/, in both cases invisible to reading;
   * no orphaned table rows            -- a prose block split a table in
     findings.md, leaving two rows to render headerless;
-  * claimed assertion counts match reality -- the "49-assertion" class.
+  * claimed assertion counts match reality -- the "49-assertion" class;
+  * AGENTS.md and CLAUDE.md carry the same parsed risk-path policy.
 
 this project's most-repeated lesson is that a null must not render as a positive,
 and a checker that quietly skips is the same defect one level up.
@@ -279,8 +280,42 @@ def check_partition() -> None:
                         )
 
 
+# --- check 5: instruction-file policy parity -------------------------------
 
-# --- check 5: judgment-phrased world-state assertions -----------------------
+def risk_policy_section(path: Path) -> str:
+    """Return the complete risk-path policy section from one instruction file."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    starts = [
+        i for i, line in enumerate(lines) if line.startswith("## Risk-gated paths")
+    ]
+    ends = [
+        i for i, line in enumerate(lines) if line.startswith("## Governing principle")
+    ]
+    if len(starts) != 1 or len(ends) != 1 or ends[0] <= starts[0]:
+        raise ValueError(
+            "expected one 'Risk-gated paths' section followed by one "
+            "'Governing principle' section"
+        )
+    return "\n".join(line.rstrip() for line in lines[starts[0] : ends[0]]).strip()
+
+
+def check_risk_policy_parity() -> None:
+    """AGENTS.md and CLAUDE.md must expose one identical risk-path policy."""
+    paths = (ROOT / "AGENTS.md", ROOT / "CLAUDE.md")
+    try:
+        policies = [risk_policy_section(path) for path in paths]
+    except (OSError, ValueError) as e:
+        failures.append(f"could not compare AGENTS.md and CLAUDE.md risk-path policies: {e}")
+        return
+
+    if policies[0] != policies[1]:
+        failures.append(
+            "AGENTS.md and CLAUDE.md risk-path policies differ; keep the complete "
+            "'Risk-gated paths' sections aligned"
+        )
+
+
+# --- check 6: judgment-phrased world-state assertions -----------------------
 
 def check_world_state_claims() -> None:
     """Any capability/world-state claim phrased as a judgment must be cited.
@@ -352,6 +387,7 @@ def main() -> int:
     check_tables()
     check_counts()
     check_partition()
+    check_risk_policy_parity()
     check_world_state_claims()
     check_state_diagram()
 
@@ -363,7 +399,7 @@ def main() -> int:
     if failures:
         print(f"\ndocs-check: {len(failures)} problem(s)")
         return 1
-    print(f"docs-check: links resolve, tables well-formed, counts match"
+    print(f"docs-check: links resolve, tables well-formed, counts and risk policies match"
           f"{' (with skips above)' if skips else ''}")
     return 0
 

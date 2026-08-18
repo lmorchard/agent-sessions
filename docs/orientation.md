@@ -15,8 +15,9 @@ per issue, whether success will be checkable by something that can't be argued w
 this decision is the thing that makes unattended work safe, not any property of the agent.
 
 Two pieces implement that bet: a **Claude Code skill** that runs the per-issue loop, and a
-**driver script** that picks issues off a board and runs the skill on them unattended. Neither
-one merges anything, ever.
+**Python driver harness** that picks issues off a board and runs the skill on them unattended.
+A thin Bash launcher preserves the original command-line entry point. Neither piece merges
+anything, ever.
 
 It works, and it is used on itself: much of this repo's own commit history was written by the
 system it describes. Every resulting pull request was merged by a human, by hand.
@@ -76,12 +77,12 @@ one place they're all defined.
 | **amendment** | Changing what a frozen check *asserts*. Allowed, but costly on purpose: stop, get a human, log it, and downgrade the run to `needs-review`. A merely cosmetic rewording is a *clarification* and is free. |
 | **marker** | A hidden HTML comment (`<!-- agent-session:spec -->`) stamped into an issue body once it has been through intake or triage. The working modes refuse to run without it, so an under-specified issue can't be picked up by accident. |
 | **tier** | `auto-ok` or `needs-review`, written into the issue body. Derived, not chosen: everything checkable and nothing risky touched → `auto-ok`; any human-judgment criterion *or* any risk-gated path → `needs-review`. It controls **where a run surfaces to a human**, not whether it runs. |
-| **risk-gated path** | Code an unattended run isn't allowed to touch: auth, secrets, data migration, deploy/CI config, dependencies — plus whatever the project's own `CLAUDE.md` names. In *this* repo the list is an allowlist, so anything unlisted is gated by default. |
+| **risk-gated path** | Code an unattended run isn't allowed to touch: auth, secrets, data migration, deploy/CI config, dependencies — plus whatever the project's own `AGENTS.md` names. In *this* repo the list is an allowlist, so anything unlisted is gated by default. |
 | **gate** | The list of conditions the `pr` mode evaluates at the end of a run, and the machine-readable block it writes into the PR body reporting the result. |
 | **verdict** | The gate's output: `eligible-for-auto-merge`, `human-merge-required`, or `pending`. The first one is **a finding the system reports, not an action it takes.** |
 | **mode** | One of the skill's six entry points (`intake`, `triage`, `plan`, `execute`, `pr`, `express`). You name the one you want; the skill reads only that mode's file. |
-| **driver** | `driver/agent-session-driver.sh` — the loop above the skill that picks an eligible issue, invokes the skill headlessly, and records the outcome. |
-| **park** | What the driver does to an issue whose run didn't reach a verdict: adds a `driver-parked` label so future selection skips it until someone or something clears it. |
+| **driver** | `src/agent_sessions/driver/agent_session_driver.py` — the coordinator above the skill that picks eligible work, invokes the skill headlessly, and records the outcome. `driver/agent-session-driver.sh` is its compatibility launcher. |
+| **park** | What the driver does to an issue whose run didn't reach a verdict: adds an `agent-session:needs-human` label so future selection skips it until someone or something clears it. |
 | **move** | A unit of build history in the older docs ("move 7 did X"). Roughly a work session. Numbering stopped being maintained; treat it as a chronological label, not a scheme. |
 
 ---
@@ -91,12 +92,16 @@ one place they're all defined.
 Two artifacts with different audiences and different ways of being graded. Conflating them is
 what makes "so is this a skill-authoring project?" a confusing question — it's both.
 
-| | `skills/agent-session/` | `driver/` + `Makefile` + `scripts/` |
+| | `skills/agent-session/` | Python harness + compatibility, test, and detector assets |
 |---|---|---|
 | What it is | the reusable artifact: a Claude Code skill running the per-issue loop | this repo's own automation, the unattended burndown loop |
-| Made of | markdown | bash, plus stdlib Python for parsing and classification |
+| Made of | markdown | Python, with a thin Bash compatibility launcher |
 | How you tell it works | micro-tests against a no-guidance control, plus dogfooding | fixture tests and mutation testing |
 | Who it's for | any project that installs the skill | only this repo |
+
+Older design history describes this as a Bash orchestrator plus a Python parser. That language
+split is historical: the 2026-08-09 conversion moved orchestration into the Python package and left
+the Bash file as a compatibility launcher.
 
 The skill is **not installed** in `~/.claude/skills/`. You exercise it by pointing a session at a
 mode's phase file. That's deliberate — it keeps the version under test the version in the repo.
@@ -105,8 +110,10 @@ Top-level layout:
 
 - `skills/agent-session/` — the skill: `SKILL.md` (the dispatcher), `phases/` (one file per mode),
   `references/` (the shared engine). Detailed below.
-- `driver/` — the unattended loop and its test suites. Detailed below.
-- `scripts/` — repo-health detectors and a live progress reader. Detailed below.
+- `src/agent_sessions/driver/` — the unattended loop's Python implementation. Detailed below.
+- `driver/` — the Bash compatibility launcher, integration assets, fixtures, and harness tests.
+- `src/agent_sessions/scripts/` — the shipping repo-health detectors and progress reader.
+- `scripts/` — root-level detector tests and test-support assets. Detailed below.
 - `docs/dev-sessions/` — one directory per work session, each with its spec, plan, frozen checks
   and notes. This is the real archaeological record, and it is frozen by design: the content is
   history, not maintained documentation.
@@ -154,7 +161,7 @@ drifted rule is a correctness bug.
 | `frozen-checks.md` | **The core of the back half.** The `checks.md` manifest; the freeze procedure, including a read-only check-reviewer asking one question per check (*what could make this green that isn't the work?*); the read-only rule; the independent verifier; the tamper diff; what substitutes when the criteria are commands rather than test files; and the clarification-vs-amendment test with its four-cell table |
 | `session-setup.md` | Branch, worktree, session directory, `spec.md` from the issue, and the tier read from the issue **body** rather than its label. Shared by `plan` and `express` so a drifted worktree path can't make one of them test the wrong branch |
 | `plan-template.md` | The `plan.md` skeleton: Phase 0 is the freeze, every phase names the criteria it advances, every checkbox cites a check by its exact command |
-| `pr-body-template.md` | The PR body skeleton, including a field-by-field spec for the `agent-session:gate` block — this is the schema `driver/gate.py` parses |
+| `pr-body-template.md` | The PR body skeleton, including a field-by-field spec for the `agent-session:gate` block — this is the schema `src/agent_sessions/driver/gate.py` parses |
 
 **Either half:**
 
@@ -166,24 +173,31 @@ drifted rule is a correctness bug.
 If you only read two files in this directory, read `acceptance-criteria.md` and
 `frozen-checks.md`. Everything else is a template, a syntax reference, or an integration detail.
 
-### `driver/` and `scripts/`
+### `src/agent_sessions/driver/`, `src/agent_sessions/scripts/`, `driver/`, and `scripts/`
 
 | File | What it is |
 |---|---|
-| `driver/agent-session-driver.sh` | Select an eligible issue → invoke the skill headlessly → classify the outcome from the PR's gate block → record it. Host-agnostic on purpose: every path is a flag, there are no prompts, and all mutable state lives under one `--state-dir` |
-| `driver/gate.py` | Parses the gate block and classifies the outcome. Importable **so its tests exercise the shipping code** — extraction was the fix for a hand-copied classifier in the test suite that had silently diverged from the driver it was supposed to be testing |
-| `driver/test-driver.sh`, `test-park-state.sh`, `test_gate.py` | The fixture suites for the above |
-| `scripts/docs_check.py` | Doc-rot detector: dead relative links, tables split by prose, and stated assertion counts that no longer match the suite |
-| `scripts/assertion_lint.py` | Catches presence-grep assertions in the bash suites — a `grep -q` for a literal that a *comment* would satisfy just as well as the behaviour |
-| `scripts/commit_lint.py` | Catches a closing keyword a commit message only quotes. Commit messages aren't markdown, so backticks don't quote anything, and GitHub closed a live backlog item off a sentence that was merely describing a test fixture |
-| `scripts/run_progress.py` | A reader over a run's `stream.jsonl`, so a fifty-minute unattended run isn't a black box. Deliberately a *reader* — letting the run narrate its own progress is the same defect one level up |
+| `src/agent_sessions/driver/agent_session_driver.py` | Coordinates configuration, credentials, GitHub reads, workspaces, agent invocation, outcome routing, persistence, and reporting |
+| `src/agent_sessions/driver/router.py` | Selects issues and routes phases as a pure function over fetched GitHub state |
+| `src/agent_sessions/driver/gate.py` | Parses the gate block and classifies the outcome. Importable **so its tests exercise the shipping code** — extraction was the fix for a hand-copied classifier in the test suite that had silently diverged from the driver it was supposed to be testing |
+| `src/agent_sessions/driver/writes.py` | Validates the write manifest against a closed kind allowlist, then constructs and executes the permitted write commands |
+| `driver/agent-session-driver.sh` | Thin Bash compatibility launcher for the packaged Python coordinator |
+| `driver/test_*.py` | The fixture and integration suites for the harness |
+| `src/agent_sessions/scripts/docs_check.py` | Doc-rot detector: dead relative links, tables split by prose, stated assertion counts that no longer match the suite, and divergent risk-path policy in the two instruction files |
+| `src/agent_sessions/scripts/assertion_lint.py` | Catches presence-grep assertions in harness tests — a `grep -q` for a literal that a *comment* would satisfy just as well as the behaviour |
+| `src/agent_sessions/scripts/commit_lint.py` | Catches a closing keyword a commit message only quotes. Commit messages aren't markdown, so backticks don't quote anything, and GitHub closed a live backlog item off a sentence that was merely describing a test fixture |
+| `src/agent_sessions/scripts/run_progress.py` | A reader over a run's `stream.jsonl`, so a fifty-minute unattended run isn't a black box. Deliberately a *reader* — letting the run narrate its own progress is the same defect one level up |
+| `scripts/test_*.py` | Root-level tests for the shipping detectors, plus test-support code |
 
-Notice the pattern in `scripts/`: every one is a detector, and every one exists because a written
-rule had already failed to prevent the defect it catches. That is the project's most-repeated
-lesson, in file form.
+The detector modules under `src/agent_sessions/scripts/` exist because written rules had already
+failed to prevent the defects they catch. That is the project's most-repeated lesson, in file
+form. The shipping modules are default-gated as unlisted `src/**`; their root-level tests and
+support under `scripts/` are explicitly drivable.
 
 `make help` lists the targets; `make check` is the aggregate that runs the suites and the
-detectors together, and it's the row the merge gate cites as *local project gates*.
+detectors together, and it's the row the merge gate cites as *local project gates*. One boundary
+is narrower than its name suggests: `make driver-check` currently checks only the Bash
+compatibility launcher. Issue #248 owns the missing shipping-Python coverage.
 
 ### The seams — text formats one component writes and another parses
 
@@ -197,12 +211,15 @@ also where the sharpest failures live, because a malformed seam usually looks fi
 | `## Tier: auto-ok` | `intake` / `triage` | `session-setup`, driver selection | Anchored on `^## Tier:`, token taken from the heading line only. No colon, the token only in the prose beneath, or both tokens on one line each break it a different way. **Exactly one such heading per body** |
 | `C1…Cn` ids | `plan`, at the freeze | `plan.md`, the commits, the verifier's report, the PR table, the gate block | Ids must stay stable for the whole run; everything downstream cites them |
 | The freeze commit sha | `plan`, re-anchored by `pr` after a rebase | The tamper diff | A rebase rewrites it and a squash orphans it. A baseline absent from `origin` turns the tamper check into a self-report |
-| `<!-- agent-session:gate -->` | `pr` | `driver/gate.py`, and humans | The block is machine-readable, so a verdict written before it was derived is one an automated reader can act on. It opens as `pending` for exactly that reason |
-| `driver-parked` label | The driver | The driver's own selection | Selection reads the **label**, not the append-only park log — reading a history as current state was the original bug here |
+| `<!-- agent-session:gate -->` | `pr` | `src/agent_sessions/driver/gate.py`, and humans | The block is machine-readable, so a verdict written before it was derived is one an automated reader can act on. It opens as `pending` for exactly that reason |
+| `agent-session:needs-human` label | The driver | The driver's own selection | Selection reads the **label**, not the append-only park log — reading a history as current state was the original bug here |
 
-The label and the board fields are the *only* things the driver writes to a target repo. Issue
-bodies, comments, PR bodies, reviews and thread resolutions are out of bounds, and merging always
-is.
+Agent-requested writes pass through the closed kind allowlist in
+`src/agent_sessions/driver/writes.py`. It permits issue comments, bodies, and creation; label
+changes and creation; branch pushes; PR creation and edits; and project-item additions and edits.
+The manifest has no kind for merging a pull request. The coordinator also performs fixed
+operational writes outside that manifest: queue-control labels, board-status updates, distributed
+lock refs, and Lab Notebook reports. Those writes are coordinator-owned, not agent-requested.
 
 ### The cast of subagents — and what each is deliberately not told
 
@@ -277,18 +294,24 @@ is a mechanism, not an intention.
 Four steps, and two of them carry the interesting properties:
 
 1. **Select.** Open, carries the marker, its anchored `## Tier:` line says `auto-ok`, no open PR
-   references it, no `driver-parked` label. Every one of those is **read from GitHub**, so
-   selection consults no local state and answers the same way on any machine. A dry run prints one
-   line per *excluded* issue with its reason, because a queue read that yields nothing has to
-   distinguish "no work available" from "my query is broken."
+   references it, no `agent-session:needs-human` label. Every eligibility field in that list comes
+   from GitHub. A dry run prints one line per *excluded* issue with its reason, because a queue read
+   that yields nothing has to distinguish "no work available" from "my query is broken."
 2. **Invoke** `express` headlessly, writing `inflight.json` *before* the call so an interrupted run
    leaves evidence, and streaming the transcript to disk so `run_progress.py` can report on a live
    run from outside it.
 3. **Classify** by *reading* the gate block the run wrote, never by re-deriving the verdict. The
-   driver is a recorder here, not a second opinion — which is also why `gate.py` is treated as the
-   oracle and kept off-limits to unattended work.
+   driver is a recorder here, not a second opinion — which is also why
+   `src/agent_sessions/driver/gate.py` is treated as the oracle and kept off-limits to unattended
+   work.
 4. **Record**, and park anything that didn't reach a verdict by labelling the issue, so future
    selection skips it until a human or a later run clears it.
+
+GitHub holds the mutable queue state: issue and PR state, labels, comments, reviews, checks, and
+project fields. The driver also keeps operational artifacts outside that queue. Its state directory
+holds `runs.jsonl`, `inflight.json`, per-run transcripts and manifests, and workspaces for provenance
+and recovery; distributed issue locks use remote `refs/locks/issue-*`. Local history can explain a
+skip or recover a run, but it does not replace GitHub's current queue state.
 
 [usage.md](usage.md) has the full outcome table, the state directory layout, and the recovery
 paths for a run that died mid-flight.
@@ -339,13 +362,18 @@ itself.
 
 **The risk-gated path list is an allowlist, not a denylist.** A directory that nobody has
 classified is `needs-review` by default. This was decided after the partition went stale by
-omission twice in two days. Read the list in [../CLAUDE.md](../CLAUDE.md) before assuming
+omission twice in two days. Read the list in [../AGENTS.md](../AGENTS.md) before assuming
 anything is drivable.
 
-**Two paths are off-limits to unattended work for a structural reason, not a stylistic one.**
-`skills/**`, because there the implementer's work product *is* the instructions grading it. And
-`driver/gate.py`, because it's the code that classifies whether the run succeeded. Everything
-else in `driver/`, plus `docs/`, `scripts/` and the `Makefile`, is drivable.
+**The called-out boundaries are off-limits to unattended work for structural reasons, not stylistic
+ones.** `skills/**`, because there the implementer's work product *is* the instructions grading it;
+`src/agent_sessions/driver/gate.py`, because it classifies whether the run succeeded; and
+`src/agent_sessions/driver/agent_session_driver.py`, because it routes the result. The compatibility
+launcher also remains gated. Only the harness tests and compatibility assets under `driver/**`, plus
+`docs/`, root-level test and support assets under `scripts/**`, and the `Makefile`, are explicitly
+drivable. Shipping detectors under `src/agent_sessions/scripts/` remain default-gated, as does every
+other unlisted `src/**` path. Read the partition in [../AGENTS.md](../AGENTS.md) before assuming a
+path is drivable.
 
 **No document may state a fact a command can print.** Cite the command instead. If you must state
 a countable fact, date it, so it becomes history rather than an error. `make docs-check` enforces
@@ -377,7 +405,7 @@ Roughly in the order you'll want them:
 - [findings.md](findings.md) — the durable lessons: recurring defect classes, what was measured
   and what it showed, and a list of verified command-line gotchas. **Read the gotchas before
   writing any flag list or gate condition** — several are the opposite of what they look like.
-- [../CLAUDE.md](../CLAUDE.md) — conventions for working in this repo, and the risk-gated
+- [../AGENTS.md](../AGENTS.md) — conventions for working in this repo, and the risk-gated
   partition.
 - [prior-art.md](prior-art.md) — survey of related work, with each claim marked verified or not.
 - [archive/build-log.md](archive/build-log.md) — chronological account of the early work, closed.

@@ -1,5 +1,63 @@
 import re
 
+import pytest
+
+from agent_sessions.scripts import docs_check
+
+RISK_POLICY = """## Risk-gated paths (off-limits to unattended work)
+
+The default is `needs-review`.
+
+- **`src/agent_sessions/driver/agent_session_driver.py`** is gated.
+
+### Drivable (the allowlist)
+
+- **`docs/**`** is drivable.
+
+## Governing principle
+"""
+
+
+@pytest.fixture
+def policy_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(docs_check, "ROOT", tmp_path)
+    docs_check.failures.clear()
+    return tmp_path
+
+
+def write_policy_doc(root, name, prefix, policy=RISK_POLICY):
+    (root / name).write_text(f"{prefix}\n\n{policy}", encoding="utf-8")
+
+
+def test_risk_policy_parity_ignores_instruction_text_outside_policy(policy_root):
+    write_policy_doc(policy_root, "AGENTS.md", "Codex skills live in ~/.Codex/skills.")
+    write_policy_doc(policy_root, "CLAUDE.md", "Claude skills live in ~/.claude/skills.")
+
+    checker = getattr(docs_check, "check_risk_policy_parity", None)
+    assert checker is not None, "docs-check has no AGENTS.md/CLAUDE.md risk-policy parity guard"
+    checker()
+
+    assert docs_check.failures == []
+
+
+def test_risk_policy_parity_rejects_controlled_divergence(policy_root):
+    write_policy_doc(policy_root, "AGENTS.md", "Codex instructions")
+    write_policy_doc(
+        policy_root,
+        "CLAUDE.md",
+        "Claude instructions",
+        RISK_POLICY.replace("`docs/**`", "`documentation/**`"),
+    )
+
+    checker = getattr(docs_check, "check_risk_policy_parity", None)
+    assert checker is not None, "docs-check has no AGENTS.md/CLAUDE.md risk-policy parity guard"
+    checker()
+
+    assert docs_check.failures == [
+        "AGENTS.md and CLAUDE.md risk-path policies differ; keep the complete "
+        "'Risk-gated paths' sections aligned"
+    ]
+
 
 def check_line(line: str) -> list:
     failures = []
