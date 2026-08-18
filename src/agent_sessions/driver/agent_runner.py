@@ -3,7 +3,6 @@
 
 Provides unified execution, timeout management, output stream capture,
 and result/cost/session parsing for agent-session driver.
-Stdlib only, importable and testable with pytest.
 """
 
 from __future__ import annotations

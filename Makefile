@@ -47,7 +47,7 @@ typecheck:
 	@uv run mypy src
 
 board-audit:
-	@PYTHONPATH=src python3 -m agent_sessions.scripts.board_audit --owner lmorchard --project 9 --repo lmorchard/agent-sessions
+	@uv run python -m agent_sessions.scripts.board_audit --owner lmorchard --project 9 --repo lmorchard/agent-sessions
 
 # C1. Kept separate from driver-test so it can be cited as its own check.
 driver-check:
@@ -58,7 +58,7 @@ driver-check:
 	fi; \
 	echo "driver-check: no executable merge path in $(DRIVER)"
 
-# `uv` runs the tests; the driver itself calls plain `python3`, because gate.py is
+# `uv` runs the tests; the driver itself calls plain `uv run python`, because gate.py is
 # stdlib-only and must stay portable to a GHA runner.
 driver-test: gate-test
 
@@ -93,10 +93,10 @@ skill-readonly:
 # never a judgment. A CLAUDE.md rule saying "don't do that" would be an exhortation,
 # and this project is 3 for 3 on those measuring away. See scripts/docs_check.py.
 evidence:
-	@PYTHONPATH=src python3 -m agent_sessions.scripts.evidence
+	@uv run python -m agent_sessions.scripts.evidence
 
 docs-check:
-	@PYTHONPATH=src python3 -m agent_sessions.scripts.docs_check
+	@uv run python -m agent_sessions.scripts.docs_check
 
 # `grep -q 'x' "$(DRIVER)"` passes when x appears in a COMMENT -- findings.md calls
 # that "a spelling check, not a test", and the warning against it sat in a comment
@@ -108,7 +108,7 @@ docs-check:
 # so there presence is the property being tested, not a stand-in for behaviour.
 # See issue #28 and scripts/assertion_lint.py.
 assertion-lint:
-	@PYTHONPATH=src python3 -m agent_sessions.scripts.assertion_lint
+	@uv run python -m agent_sessions.scripts.assertion_lint
 
 # GitHub closes an issue on `Closes #N` in a commit message, and commit messages
 # are NOT rendered as markdown -- so backticks around one are literal characters,
@@ -121,14 +121,14 @@ assertion-lint:
 #
 # Scope is the commits this branch adds on top of origin/main. History is
 # immutable and already holds the one known instance, so re-reporting it forever
-# would train the operator to ignore the check -- `python3 scripts/commit_lint.py
+# would train the operator to ignore the check -- `uv run python scripts/commit_lint.py
 # --all` is how the regression guard gets run by hand. Same detector-not-
 # exhortation reasoning as docs-check and assertion-lint above. See issue #47.
 commit-lint:
-	@PYTHONPATH=src python3 -m agent_sessions.scripts.commit_lint
+	@uv run python -m agent_sessions.scripts.commit_lint
 
 guard-lint:
-	@gh issue list --json body | PYTHONPATH=src python3 -m agent_sessions.scripts.guard_lint
+	@gh issue list --json body | uv run python -m agent_sessions.scripts.guard_lint
 
 # Credential preflight. Not in `check`: it makes live GitHub calls and depends on
 # the operator's own tokens, so it is a thing you run when setting a machine up or
@@ -179,10 +179,10 @@ loop:
 # INTERVAL= picks how often to poll. Auto-detects the newest run across state dirs;
 # use watch-self or pass --repo <owner/name> to target a specific repository.
 watch:
-	@PYTHONPATH=src python3 -m agent_sessions.scripts.run_progress --watch --interval $(INTERVAL)
+	@uv run python -m agent_sessions.scripts.run_progress --watch --interval $(INTERVAL)
 
 watch-self:
-	@PYTHONPATH=src python3 -m agent_sessions.scripts.run_progress --repo lmorchard/agent-sessions --watch --interval $(INTERVAL)
+	@uv run python -m agent_sessions.scripts.run_progress --repo lmorchard/agent-sessions --watch --interval $(INTERVAL)
 
 # Drive THIS repo. Needs --allow-nested-skill-dir, because $(SKILL) lives inside
 # $(CURDIR) and #10's guard now refuses that configuration by default (exit 2).

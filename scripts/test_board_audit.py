@@ -580,7 +580,7 @@ def test_make_board_audit_binds_this_repository():
     )
 
     assert completed.stdout.split() == [
-        "PYTHONPATH=src", "python3", "-m", "agent_sessions.scripts.board_audit",
+        "uv", "run", "python", "-m", "agent_sessions.scripts.board_audit",
         "--owner", "lmorchard", "--project", "9",
         "--repo", "lmorchard/agent-sessions",
     ]

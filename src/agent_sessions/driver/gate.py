@@ -21,7 +21,6 @@ exercise the shipping code and the divergence becomes unrepresentable rather
 than merely discouraged. The behaviour below is a deliberate *faithful* port of
 the bash, quirks included -- the goal is one implementation, not a better one.
 
-Stdlib only, on purpose. The driver's header claims a GHA runner executes it
 unchanged; pytest is a dev dependency of the *tests*, never of this file.
 Verified by `python3 -I -S -c "import gate"`, which sees no site-packages.
 

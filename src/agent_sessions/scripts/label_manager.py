@@ -2,7 +2,6 @@
 """Workflow label manager for agent-sessions.
 
 Enforces state invariants and valid transitions on GitHub issue and PR labels.
-Zero external dependencies (stdlib only).
 """
 
 import argparse

@@ -306,7 +306,7 @@ def test_driver_tier_passed(tmp_path: Path, monkeypatch):
         return "123\thttps://github.com/owner/repo/pull/123"
 
     monkeypatch.setattr("agent_sessions.driver.gh_query.pr_for_issue", mock_pr_for_issue)
-    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.check_pr_unresolved_threads", lambda r, p: 0)
+    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.check_pr_unresolved_threads", lambda r, p, t: 0)
     monkeypatch.setattr("agent_sessions.driver.agent_session_driver.check_pr_ci_status", lambda r, p: (0, 0))
     monkeypatch.setattr("agent_sessions.driver.agent_session_driver.check_pr_reviews", lambda r, p: (1, 1, "APPROVED"))
 

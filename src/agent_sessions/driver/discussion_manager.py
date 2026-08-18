@@ -3,7 +3,6 @@
 
 Handles category creation, locating or creating daily discussion threads,
 and posting start-of-work / finish-run comments via GitHub CLI (`gh`).
-Stdlib only, importable and testable.
 """
 
 from __future__ import annotations

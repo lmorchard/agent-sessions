@@ -19,6 +19,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+import requests
+
 sys.path.insert(0, str(Path(__file__).parent))
 from agent_sessions.driver import (
     agent_runner,
@@ -841,7 +843,7 @@ def mark_board_in_progress(board: str, item_id: str, retries: int = 3) -> bool:
 
 
 
-def get_pr_unresolved_threads_text(repo: str, pr_num: str | int) -> str:
+def get_pr_unresolved_threads_text(repo: str, pr_num: str | int, token: str) -> str:
     parts = repo.split("/")
     if len(parts) != 2:
         return ""
@@ -866,21 +868,24 @@ def get_pr_unresolved_threads_text(repo: str, pr_num: str | int) -> str:
       }
     }"""
     try:
-        cmd = [
-            "gh",
-            "api",
-            "graphql",
-            "-f",
-            f"query={query}",
-            "-F",
-            f"owner={owner}",
-            "-F",
-            f"repo={repo_name}",
-            "-F",
-            f"pr={pr_num}",
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        data = json.loads(res.stdout)
+        res = requests.post(
+            "https://api.github.com/graphql",
+            json={
+                "query": query,
+                "variables": {
+                    "owner": owner,
+                    "repo": repo_name,
+                    "pr": int(pr_num) if str(pr_num).isdigit() else pr_num
+                }
+            },
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            timeout=10,
+        )
+        res.raise_for_status()
+        data = res.json()
         nodes = (
             data.get("data", {})
             .get("repository", {})
@@ -907,7 +912,7 @@ def get_pr_unresolved_threads_text(repo: str, pr_num: str | int) -> str:
     except Exception:
         return ""
 
-def check_pr_unresolved_threads(repo: str, pr_num: str | int) -> int:
+def check_pr_unresolved_threads(repo: str, pr_num: str | int, token: str) -> int:
     parts = repo.split("/")
     if len(parts) != 2:
         return 0
@@ -922,21 +927,24 @@ def check_pr_unresolved_threads(repo: str, pr_num: str | int) -> int:
       }
     }"""
     try:
-        cmd = [
-            "gh",
-            "api",
-            "graphql",
-            "-f",
-            f"query={query}",
-            "-F",
-            f"owner={owner}",
-            "-F",
-            f"repo={repo_name}",
-            "-F",
-            f"pr={pr_num}",
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        data = json.loads(res.stdout)
+        res = requests.post(
+            "https://api.github.com/graphql",
+            json={
+                "query": query,
+                "variables": {
+                    "owner": owner,
+                    "repo": repo_name,
+                    "pr": int(pr_num) if str(pr_num).isdigit() else pr_num
+                }
+            },
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            timeout=10,
+        )
+        res.raise_for_status()
+        data = res.json()
         nodes = (
             data.get("data", {})
             .get("repository", {})
@@ -1396,7 +1404,7 @@ def main(argv: list[str] | None = None) -> int:
         prnum = str(pr.get("number"))
         unresolved = unresolved_map.get(prnum)
         if unresolved is None:
-            unresolved = check_pr_unresolved_threads(repo, prnum)
+            unresolved = check_pr_unresolved_threads(repo, prnum, creds.read_token)
 
         if "statusCheckRollup" in pr:
             failed_ci, pending_ci = gh_query.parse_pr_ci_status(pr)
@@ -1525,7 +1533,7 @@ def main(argv: list[str] | None = None) -> int:
                         for c in pr_comments[-3:]:  # last 3 comments
                             extra_context += f"- {c.get('author', {}).get('login', 'unknown')}: {c.get('body', '')}\n"
 
-                    unresolved_text = get_pr_unresolved_threads_text(repo, prnum)
+                    unresolved_text = get_pr_unresolved_threads_text(repo, prnum, creds.read_token)
                     if unresolved_text:
                         extra_context += "Unresolved Review Threads:\n"
                         extra_context += unresolved_text

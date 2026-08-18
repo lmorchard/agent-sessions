@@ -215,7 +215,21 @@ class _Result:
         self.stderr = stderr
 
 
+
+class FakeResponse:
+    def __init__(self, status_code, json_data):
+        self.status_code = status_code
+        self._json_data = json_data
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise Exception(f"HTTP Error: {self.status_code}")
+
+    def json(self):
+        return self._json_data
+
 class FakeGitHub:
+
     """Fixture GitHub, plus a local git remote, behind one `subprocess.run`.
 
     Reads are served from the fixture records; writes mutate them, so a second pass
@@ -311,6 +325,17 @@ class FakeGitHub:
         return ops
 
     # -- the subprocess.run replacement -----------------------------------
+
+
+    def requests_post(self, url, **kwargs):
+        if url == "https://api.github.com/graphql":
+            json_payload = kwargs.get("json", {})
+            variables = json_payload.get("variables", {})
+            pr_number = variables.get("pr")
+            pull = self.pr_by_number(pr_number)
+            nodes = [{"isResolved": t["isResolved"]} for t in (pull["reviewThreads"] if pull else [])]
+            return FakeResponse(200, {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": nodes}}}}})
+        raise NotImplementedError(f"Mock for {url} not implemented")
 
     def run(self, cmd, **kwargs):
         argv = [str(c) for c in cmd]
@@ -716,6 +741,8 @@ class LoopHarness:
         agent = StubAgent() if agent is None else agent
         self.agent = agent
         self.monkeypatch.setattr(subprocess, "run", gh.run)
+        import requests
+        self.monkeypatch.setattr(requests, "post", gh.requests_post)
         self.monkeypatch.setattr(agent_runner, "run_agent", agent)
 
         full_argv = [
