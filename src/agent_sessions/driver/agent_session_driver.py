@@ -840,6 +840,73 @@ def mark_board_in_progress(board: str, item_id: str, retries: int = 3) -> bool:
     return False
 
 
+
+def get_pr_unresolved_threads_text(repo: str, pr_num: str | int) -> str:
+    parts = repo.split("/")
+    if len(parts) != 2:
+        return ""
+    owner, repo_name = parts
+    query = """query($owner:String!,$repo:String!,$pr:Int!){
+      repository(owner:$owner,name:$repo){
+        pullRequest(number:$pr){
+          reviewThreads(first:100){
+            nodes{
+              isResolved
+              comments(first: 50){
+                nodes{
+                  author { login }
+                  body
+                  path
+                  line
+                }
+              }
+            }
+          }
+        }
+      }
+    }"""
+    try:
+        cmd = [
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            f"query={query}",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"repo={repo_name}",
+            "-F",
+            f"pr={pr_num}",
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        data = json.loads(res.stdout)
+        nodes = (
+            data.get("data", {})
+            .get("repository", {})
+            .get("pullRequest", {})
+            .get("reviewThreads", {})
+            .get("nodes", [])
+        )
+
+        text = ""
+        for i, thread in enumerate(nodes):
+            if isinstance(thread, dict) and not thread.get("isResolved"):
+                comments = thread.get("comments", {}).get("nodes", [])
+                if comments:
+                    first_c = comments[0]
+                    path = first_c.get("path", "unknown")
+                    line = first_c.get("line", "unknown")
+                    text += f"Unresolved Review Thread #{i+1} on {path} line {line}:\n"
+                    for c in comments:
+                        author = c.get("author", {}).get("login", "unknown") if c.get("author") else "unknown"
+                        body = c.get("body", "")
+                        text += f"  - {author}: {body}\n"
+                    text += "\n"
+        return text
+    except Exception:
+        return ""
+
 def check_pr_unresolved_threads(repo: str, pr_num: str | int) -> int:
     parts = repo.split("/")
     if len(parts) != 2:
@@ -1457,6 +1524,12 @@ def main(argv: list[str] | None = None) -> int:
                         extra_context += "Recent PR Comments:\n"
                         for c in pr_comments[-3:]:  # last 3 comments
                             extra_context += f"- {c.get('author', {}).get('login', 'unknown')}: {c.get('body', '')}\n"
+
+                    unresolved_text = get_pr_unresolved_threads_text(repo, prnum)
+                    if unresolved_text:
+                        extra_context += "Unresolved Review Threads:\n"
+                        extra_context += unresolved_text
+
             except Exception:
                 pass
 

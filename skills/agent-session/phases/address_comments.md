@@ -16,7 +16,7 @@ This phase is triggered by the orchestrator when a PR has open review comments.
 ## Process
 
 1. **Assess each unresolved comment:**
-   Fetch open comments using `gh pr view <n> --comments`.
+   The unresolved review threads have been provided in your context.
    - **Fix:** real bugs, valid edge cases, missing error handling, doc/code mismatches, test gaps
    - **Skip:** over-engineering, theoretical concerns without real risk, style nitpicks
    - **Defer:** real correctness issues that are pre-existing and outside this spec's scope.
