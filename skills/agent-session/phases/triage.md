@@ -64,7 +64,7 @@ criteria), and you do the part that does (ratify). See
 
    - In your comment, explicitly ask the human to react with 👍 or reply with 'Approved' if this spec looks good, or to provide any corrections.
 
-4. **Follow-up pass (Reading human replies & reactions).** The human has left feedback, approved the proposal in the issue comments, or added a 👍 (THUMBS_UP / +1) reaction to the proposal comment. **Explicitly fetch and read the comments and reactions** using `gh issue view <n> --json comments` or `gh api graphql`.
+4. **Follow-up pass (Reading human replies & reactions).** The human has left feedback, approved the proposal in the issue comments, or added a 👍 (THUMBS_UP / +1) reaction to the proposal comment. This information has been pre-fetched and provided in your context.
    - If they explicitly approved the spec, reacted with 👍 to the proposal comment, or ratified the risk-gated decisions (e.g., 👍 reaction, "Approved", "Looks good", "Dependencies are fine"), synthesize their approval into the spec and upgrade the tier label to `agent-session:auto-ok`. Proceed to Step 5.
    - If they provided corrections, synthesize them into an updated spec. If the spec is now complete and all risk-gated items are approved, set the tier to `agent-session:auto-ok` and proceed to Step 5.
    - If the spec STILL needs human input after synthesizing their corrections, record a new top-level `issue_comment` asking for further clarification (never edit past comments in place), RE-APPLY the `agent-session:needs-human` label with a `label` entry, and stop.
