@@ -238,10 +238,10 @@ Worth stating plainly, because the docs have historically drifted toward describ
 holds **a harness with a skill component inside it**, each with different responsibilities and correctness regimes. Conflating
 them is what makes "is this a skill-authoring project?" feel like a confusing question:
 
-|  | `skills/agent-session/` | `driver/` + `Makefile` |
+|  | `skills/agent-session/` | `src/agent_sessions/driver/` + compatibility and test assets |
 |---|---|---|
-| What it is | the skill component — a set of phase instructions, `dev-session` lineage | the harness — phase state machine, priority ladder, outcome classification, merge-gate oracle (`gate.py`), park state, distributed mutex, budget accounting, pluggable backends, run provenance |
-| Made of | markdown | bash, plus a Python parser (`driver/gate.py`) |
+| What it is | the skill component — a set of phase instructions, `dev-session` lineage | the harness — phase state machine, priority ladder, outcome classification, merge-gate oracle (`src/agent_sessions/driver/gate.py`), park state, distributed mutex, budget accounting, pluggable backends, run provenance |
+| Made of | markdown | Python, with a thin Bash compatibility launcher |
 | Its oracle | cheap classifier evals, micro-tests, and dogfooding | fixture tests and mutation testing |
 | Who reads it | this system's harness | target repositories and CI environments |
 
@@ -262,8 +262,15 @@ adding modes doesn't confound the LLM mid-phase — the only confounding risk is
 boundary, mitigated by explicit mode arguments + an ask-don't-guess dispatcher. Heavy modes
 fan out to subagents; the board-driver stays *above* the skill as orchestration.
 
-Built (orchestration), in `driver/`:
-- `agent-session-driver.sh` — The **Wiggum Architecture reconciliation loop**. A stateless state machine that evaluates GitHub repository state (issues, PRs, review comments, CI status) and dispatches tightly-scoped, short-lived LLM agents. Uses GitHub labels (`agent-session:attempt-1..3`) and comments for zero-local-state queue control and async human-in-the-loop ratification.
+Built (orchestration), primarily in `src/agent_sessions/driver/`:
+
+- `agent_session_driver.py` — the coordinator: configuration, credentials, GitHub reads,
+  workspaces, agent invocation, outcome routing, persistence, and reporting.
+- `router.py` — pure selection and phase routing over already-fetched GitHub state.
+- `gate.py` — merge-gate parsing and outcome classification.
+- `writes.py` — the validated manifest allowlist and the write-command executor.
+- `driver/agent-session-driver.sh` — a thin Bash compatibility launcher for the packaged
+  coordinator.
 
 Built (front-of-funnel), in `skills/agent-session/`:
 - `SKILL.md` — dispatcher, context-management notes, conventions.
@@ -306,7 +313,12 @@ Built (back half, move 1), in `skills/agent-session/`:
 
 ## Asynchronous GitHub-Native Interaction Model
 
-The driver and skills operate as a stateless reconciliation loop over native GitHub primitives (labels, comments, PRs). Zero control state is stored in local runner files; all execution history and queue routing derive from live GitHub issue metadata.
+The driver and skills reconcile queue state through native GitHub primitives: issues, labels,
+comments, PRs, reviews, checks, and project fields determine which work is eligible and which phase
+runs next. Operational records live elsewhere. The state directory holds local run provenance and
+recovery artifacts such as `runs.jsonl`, `inflight.json`, transcripts, manifests, and workspaces;
+distributed issue locks live under remote `refs/locks/issue-*`. These artifacts support history,
+recovery, and mutual exclusion rather than replacing GitHub as the queue.
 
 ### Label Vocabulary & Queue Control
 
@@ -318,7 +330,8 @@ The driver and skills operate as a stateless reconciliation loop over native Git
 
 ### Current-State Control Loop
 
-The driver evaluates live GitHub state on every pass without historical diffing or local state files:
+The driver bases candidate selection on live GitHub queue state. Append-only local history supplies
+provenance and recovery context; it is not the authoritative park bit:
 
 1. **Selection & Priority Ladder**:
    - **P1: Unblock**: Issues referencing open PRs needing comment resolution, CI fixes, or gate grading.
@@ -541,10 +554,12 @@ Closed, but the *reasoning* is still load-bearing.
   account.** A tool allowlist cannot
   contain an agent that has a shell, and a compliant agent is indistinguishable from a contained
   one — but a read-scoped token is refused by the API whatever the agent runs and however
-  cooperative it is being. `driver/credentials.py` builds the agent's child environment with the
-  read token and strips every write-capable one; `driver/writes.py` performs the run's comments,
-  labels, branch push and PR from a schema-validated manifest, under the driver's write token.
-  There is no manifest kind that merges.
+  cooperative it is being. `src/agent_sessions/driver/credentials.py` builds the agent's child
+  environment with the read token and strips every write-capable one;
+  `src/agent_sessions/driver/writes.py` validates and performs the manifest under the driver's write
+  token. Its registered kinds cover issue comments, bodies, and creation; label changes and
+  creation; branch pushes; PR creation and edits; and project-item additions and edits. There is no
+  manifest kind that merges.
 
   **And there is no degraded mode.** An earlier revision of this change let the driver fall back to
   the host `gh` keyring, with a loud warning. That was wrong for the reason the whole allowlist
@@ -608,18 +623,24 @@ Closed, but the *reasoning* is still load-bearing.
   supplies the skip reason, which is the half of D1 that was right.
 
   Cost, paid knowingly: the write side came back (there is an un-park action again), and the driver
-  became a GitHub **writer** for the first time. `CLAUDE.md` bounds that — issue metadata, never
-  issue or PR content.
+  became a GitHub **writer** for the first time. At that 2026-07-29 decision, `CLAUDE.md` bounded the
+  writer to issue metadata. The 2026-08-10 credential-containment decision above superseded that
+  narrower boundary with the validated manifest allowlist.
 - **The amendment trigger's tree** → both trees; see the entry above.
-- **Language split in `driver/`** → **bash for orchestration, Python for parsing and
-  classification.** Orchestration means flags, process control, and invoking `gh`/`git`/`claude`;
-  parsing and classification live in `driver/gate.py`. Decided in move 7 and it explicitly argues
-  *against* rewriting the driver in Python: the defects it hit — `Edit(` matching inside
+- **Language split in `driver/` — superseded 2026-08-09.** Move 7 decided on **Bash for
+  orchestration, Python for parsing and classification**. At that time, orchestration meant flags,
+  process control, and invoking `gh`/`git`/`claude`; parsing and classification lived in the
+  then-current `driver/gate.py`. That decision explicitly argued *against* rewriting the driver in
+  Python: the defects it hit — `Edit(` matching inside
   `NotebookEdit(`, an `@`-anchored sha regex, `head -1` on a leading blank line — were
   **under-specified pattern matching, which recurs in any language.** The measured reason to act was
-  different: `test-driver.sh` hand-copied the classifier and had already diverged, so the suite
-  graded a replica. **`gate.py` must stay stdlib-only** so the driver remains portable to a runner
-  that has no `uv`; pytest is a dev dependency of its *tests* only.
+  different: the Bash suite hand-copied the classifier and had already diverged, so the suite graded
+  a replica.
+
+  The 2026-08-09 conversion superseded the language boundary, not that reasoning. The shipping
+  harness is now Python: `src/agent_sessions/driver/agent_session_driver.py` coordinates the run,
+  `router.py` selects and routes phases, `gate.py` parses and classifies, and `writes.py` validates
+  requested writes. `driver/agent-session-driver.sh` remains only as a compatibility launcher.
 - **Board column vocabulary** → **read `gh project field-list`, never the doc.** The three actively
   managed boards use `Backlog / Ready / In progress / In review / Done`, which is what the skill
   transitions through; `gh project create` applies no template and yields a bare
