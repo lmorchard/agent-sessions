@@ -3,7 +3,6 @@
 
 Stateless state machine that evaluates GitHub repository state (issues, PRs,
 review comments, CI status) and dispatches tightly-scoped, short-lived LLM agents.
-Stdlib only, importable and testable with pytest.
 """
 
 from __future__ import annotations
@@ -895,19 +894,23 @@ def get_pr_unresolved_threads_text(repo: str, pr_num: str | int, token: str) -> 
         )
 
         text = ""
-        for i, thread in enumerate(nodes):
-            if isinstance(thread, dict) and not thread.get("isResolved"):
-                comments = thread.get("comments", {}).get("nodes", [])
-                if comments:
-                    first_c = comments[0]
-                    path = first_c.get("path", "unknown")
-                    line = first_c.get("line", "unknown")
-                    text += f"Unresolved Review Thread #{i+1} on {path} line {line}:\n"
-                    for c in comments:
-                        author = c.get("author", {}).get("login", "unknown") if c.get("author") else "unknown"
-                        body = c.get("body", "")
-                        text += f"  - {author}: {body}\n"
-                    text += "\n"
+        # Cap to latest 10 threads
+        unresolved_threads = [t for t in nodes if isinstance(t, dict) and not t.get("isResolved")]
+        for i, thread in enumerate(unresolved_threads[-10:]):
+            comments = thread.get("comments", {}).get("nodes", [])
+            if comments:
+                first_c = comments[0]
+                path = first_c.get("path", "unknown")
+                line = first_c.get("line", "unknown")
+                text += f"Unresolved Review Thread #{i+1} on {path} line {line}:\n"
+                # Cap to latest 5 comments per thread
+                for c in comments[-5:]:
+                    author = c.get("author", {}).get("login", "unknown") if c.get("author") else "unknown"
+                    body = c.get("body", "")
+                    if len(body) > 500:
+                        body = body[:500] + "... [truncated]"
+                    text += f"  - {author}: {body}\n"
+                text += "\n"
         return text
     except Exception:
         return ""

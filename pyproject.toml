@@ -9,8 +9,6 @@ description = "Autonomous agent session board driver and reconciliation loop"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "httpx>=0.28.1",
-    "pygithub>=2.9.1",
     "requests>=2.34.2",
 ]
 
