@@ -16,9 +16,12 @@ Stdlib only, importable and testable with pytest.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
+
+from agent_sessions.driver import credentials
 
 DEFAULT_BASE = "main"
 
@@ -384,8 +387,12 @@ def execute(
         if stopped:
             continue
         record: dict = {"kind": entry["kind"], "status": "ok", "returncode": 0, "stdout": "", "stderr": ""}
+        cmd_env = env
+        if entry.get("kind") in BOARD_KINDS:
+            creds = credentials.resolve(env)
+            cmd_env = credentials.board_env(env or dict(os.environ), creds)
         for argv in commands(entry, repo=repo, repo_path=repo_path, scratch=Path(scratch), index=i, board=board):
-            res = runner(argv, capture_output=True, text=True, env=env)
+            res = runner(argv, capture_output=True, text=True, env=cmd_env)
             record["returncode"] = res.returncode
             record["stdout"] = getattr(res, "stdout", "") or ""
             record["stderr"] = getattr(res, "stderr", "") or ""

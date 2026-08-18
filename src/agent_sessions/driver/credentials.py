@@ -12,10 +12,14 @@ Stdlib only, importable and testable with pytest.
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import shlex
 import stat
 import subprocess
+import time
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,10 +30,18 @@ READ_TOKEN_VAR = "AGENT_GH_READ_TOKEN"
 #: file inside the agent's repo path -- see `exposure_error`.
 WRITE_TOKEN_VAR = "DRIVER_GH_WRITE_TOKEN"
 
+#: Optional board credential for GitHub Projects V2 mutations (e.g. user-owned projects).
+BOARD_TOKEN_VAR = "DRIVER_GH_BOARD_TOKEN"
+
 #: The GitHub login both tokens must resolve to. Required, and checked against a live
 #: `gh api user`: without it the driver can only assume whose account it is spending,
 #: and "assumed" is exactly what this module exists to stop.
 LOGIN_VAR = "DRIVER_GH_LOGIN"
+
+#: GitHub App configuration variables.
+APP_ID_VAR = "DRIVER_GH_APP_ID"
+APP_INSTALLATION_ID_VAR = "DRIVER_GH_APP_INSTALLATION_ID"
+APP_PRIVATE_KEY_FILE_VAR = "DRIVER_GH_APP_PRIVATE_KEY_FILE"
 
 #: Suffix for supplying a token by command rather than by value. `<VAR>_CMD` is run
 #: and its stdout used, so the secret can live in a keychain while only the command
@@ -78,6 +90,7 @@ AGENT_TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN")
 class Credentials:
     read_token: str = ""
     write_token: str = ""
+    board_token: str = ""
     login: str = ""
     extra_bot_logins: tuple[str, ...] = ()
     git_author_name: str = ""
@@ -115,7 +128,62 @@ def _from_command(spec: str, runner) -> tuple[str, str]:
     return token, ""
 
 
-def resolve(env: dict[str, str] | None = None, runner=None) -> Credentials:
+def generate_app_jwt(
+    app_id: str,
+    key_path: str | Path,
+    now: int | None = None,
+    runner=None,
+) -> str:
+    """Generate a signed RS256 JWT for GitHub App authentication using openssl."""
+    if runner is None:
+        runner = subprocess.run
+    if now is None:
+        now = int(time.time())
+
+    header = {"alg": "RS256", "typ": "JWT"}
+    payload = {"iat": now - 60, "exp": now + 600, "iss": str(app_id)}
+
+    def _b64url(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
+
+    h_b64 = _b64url(json.dumps(header).encode("utf-8"))
+    p_b64 = _b64url(json.dumps(payload).encode("utf-8"))
+    signing_input = f"{h_b64}.{p_b64}".encode("utf-8")
+
+    cmd = ["openssl", "dgst", "-sha256", "-sign", str(key_path)]
+    res = runner(cmd, input=signing_input, capture_output=True, check=True)
+    sig_b64 = _b64url(res.stdout)
+    return f"{h_b64}.{p_b64}.{sig_b64}"
+
+
+def fetch_app_installation_token(
+    jwt_token: str,
+    installation_id: str,
+    permissions: dict[str, str] | None = None,
+    http_post=None,
+) -> str:
+    """Exchange a GitHub App JWT for a scoped Installation Access Token."""
+    if http_post is not None:
+        return str(http_post(installation_id, jwt_token, permissions))
+
+    url = f"https://api.github.com/app/installations/{installation_id}/access_tokens"
+    payload = {}
+    if permissions:
+        payload["permissions"] = permissions
+    data_bytes = json.dumps(payload).encode("utf-8")
+
+    headers = {
+        "Authorization": f"Bearer {jwt_token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "agent-session-driver",
+    }
+    req = urllib.request.Request(url, data=data_bytes, headers=headers, method="POST")
+    with urllib.request.urlopen(req) as resp:
+        res_data = json.loads(resp.read().decode("utf-8"))
+        return str(res_data.get("token", ""))
+
+
+def resolve(env: dict[str, str] | None = None, runner=None, http_post=None) -> Credentials:
     src = os.environ if env is None else env
     if runner is None:
         runner = subprocess.run
@@ -137,6 +205,44 @@ def resolve(env: dict[str, str] | None = None, runner=None) -> Credentials:
         tokens[var] = token
         if error:
             errors.append(f"{var}{CMD_SUFFIX}: {error}")
+
+    app_id = (src.get(APP_ID_VAR) or src.get("GH_APP_ID") or "").strip()
+    app_inst_id = (
+        src.get(APP_INSTALLATION_ID_VAR) or src.get("GH_APP_INSTALLATION_ID") or ""
+    ).strip()
+    app_key_file = (
+        src.get(APP_PRIVATE_KEY_FILE_VAR) or src.get("GH_APP_PRIVATE_KEY_FILE") or ""
+    ).strip()
+
+    if app_id and app_inst_id and app_key_file and (not tokens.get(READ_TOKEN_VAR) or not tokens.get(WRITE_TOKEN_VAR)):
+        try:
+            jwt_token = generate_app_jwt(app_id, app_key_file, runner=runner)
+            if not tokens.get(READ_TOKEN_VAR):
+                tokens[READ_TOKEN_VAR] = fetch_app_installation_token(
+                    jwt_token,
+                    app_inst_id,
+                    permissions={"contents": "read", "issues": "read", "pull_requests": "read", "discussions": "read"},
+                    http_post=http_post,
+                )
+            if not tokens.get(WRITE_TOKEN_VAR):
+                tokens[WRITE_TOKEN_VAR] = fetch_app_installation_token(
+                    jwt_token,
+                    app_inst_id,
+                    permissions={"contents": "write", "issues": "write", "pull_requests": "write", "discussions": "write"},
+                    http_post=http_post,
+                )
+        except Exception as e:
+            errors.append(f"GitHub App token resolution failed: {e}")
+
+    board_token = (src.get(BOARD_TOKEN_VAR) or "").strip()
+    if not board_token:
+        spec = (src.get(BOARD_TOKEN_VAR + CMD_SUFFIX) or "").strip()
+        if spec:
+            board_token, error = _from_command(spec, runner)
+            if error:
+                errors.append(f"{BOARD_TOKEN_VAR}{CMD_SUFFIX}: {error}")
+    if not board_token:
+        board_token = tokens.get(WRITE_TOKEN_VAR, "")
 
     login = (src.get(LOGIN_VAR) or "").strip()
 
@@ -168,6 +274,7 @@ def resolve(env: dict[str, str] | None = None, runner=None) -> Credentials:
     return Credentials(
         read_token=tokens[READ_TOKEN_VAR],
         write_token=tokens[WRITE_TOKEN_VAR],
+        board_token=board_token,
         login=login,
         extra_bot_logins=tuple(p for p in extras if p),
         git_author_name=git_author_name,
@@ -253,6 +360,16 @@ def driver_env(env: dict[str, str], creds: Credentials) -> dict[str, str]:
     return parent
 
 
+def board_env(base_env: dict[str, str], creds: Credentials) -> dict[str, str]:
+    """Environment for executing gh project board operations."""
+    env = dict(base_env)
+    token = creds.board_token or creds.write_token
+    if token:
+        env["GH_TOKEN"] = token
+        env["GITHUB_TOKEN"] = token
+    return env
+
+
 def apply_driver_env(creds: Credentials, env: dict[str, str] | None = None) -> None:
     """Install the write credential into this process, so every `gh` and `git`
     subprocess the driver spawns inherits it. The agent's child is built by
@@ -310,14 +427,14 @@ def identity_error(creds: Credentials, read_login: str, write_login: str) -> str
     An empty one means the lookup failed, which is refused rather than assumed: an
     unverifiable identity is the thing this check exists to rule out.
     """
-    expected = creds.login.strip().lower()
+    expected = creds.login.strip().lower().removesuffix("[bot]")
     problems = []
     for name, var, actual in (
         ("read", READ_TOKEN_VAR, read_login),
         ("write", WRITE_TOKEN_VAR, write_login),
     ):
-        resolved = (actual or "").strip().lower()
-        if not resolved:
+        resolved = (actual or "").strip().lower().removesuffix("[bot]")
+        if not (actual or "").strip():
             problems.append(f"could not resolve the account behind {var}")
         elif resolved != expected:
             problems.append(f"{var} belongs to {actual.strip()!r}, not {creds.login!r}")

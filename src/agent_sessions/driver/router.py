@@ -174,13 +174,11 @@ def select(
                 messages.append(f"  parked -- excluded from future selection unless --retry {n}")
                 messages.append(f"  SKIP    #{n}  {reason}")
             else:
-                if is_parked and phase == "grade_gate":
+                if is_parked:
                     messages.append(f"  SKIP    #{n}  parked: {parked_r} (waiting for human review/changes, not re-grading)")
                 else:
                     p1_unblock.append((n, phase))
                     messages.append(f"  ELIGIBLE #{n}  tier: auto-ok (Priority 1: Unblock - {phase})")
-                    if is_parked:
-                        messages.append(f"  NOTE    #{n}  Bypassing park state (parked: {parked_r}) to perform Unblock phase: {phase}")
         else:
             if is_parked:
                 messages.append(f"  SKIP    #{n}  parked: {parked_r}")

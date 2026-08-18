@@ -32,6 +32,26 @@ def test_fetch_open_prs_failure(monkeypatch):
     with pytest.raises(RuntimeError, match="gh command failed: Some error"):
         gh_query.fetch_open_prs("stub/repo")
 
+
+def test_fetch_prs_node_limit_retry(monkeypatch):
+    calls = []
+
+    def mock_run(cmd, *args, **kwargs):
+        calls.append(cmd)
+        if "--limit" in cmd and cmd[cmd.index("--limit") + 1] == "30":
+            raise subprocess.CalledProcessError(1, cmd="gh", stderr="requests up to 525,100 possible nodes which exceeds the maximum limit of 500,000")
+        class MockResult:
+            stdout = '[{"number": 12, "title": "stub"}]'
+        return MockResult()
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+    prs = gh_query.fetch_prs("stub/repo")
+    assert len(prs) == 1
+    assert prs[0]["number"] == 12
+    assert len(calls) == 2
+    assert calls[0][calls[0].index("--limit") + 1] == "30"
+    assert calls[1][calls[1].index("--limit") + 1] == "15"
+
 def test_pr_blocking_issue():
     prs = [
         {"number": 42, "url": "https://url/42", "closingIssuesReferences": [{"number": 7}]},

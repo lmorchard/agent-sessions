@@ -51,6 +51,44 @@ def test_a_read_token_with_no_write_token_is_not_split():
     assert creds.split is False
 
 
+def test_generate_app_jwt():
+    def mock_runner(cmd, input=None, capture_output=True, check=True):
+        class Res:
+            stdout = b"signed_signature_bytes"
+        return Res()
+
+    jwt = credentials.generate_app_jwt("12345", "/path/to/key.pem", now=1700000000, runner=mock_runner)
+    assert jwt.startswith("eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCJ9.")
+    assert len(jwt.split(".")) == 3
+
+
+def test_resolve_github_app_tokens(tmp_path):
+    key_file = tmp_path / "key.pem"
+    key_file.write_text("fake-key-content")
+
+    def mock_runner(cmd, input=None, capture_output=True, check=True):
+        class Res:
+            stdout = b"signature"
+        return Res()
+
+    def mock_http_post(inst_id, jwt, permissions):
+        mode = "read" if permissions.get("contents") == "read" else "write"
+        return f"ghs_app_token_{mode}"
+
+    env = {
+        credentials.APP_ID_VAR: "123456",
+        credentials.APP_INSTALLATION_ID_VAR: "789012",
+        credentials.APP_PRIVATE_KEY_FILE_VAR: str(key_file),
+        credentials.LOGIN_VAR: "agent-bot",
+        credentials.BOARD_TOKEN_VAR: "ghp_board_token_123",
+    }
+    creds = credentials.resolve(env, runner=mock_runner, http_post=mock_http_post)
+    assert creds.read_token == "ghs_app_token_read"
+    assert creds.write_token == "ghs_app_token_write"
+    assert creds.board_token == "ghp_board_token_123"
+    assert creds.split is True
+
+
 # -- the agent's environment ------------------------------------------------
 
 

@@ -640,6 +640,22 @@ def is_git_ignored(path: Path | str, repo_path: Path | str) -> bool:
 
 def whoami(env: dict[str, str]) -> str:
     """The GitHub login a token authenticates as, or "" if it cannot be resolved."""
+    token = env.get("GH_TOKEN") or env.get("GITHUB_TOKEN") or ""
+    if token.startswith("ghs_"):
+        try:
+            res = subprocess.run(
+                ["gh", "api", "graphql", "-f", "query={ viewer { login } }", "--jq", ".data.viewer.login"],
+                capture_output=True,
+                text=True,
+                check=True,
+                env=env,
+            )
+            out = res.stdout.strip()
+            if out and not out.startswith("{") and not out.startswith("["):
+                return out
+        except Exception:
+            pass
+
     try:
         res = subprocess.run(
             ["gh", "api", "user", "--jq", ".login"],
@@ -648,9 +664,12 @@ def whoami(env: dict[str, str]) -> str:
             check=True,
             env=env,
         )
-        return res.stdout.strip()
+        out = res.stdout.strip()
+        if out and not out.startswith("{") and not out.startswith("["):
+            return out
     except Exception:
-        return ""
+        pass
+    return ""
 
 
 def perform_writes(writes_file: Path, repo: str, repo_path: Path, rundir: Path, board: str = "") -> dict:
@@ -725,7 +744,8 @@ def fetch_board_json(board: str) -> list[dict]:
     if not board or "/" not in board:
         return []
     try:
-        res = subprocess.run(board_command(board), capture_output=True, text=True, check=True)
+        env = credentials.board_env(dict(os.environ), credentials.resolve())
+        res = subprocess.run(board_command(board), capture_output=True, text=True, check=True, env=env)
         data = json.loads(res.stdout)
         items = data.get("items", [])
         say(f"board {board}: read {len(items)} items (advisory only; does not gate)")
@@ -757,12 +777,13 @@ def get_board_metadata(board: str, retries: int = 3) -> dict | None:
 
     owner, number = board.split("/", 1)
     last_err = ""
+    env = credentials.board_env(dict(os.environ), credentials.resolve())
     for attempt in range(retries):
         try:
-            res = subprocess.run(["gh", "project", "view", number, "--owner", owner, "--format", "json"], capture_output=True, text=True, check=True)
+            res = subprocess.run(["gh", "project", "view", number, "--owner", owner, "--format", "json"], capture_output=True, text=True, check=True, env=env)
             project_id = json.loads(res.stdout)["id"]
 
-            res = subprocess.run(["gh", "project", "field-list", number, "--owner", owner, "--format", "json"], capture_output=True, text=True, check=True)
+            res = subprocess.run(["gh", "project", "field-list", number, "--owner", owner, "--format", "json"], capture_output=True, text=True, check=True, env=env)
             fields = json.loads(res.stdout).get("fields", [])
             status_field = next((f for f in fields if f.get("name") == "Status"), None)
             if not status_field:
@@ -798,6 +819,7 @@ def mark_board_in_progress(board: str, item_id: str, retries: int = 3) -> bool:
         return False
 
     last_err = ""
+    env = credentials.board_env(dict(os.environ), credentials.resolve())
     for attempt in range(retries):
         try:
             subprocess.run([
@@ -806,7 +828,7 @@ def mark_board_in_progress(board: str, item_id: str, retries: int = 3) -> bool:
                 "--project-id", str(meta["project_id"]),
                 "--field-id", str(meta["field_id"]),
                 "--single-select-option-id", str(meta["option_id"])
-            ], capture_output=True, text=True, check=True)
+            ], capture_output=True, text=True, check=True, env=env)
             return True
         except Exception as e:
             last_err = _cmd_error_msg(e)
