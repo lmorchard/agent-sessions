@@ -444,7 +444,7 @@ scenarios deferred until there's something worth hardening.
 
 ### Move 3 — the board-driver, built and run (2026-07-25)
 
-Session artifacts: [dev-sessions/2026-07-25-0926-board-driver/](../dev-sessions/2026-07-25-0926-board-driver/)
+Session artifacts: [dev-sessions/2026-07-25-0926-board-driver/](dev-sessions/2026-07-25-0926-board-driver/)
 (`spec.md` answers the four questions, `notes.md` has the run account).
 
 **Built:** `driver/agent-session-driver.sh` — five stages (`select` → `invoke` → `classify` →
@@ -793,7 +793,7 @@ confidence-to-correctness calibration, and measurement is the instrument that ca
 
 ### Move 5 — the discriminate rule, measured and CUT (2026-07-27)
 
-Session artifacts: [dev-sessions/2026-07-27-1403-measurement/](../dev-sessions/2026-07-27-1403-measurement/)
+Session artifacts: [dev-sessions/2026-07-27-1403-measurement/](dev-sessions/2026-07-27-1403-measurement/)
 — `microtest/results.md` is the full account, `microtest/results/` the raw per-rep JSON, and every
 variant is *derived* from the shipped file by `build-variants.py` rather than hand-copied.
 

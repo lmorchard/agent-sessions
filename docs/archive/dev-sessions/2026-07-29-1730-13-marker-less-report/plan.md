@@ -19,7 +19,7 @@ existing `read N open issues` line. No cap on the list.
 ## Phase 0: Freeze the acceptance checks — **DONE**
 
 **Files:**
-- Created: `docs/dev-sessions/2026-07-29-1730-13-marker-less-report/checks.md`
+- Created: `docs/archive/dev-sessions/2026-07-29-1730-13-marker-less-report/checks.md`
 - Modified: `driver/test-driver.sh:575-702` — the C1 case and the G1 guard case
 
 **Verification — automated:**

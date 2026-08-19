@@ -110,10 +110,10 @@ Nothing was skipped or deferred.
 
 ## References
 
-- Spec: `docs/dev-sessions/2026-08-03-1341-58-driver-fault-false-positive/spec.md`
-- Checks: `docs/dev-sessions/2026-08-03-1341-58-driver-fault-false-positive/checks.md`
-- Plan: `docs/dev-sessions/2026-08-03-1341-58-driver-fault-false-positive/plan.md`
-- Notes: `docs/dev-sessions/2026-08-03-1341-58-driver-fault-false-positive/notes.md`
+- Spec: `docs/archive/dev-sessions/2026-08-03-1341-58-driver-fault-false-positive/spec.md`
+- Checks: `docs/archive/dev-sessions/2026-08-03-1341-58-driver-fault-false-positive/checks.md`
+- Plan: `docs/archive/dev-sessions/2026-08-03-1341-58-driver-fault-false-positive/plan.md`
+- Notes: `docs/archive/dev-sessions/2026-08-03-1341-58-driver-fault-false-positive/notes.md`
 - Closes #58
 
 ---

@@ -36,7 +36,7 @@ aborts. Every conditional assignment below uses `if/then/fi` for that reason, no
 Frozen at `cc45871`, sha recorded in `5a91662`.
 
 **Files:**
-- Created: `docs/dev-sessions/2026-07-31-1739-39-fetch-open-prs-failures/checks.md`
+- Created: `docs/archive/dev-sessions/2026-07-31-1739-39-fetch-open-prs-failures/checks.md`
 - Modified: `driver/test-park-state.sh` — the three cases C1–C3 name, plus a control case and one
   argv-logging line in the `claude` stub without which C1's zero-count clause is vacuous
 

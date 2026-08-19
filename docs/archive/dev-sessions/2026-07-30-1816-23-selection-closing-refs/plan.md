@@ -31,7 +31,7 @@ See `checks.md` → "Line-reference drift".
 Written per `references/frozen-checks.md`. No implementation in this phase.
 
 **Files:**
-- Create: `docs/dev-sessions/2026-07-30-1816-23-selection-closing-refs/checks.md` — criteria +
+- Create: `docs/archive/dev-sessions/2026-07-30-1816-23-selection-closing-refs/checks.md` — criteria +
   checks copied verbatim from the issue, ids assigned
 - Modify: `driver/test-driver.sh` — the node `select: an open PR blocks an issue only when it
   closes it`, plus the `guard: body/branch matching still works where GitHub records no link` node.

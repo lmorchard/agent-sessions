@@ -26,7 +26,7 @@ Manifest written; the check the criterion names authored into the frozen file; f
 `6f18f87`, sha recorded in `8a8cbd5`.
 
 **Files:**
-- Created: `docs/dev-sessions/2026-07-29-1808-11-repo-path-root-containment/checks.md`
+- Created: `docs/archive/dev-sessions/2026-07-29-1808-11-repo-path-root-containment/checks.md`
 - Modified: `driver/test-driver.sh` — one new nest case, `--repo-path / is containment, not a
   wildcard`, plus its comment block
 

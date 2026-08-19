@@ -24,7 +24,7 @@ Full text, checks and adjudication live in `checks.md`, frozen at `e3d3412`.
 ## Phase 0: Freeze the acceptance checks — **DONE**
 
 **Files:**
-- Created: `docs/dev-sessions/2026-08-03-1341-58-driver-fault-false-positive/checks.md`
+- Created: `docs/archive/dev-sessions/2026-08-03-1341-58-driver-fault-false-positive/checks.md`
 - Modified: `driver/test-park-state.sh` — the `#58` section (C1, C2, G3, G4)
 
 **Verification — automated:**

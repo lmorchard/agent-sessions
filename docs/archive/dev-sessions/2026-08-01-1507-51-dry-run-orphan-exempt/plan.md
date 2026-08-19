@@ -26,8 +26,8 @@ warning, completes selection, and exits 0.
 Written per `references/frozen-checks.md`. No implementation in this phase.
 
 **Files:**
-- Created: `docs/dev-sessions/2026-08-01-1507-51-dry-run-orphan-exempt/checks.md`
-- Created: `docs/dev-sessions/2026-08-01-1507-51-dry-run-orphan-exempt/g3-baseline-labels.txt`
+- Created: `docs/archive/dev-sessions/2026-08-01-1507-51-dry-run-orphan-exempt/checks.md`
+- Created: `docs/archive/dev-sessions/2026-08-01-1507-51-dry-run-orphan-exempt/g3-baseline-labels.txt`
 - Modified: `driver/test-park-state.sh` — the `#51` section the checks name
 
 **Verification — automated:**

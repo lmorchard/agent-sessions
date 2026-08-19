@@ -1,7 +1,7 @@
 # Move 7 — put the roadmap on a board, dogfood the front half
 
-Brief: [handoff-restructure.md](../../archive/handoff-restructure.md) § "Move 7". Input: the reconciled
-roadmap in [design.md](../../design.md#roadmap), produced by move 6.
+Brief: [handoff-restructure.md](../../handoff-restructure.md) § "Move 7". Input: the reconciled
+roadmap in [design.md](../../../design.md#roadmap), produced by move 6.
 
 ## The shape
 
@@ -27,7 +27,7 @@ If neither is being served, this is filing cabinets and should be called that.
 ## Standing constraints
 
 - **Expect a heavy `needs-review` skew, and do not fight it.** The oracle for skill wording is a
-  micro-test at ~$50 and half a session ([findings.md](../../findings.md)). Do not fudge criteria
+  micro-test at ~$50 and half a session ([findings.md](../../../findings.md)). Do not fudge criteria
   to make skill issues look `auto-ok`; an honest `needs-review` beats a checkable-looking proxy,
   and this is precisely the repo that would be tempted.
 - **Nothing merges.** Unchanged.

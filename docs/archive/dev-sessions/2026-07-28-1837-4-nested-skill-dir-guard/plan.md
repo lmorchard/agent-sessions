@@ -25,7 +25,7 @@ Full text + checks live in `checks.md`; ids are assigned there.
 ## Phase 0: Freeze the acceptance checks — **DONE**
 
 **Files:**
-- Created: `docs/dev-sessions/2026-07-28-1837-4-nested-skill-dir-guard/checks.md`
+- Created: `docs/archive/dev-sessions/2026-07-28-1837-4-nested-skill-dir-guard/checks.md`
 - Modified: `driver/test-driver.sh` — eleven new cases, section
   `nested skill-dir: the flags must not be able to describe a self-editing run`
 

@@ -87,7 +87,7 @@ unsatisfiable by construction.
 ## The migration, as run on this host
 
 ```
-python3 docs/dev-sessions/2026-07-31-1209-27-state-dir-per-repo/migrate-ledger.py --apply
+python3 docs/archive/dev-sessions/2026-07-31-1209-27-state-dir-per-repo/migrate-ledger.py --apply
 ```
 
 18 attributable rows → 8 (`lmorchard-agent-sessions`) + 10 (`lmorchard-decafclaw`), each re-read and

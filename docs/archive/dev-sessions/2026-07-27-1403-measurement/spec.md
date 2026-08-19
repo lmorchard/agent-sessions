@@ -1,6 +1,6 @@
 # Move 5 — measure the skill's unmeasured rules
 
-Brief: [`docs/handoff-measurement.md`](../../archive/handoff-measurement.md).
+Brief: [`docs/handoff-measurement.md`](../../handoff-measurement.md).
 
 ## Goal
 

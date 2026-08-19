@@ -29,7 +29,7 @@ Full text and checks live in `checks.md`, frozen at `1bd50f030f446c9abd7d486d68c
 Per `references/frozen-checks.md`. No implementation.
 
 **Files:**
-- Created: `docs/dev-sessions/2026-07-31-1052-36-dirty-skill-dir-guard/checks.md`
+- Created: `docs/archive/dev-sessions/2026-07-31-1052-36-dirty-skill-dir-guard/checks.md`
 - Modified: `driver/test-driver.sh` — the `#36` section (C1 both arms, C2, G3, the untracked and
   dirty-elsewhere scope assertions, two reducer probes), plus four existing nest cases moved onto a
   clean committed scratch fixture

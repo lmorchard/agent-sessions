@@ -25,7 +25,7 @@ Full text and checks live in `checks.md`; ids are assigned there.
 Written before any implementation, per `references/frozen-checks.md`.
 
 **Files:**
-- Created: `docs/dev-sessions/2026-08-01-1014-50-gate-test-globs/checks.md` — criteria copied
+- Created: `docs/archive/dev-sessions/2026-08-01-1014-50-gate-test-globs/checks.md` — criteria copied
   verbatim from the issue, ids assigned, four hazards named
 - Created: `scripts/test_gate_test_wiring.py` — the tests C1 and C2 name. **Read-only from Phase 1
   onward.**

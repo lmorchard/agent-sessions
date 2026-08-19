@@ -532,7 +532,7 @@ rule from ever seeing live data.
   branch diff: only `Makefile`, `scripts/board_audit.py`, `scripts/test_board_audit.py`, and session
   documents changed. The detector invokes only `gh project field-list`, `gh project item-list`,
   `gh issue list`, and `gh pr list`; no gated path changed.**
-- [x] Finish `docs/dev-sessions/2026-08-05-1417-board-audit/notes.md` with decisions, commits,
+- [x] Finish `docs/archive/dev-sessions/2026-08-05-1417-board-audit/notes.md` with decisions, commits,
   verification evidence, external board mutations, and the first check for a cold resume. —
   **Completed for a cold reader.**
 - [x] Commit the completed plan/notes artifact update with an accurate message after verification. —

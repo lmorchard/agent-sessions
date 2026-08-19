@@ -2,7 +2,7 @@
 
 **Source:** https://github.com/lmorchard/agent-sessions/issues/62
 **Tier:** `auto-ok` (body and label agree)
-**Session:** `docs/dev-sessions/2026-08-03-1109-62-docs-check-worktree-root/`
+**Session:** `docs/archive/dev-sessions/2026-08-03-1109-62-docs-check-worktree-root/`
 **Worktree:** `.worktrees/fix/62-docs-check-worktree-root`, branch `fix/62-docs-check-worktree-root`
 
 ## Phase 0 — freeze (DONE)

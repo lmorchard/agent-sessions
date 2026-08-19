@@ -25,7 +25,7 @@ Full text + checks live in `checks.md`. Ids are assigned there and referenced he
 Written per `references/frozen-checks.md`. No implementation in this phase.
 
 **Files:**
-- Create: `docs/dev-sessions/2026-07-31-1412-42-run-progress/checks.md` — criteria + checks copied
+- Create: `docs/archive/dev-sessions/2026-07-31-1412-42-run-progress/checks.md` — criteria + checks copied
   verbatim from the issue, ids assigned
 - Create: `scripts/test_run_progress.py` — the five tests C1…C3 name, authored by a subagent that was
   given the criteria and the measured record shape but **not** this plan

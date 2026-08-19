@@ -60,7 +60,7 @@ Neither is stylistic; each is a frozen or pre-existing assertion that would brea
 
 - [ ] `make driver-test` — the three C-cases flip to pass, G1/G2 `#27` cases stay passing, and all
       97 pre-existing assertions still pass
-- [ ] `python3 docs/dev-sessions/2026-07-31-1209-27-state-dir-per-repo/probe-01-orphan-crossrepo.py`
+- [ ] `python3 docs/archive/dev-sessions/2026-07-31-1209-27-state-dir-per-repo/probe-01-orphan-crossrepo.py`
       — re-run C1's original demonstration; expect `VERDICT: no gap`
 - [ ] `python3 .../probe-02-classify-only-ambiguous.py` — expect `VERDICT: no gap`
 - [ ] `python3 .../probe-03-c2-default-state-dir.py` — expect `VERDICT: C2 SATISFIED`

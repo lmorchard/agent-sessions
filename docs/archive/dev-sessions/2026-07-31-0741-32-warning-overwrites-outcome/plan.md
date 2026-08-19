@@ -23,7 +23,7 @@ Full text + checks live in `checks.md`. Ids assigned there.
 ## Phase 0: Freeze the acceptance checks — **DONE**
 
 **Files:**
-- Created: `docs/dev-sessions/2026-07-31-0741-32-warning-overwrites-outcome/checks.md`
+- Created: `docs/archive/dev-sessions/2026-07-31-0741-32-warning-overwrites-outcome/checks.md`
 - Modified: `driver/test-driver.sh` — the `#32` section, C1 + C2 + G1 + two attributability probes
 
 **Verification — automated:**
@@ -152,7 +152,7 @@ later and a bare tab-separated duplicate is noise.
 bidirectional-coverage rule is satisfied by a stated exception rather than by an omission.
 
 **Files:**
-- Modify: `docs/dev-sessions/2026-07-31-0741-32-warning-overwrites-outcome/notes.md` — the
+- Modify: `docs/archive/dev-sessions/2026-07-31-0741-32-warning-overwrites-outcome/notes.md` — the
   execution record, the verifier's report, and the tamper verdict
 
 **Verification — automated:**

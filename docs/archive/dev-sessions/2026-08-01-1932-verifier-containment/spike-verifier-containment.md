@@ -35,7 +35,7 @@ echo "$PROMPT" | claude -p \
 
 The prompt goes on **stdin**, not as a positional argument — `--allowedTools` and `--agents` are
 variadic and would swallow it. That trap is already recorded in
-[findings.md](../../findings.md#claude-code-cli).
+[findings.md](../../../findings.md#claude-code-cli).
 
 ## Results
 
@@ -83,14 +83,14 @@ No prompt, no denial, no error. `Bash(python3:*)` is a general-purpose write pri
 
 **The failure mode is invisible under normal operation.** A cooperative run looks contained and
 produces exactly the evidence a passing test would. Only an adversarial prompt separates *declined*
-from *blocked*. This is [findings.md](../../findings.md) defect class 2 — a null rendering as a
+from *blocked*. This is [findings.md](../../../findings.md) defect class 2 — a null rendering as a
 positive — reached through the agent's disposition rather than through a parsing bug, and it is the
 reason cell C is reported here as **inconclusive** rather than as a pass.
 
 ## Three ways to close it
 
 **(a) A `PreToolUse` hook.** The mechanism [#1](https://github.com/lmorchard/agent-sessions/issues/1)
-already exists for. Note that [design.md](../../design.md)'s capability ladder carries a
+already exists for. Note that [design.md](../../../design.md)'s capability ladder carries a
 *flagged-unverified* claim about hooks blocking under `bypassPermissions`; this spike is a concrete
 reason to go verify it rather than design against it.
 
