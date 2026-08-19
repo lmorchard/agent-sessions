@@ -4,11 +4,12 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help doctor doctor-self check board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly backend-permission-probe opencode-policy-contract lint typecheck
+.PHONY: help doctor doctor-self check evidence board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly backend-permission-probe opencode-policy-contract lint typecheck
 
 help:
 	@echo "check            run every check -- the targets listed below, in one go"
 	@echo "doctor           check the driver's GitHub credentials against a live repo"
+	@echo "doctor-self      the same, against this repo and its own board"
 	@echo "lint             run ruff linter"
 	@echo "typecheck        run mypy type checker"
 	@echo "board-audit      audit this repo's live GitHub project (read-only)"
@@ -19,6 +20,8 @@ help:
 	@echo "skill-readonly   assert native agent tools cannot write to the skill directory"
 	@echo "backend-permission-probe  run one live, harmless backend permission probe"
 	@echo "opencode-policy-contract  verify config isolation against installed OpenCode"
+	@echo "evidence         report outcomes across every per-repo run ledger (read-only)"
+	@echo "                 REPO_FILTER=owner/name narrows it to one repo"
 	@echo "docs-check       detect doc rot: links, tables, counts, risk-policy drift"
 	@echo "assertion-lint   detect presence-grep assertions -- a spelling check, not a test"
 	@echo "guard-lint       detect pinned test count guards in issue bodies"
@@ -27,6 +30,7 @@ help:
 	@echo "run              one real unattended run (nothing merges)"
 	@echo "loop             burn down up to 2 eligible issues (nothing merges)"
 	@echo "watch            digest the newest run's stream.jsonl on a loop; reads, never writes"
+	@echo "watch-self       the same, pinned to this repo's runs"
 	@echo "run-self         drive THIS repo (needs --allow-nested-skill-dir)"
 	@echo "dry-run-self     selection only against this repo's own board"
 	@echo "                 ISSUE=n pin one issue, bypassing selection (run, run-self)"
@@ -38,7 +42,7 @@ check: driver-check
 	@$(MAKE) -j check-parallel
 	@echo "all checks passed"
 
-.PHONY: check-parallel driver-test-sh
+.PHONY: check-parallel
 
 check-parallel: gate-test skill-readonly docs-check assertion-lint commit-lint lint typecheck
 
@@ -102,14 +106,18 @@ backend-permission-probe:
 opencode-policy-contract:
 	@uv run python -m agent_sessions.scripts.opencode_policy_contract
 
+# The report CLAUDE.md tells you to cite instead of writing a number down. Reads every
+# per-repo runs.jsonl under the live state root; pass --repo owner/name or --state-dir to
+# narrow it. It used to read `.driver-state/`, which #27 superseded, so it rendered a
+# cold archive whose rows predate the `phase` field it groups by.
+evidence:
+	@uv run python -m agent_sessions.scripts.evidence $(if $(REPO_FILTER),--repo $(REPO_FILTER),)
+
 # Documentation rot is mechanical, so detect it mechanically. Every doc defect this
 # project hit was a fact derivable from a live source, or prose duplicating one --
 # never a judgment. An instruction-file rule saying "don't do that" would be an
 # exhortation, and this project is 3 for 3 on those measuring away. See
 # src/agent_sessions/scripts/docs_check.py.
-evidence:
-	@uv run python -m agent_sessions.scripts.evidence
-
 docs-check:
 	@uv run python -m agent_sessions.scripts.docs_check
 
