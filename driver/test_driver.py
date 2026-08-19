@@ -430,3 +430,172 @@ def test_mark_board_in_progress_failure_logs_stderr(monkeypatch):
     assert "failed to mark item ITEM_1 in progress: GraphQL: Could not resolve item" in logs[0]
 
 
+def test_lifecycle_preflight(tmp_path: Path, monkeypatch):
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_GH_READ_TOKEN", "read-token")
+    monkeypatch.setenv("DRIVER_GH_WRITE_TOKEN", "write-token")
+    monkeypatch.setenv("DRIVER_GH_LOGIN", "agent-session-bot")
+
+    class MockResult:
+        stdout = json.dumps([])
+        returncode = 0
+
+    def mock_run(cmd, *args, **kwargs):
+        if [str(c) for c in cmd][:3] == ["gh", "api", "user"]:
+            class Login:
+                stdout = "agent-session-bot\n"
+                returncode = 0
+            return Login()
+        return MockResult()
+
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    argv = [
+        "--repo", "owner/repo",
+        "--repo-path", str(repo_dir),
+        "--skill-dir", str(skill_dir),
+        "--state-dir", str(tmp_path / "state"),
+        "--dry-run",
+    ]
+    ctx = agent_session_driver.preflight(argv)
+    assert isinstance(ctx, agent_session_driver.RunContext)
+    assert ctx.repo == "owner/repo"
+    assert ctx.repo_path == repo_dir.resolve()
+    assert ctx.skill_dir == skill_dir.resolve()
+    assert ctx.dry_run is True
+
+
+def test_lifecycle_selection(tmp_path: Path, monkeypatch):
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_GH_READ_TOKEN", "read-token")
+    monkeypatch.setenv("DRIVER_GH_WRITE_TOKEN", "write-token")
+    monkeypatch.setenv("DRIVER_GH_LOGIN", "agent-session-bot")
+
+    class MockResult:
+        stdout = json.dumps([])
+        returncode = 0
+
+    def mock_run(cmd, *args, **kwargs):
+        if [str(c) for c in cmd][:3] == ["gh", "api", "user"]:
+            class Login:
+                stdout = "agent-session-bot\n"
+                returncode = 0
+            return Login()
+        if [str(c) for c in cmd][:3] == ["gh", "issue", "list"]:
+            class Issues:
+                stdout = json.dumps([{
+                    "number": 10,
+                    "title": "Fix something",
+                    "body": "<!-- agent-session:spec -->\n\n## Tier: auto-ok\n",
+                    "labels": [{"name": "P1"}],
+                    "url": "https://github.com/owner/repo/issues/10",
+                    "updatedAt": "2026-08-10T12:00:00Z",
+                }])
+                returncode = 0
+            return Issues()
+        return MockResult()
+
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    argv = [
+        "--repo", "owner/repo",
+        "--repo-path", str(repo_dir),
+        "--skill-dir", str(skill_dir),
+        "--state-dir", str(state_dir),
+        "--dry-run",
+    ]
+    ctx = agent_session_driver.preflight(argv)
+    sel = agent_session_driver.select_queue(ctx)
+
+    assert isinstance(sel, agent_session_driver.SelectionResult)
+    assert isinstance(sel.candidates, list)
+    assert len(sel.candidates) == 1
+    assert sel.candidates[0] == ("10", "execute")
+
+
+def test_lifecycle_classify_and_record(tmp_path: Path, monkeypatch):
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    state_dir = tmp_path / "state"
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_GH_READ_TOKEN", "read-token")
+    monkeypatch.setenv("DRIVER_GH_WRITE_TOKEN", "write-token")
+    monkeypatch.setenv("DRIVER_GH_LOGIN", "agent-session-bot")
+
+    class MockResult:
+        stdout = json.dumps([])
+        returncode = 0
+
+    def mock_run(cmd, *args, **kwargs):
+        if [str(c) for c in cmd][:3] == ["gh", "api", "user"]:
+            class Login:
+                stdout = "agent-session-bot\n"
+                returncode = 0
+            return Login()
+        return MockResult()
+
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    argv = [
+        "--repo", "owner/repo",
+        "--repo-path", str(repo_dir),
+        "--skill-dir", str(skill_dir),
+        "--state-dir", str(state_dir),
+    ]
+    ctx = agent_session_driver.preflight(argv)
+
+    rundir = ctx.runs_dir / "10-20260810T120000Z"
+    rundir.mkdir(parents=True, exist_ok=True)
+    raw_output = rundir / "stream.jsonl"
+    raw_output.write_text(json.dumps({"type": "result", "total_cost_usd": 0.5, "result": "done"}) + "\n")
+    stderr_output = rundir / "stderr.txt"
+    writes_file = rundir / "writes.jsonl"
+    writes_file.write_text("")
+
+    inv = agent_session_driver.InvocationResult(
+        issue_num="10",
+        phase="execute",
+        ts="20260810T120000Z",
+        rundir=rundir,
+        raw_output=raw_output,
+        stderr_output=stderr_output,
+        writes_file=writes_file,
+        exit_code=0,
+        cost=0.5,
+        session_id="sess-123",
+        cost_known=True,
+        final_text="Agent completed work.",
+        writes_result={"ok": True, "entries": [], "applied": 0, "messages": []},
+        run_repo_path=repo_dir,
+    )
+
+    outcome = agent_session_driver.classify_and_record(ctx, inv, open_prs=[])
+
+    assert isinstance(outcome, agent_session_driver.RunOutcome)
+    assert outcome.issue_num == "10"
+    assert outcome.outcome == "parked"
+    assert outcome.cost == 0.5
+
+    runs_log_lines = ctx.runs_log.read_text(encoding="utf-8").splitlines()
+    assert len(runs_log_lines) == 1
+    row = json.loads(runs_log_lines[0])
+    assert row["issue"] == 10
+    assert row["outcome"] == "parked"
+    assert row["cost_usd"] == 0.5
+
+
