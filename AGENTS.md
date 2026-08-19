@@ -14,7 +14,11 @@ conventions + gotchas only.
 
 ## What this is (and isn't)
 
-- **An autonomy harness with a skill component.** The system's orchestration lives in `driver/`; the skill component lives at `skills/agent-session/` in *this repo* — it is NOT installed in `~/.Codex/skills/`. Test it by running its phase files manually (dogfooding), not via a registered skill.
+- **An autonomy harness with a skill component.** The system's orchestration lives in
+  `src/agent_sessions/driver/`; `driver/agent-session-driver.sh` is a compatibility launcher. The
+  skill component lives at `skills/agent-session/` in *this repo* — it is NOT installed in
+  `~/.Codex/skills/`. Test it by running its phase files manually (dogfooding), not via a
+  registered skill.
 - **The reference skill it derives from** is at `~/.Codex/skills/dev-session/` (phases +
   references). Adapt from it; don't edit it.
 
@@ -34,15 +38,17 @@ by `gh project create`, which applies no template, so it started on the bare `To
 
 ## Risk-gated paths (off-limits to unattended work)
 
-`references/acceptance-criteria.md`'s **trigger 2** is project-configurable — it fires on *"anything
-the project's AGENTS.md marks off-limits."*
+`skills/agent-session/references/acceptance-criteria.md`'s **trigger 2** is
+project-configurable — it fires on anything the project's instruction file marks off-limits.
 
 **The default is `needs-review`: anything not named drivable below is gated.** This is an allowlist,
 not a denylist, and the direction is the whole point. Decided 2026-07-29 after the partition went
-stale by omission **twice in two days** — once when the classifier moved into `driver/gate.py`, once
-when `scripts/` was created (in the very commit that added the "ask what it just invalidated" section
-below). Under a denylist, a directory nobody has classified reads as *drivable*, so the failure mode
-of forgetting is that unreviewed work runs unattended, and a triage scanner has to guess by analogy.
+stale by omission **twice in two days** — once when the classifier moved into the then-current
+`driver/gate.py` on 2026-07-29, and once when `scripts/` was created (in the very commit that added
+the "ask what it just invalidated" section below). The 2026-08-09 Python conversion later superseded
+that classifier path. Under a denylist, a directory nobody has classified reads as *drivable*, so
+the failure mode of forgetting is that unreviewed work runs unattended, and a triage scanner has to
+guess by analogy.
 Under an allowlist, forgetting is merely inconvenient: new code routes to a human until someone says
 otherwise. **A path this file does not mention is not a question to resolve by analogy — it is
 `needs-review` until listed.**
@@ -57,27 +63,35 @@ For this repo, the gated paths worth calling out by name, because the *reason* i
   run; this line is its **intake-time counterpart**, and it takes effect without any skill file
   being touched.
 
-- **`src/agent_sessions/driver/gate.py` — the oracle, and therefore off-limits too.** As of 2026-07-28 this module is
-  what classifies a run's outcome (`classify_pr_body`, called at `agent-session-driver.sh:485` and
-  `:616`). **An issue whose work edits it is editing the code that grades its own run** — the
-  implementer authoring its own oracle, one level removed from the skill. The `skills/**` rule does
+- **`src/agent_sessions/driver/gate.py` — the oracle, and therefore off-limits too.** This module
+  parses the merge-gate block and classifies a run's outcome; the coordinator calls `gate.classify`
+  at both recovery and normal-run classification. **An issue whose work edits it is editing the code
+  that grades its own run** — the implementer is authoring its own oracle, one level removed from
+  the skill. The `skills/**` rule does
   not cover it, and this line was added because the move-7 partition missed it: `driver/` was
   wholly drivable before the classifier moved there.
 
-- **`driver/agent-session-driver.sh` — the outcome *routing*, gated 2026-08-03 by Les.** The file
-  holds the parking case lists and the budget-reclassification thresholds, so a run could in
-  principle edit them to flatter its own record. This was previously named as an accepted residual
-  risk with the note *"revisit if a run ever touches that routing."* **That clause has now fired
+- **`src/agent_sessions/driver/agent_session_driver.py` — the current home of the outcome
+  *routing*.** Les gated that responsibility on 2026-08-03 while it still lived in the Bash driver;
+  the 2026-08-09 conversion moved it into the coordinator without changing the decision. The
+  coordinator holds the parking case lists and the budget-reclassification thresholds, so a run
+  could in principle edit them to flatter its own record. This was previously named as an accepted
+  residual risk with the note *"revisit if a run ever touches that routing."* **That clause has now fired
   three times** — on #39, on #58, and it would fire again on [#82](https://github.com/lmorchard/agent-sessions/issues/82)
   — and PR #78's gate block escalated it in writing rather than resolving it. A revisit trigger that
   keeps firing and never converts is not a trigger; it is a deferral. So it converted.
 
   **The cost is stated, because it is real and it is the reason this was a human's call.** Path
   granularity cannot express *"this file except its classification path,"* so gating the routing
-  gates the whole driver script — the largest single piece of orchestration in the repo, and the
+  gates the whole coordinator — the largest single piece of orchestration in the repo, and the
   thing most likely to need work. Driver changes now route to a human. If that proves too coarse,
-  the fix is to extract the routing into its own module the way `gate.py` was extracted, and gate
-  *that*; **it is not to quietly widen the allowlist back.**
+  the fix is to extract the outcome routing into its own module the way `gate.py` was extracted,
+  and gate *that*; **it is not to quietly widen the allowlist back.**
+
+- **`driver/agent-session-driver.sh` — the compatibility launcher.** Since the 2026-08-09 Python
+  conversion it only enters the packaged coordinator. It remains gated because the allowlist has
+  never explicitly reclassified it as drivable; becoming thin does not silently widen the
+  partition.
 
 Plus the standing defaults trigger 2 already names: auth/authorization, secrets, data
 migration/deletion, deploy/infra/CI config, dependency changes.
@@ -88,49 +102,58 @@ Decided 2026-07-29, because the question kept recurring one detector at a time a
 being re-derived by analogy. **Gated means the code decides whether *this run's own work* is
 acceptable to merge.** That is the outcome classifier, and — since 2026-08-03 — the routing that
 consumes its verdict. A test suite, a lint recipe or a doc-rot detector grades the *work*; only
-`gate.py` and the driver's routing decide the *verdict*, and a verdict is what converts into an
-automatic merge under phase 3.
+`src/agent_sessions/driver/gate.py` and the coordinator's outcome routing decide how the driver
+classifies and records the result.
 
-So `scripts/docs_check.py` is **drivable**, and so is a future check-linter, however detector-shaped
-they look.
+`src/agent_sessions/scripts/docs_check.py` grades documentation rather than the run's verdict, but
+it remains `needs-review` because it is an unlisted shipping `src/**` path. Its root-level test,
+`scripts/test_docs_check.py`, is drivable. The same distinction applies to other shipping detectors
+under `src/agent_sessions/scripts/` and their root-level tests under `scripts/`.
 
-**The residual risk, named rather than gated away.** A run that edits `docs/` *and* `scripts/docs_check.py` in one change
-could weaken the detector that would have caught its own doc rot, and `make check` would still be
-green. The broad reading would close that, but it would also sweep in `driver/test-driver.sh`,
-`driver/test_gate.py`, `driver/test-park-state.sh` and the `Makefile` recipes — every one of which is
-listed as drivable directly below, and whose drivability is the only reason this repo can dogfood
-itself. The mitigations are the same ones already relied on: tests that import what ships, `make
-check` in every PR, and a human at the merge gate. Revisit if a run ever actually does it.
+**The residual risk, named rather than gated away.** Drivable harness tests can weaken the
+assertions that protect gated shipping code. The broad reading would close that, but it would also
+sweep in `driver/test_driver.py`, `driver/test_gate.py`, `driver/test_park_state.py`, root-level
+detector tests, and the `Makefile` recipes — all needed for this repo to dogfood itself. The
+mitigations are tests that import what ships, `make check` in every PR, and a human at the merge
+gate. Revisit if an unattended run ever weakens a test to admit its own change.
 
 ### Drivable (the allowlist)
 
-- **`driver/`, except `driver/gate.py` and `driver/agent-session-driver.sh`** — its bash fixture
-  suites (`test-driver.sh`, `test-park-state.sh`) and its Python tests (`test_gate.py`). Note what
-  this leaves: as of 2026-08-03 the driver's *tests* are drivable and the driver itself is not.
+- **`driver/**`, except `driver/agent-session-driver.sh`** — compatibility assets, fixtures, and
+  the `driver/test_*.py` harness tests. Note what this leaves: the tests are drivable, while the
+  launcher and every unlisted `src/**` implementation path remain `needs-review`.
 - **`docs/`** — including `findings.md` and session notes.
 - **`Makefile`**.
-- **`scripts/`** — `docs_check.py` and its tests, per the narrow reading above. Added 2026-07-29; it
-  was unlisted from creation until then, which is what prompted the allowlist.
+- **`scripts/**`** — root-level tests and support assets, including
+  `scripts/test_docs_check.py`. This does not include the shipping implementations under
+  `src/agent_sessions/scripts/`, which remain gated by default. Added 2026-07-29; it was unlisted
+  from creation until then, which is what prompted the allowlist.
 
-That partition is the only reason this repo can dogfood itself at all: skill-wording and oracle work
-routes to a human, orchestration and doc work does not.
+No `src/**` path is implicitly drivable. The two Python paths named above explain why they are
+especially sensitive; every other unlisted package path receives the same `needs-review` default
+without requiring an analogy.
 
-**What the driver may write to a target repo: issue *metadata*, never issue or PR *content*.**
-Labels and project-board fields are in bounds; issue bodies, comments, PR bodies, reviews and thread
-resolutions are not, and merging never is. Recorded 2026-07-29, when #5 moved the park record from a
-local file to a `driver-parked` label and the driver became a GitHub writer for the first time — the
-tier stayed `auto-ok` on the grounds that a label is not auth, secrets, data migration/deletion,
-deploy/infra/CI config or a dependency. **Widening this line is a decision to put to the human, not
-a drift to discover in a diff**, which is the whole reason it is written down rather than inferred
-from what the driver happens to call today.
+That partition is the only reason this repo can dogfood itself at all: skill-wording, oracle, and
+shipping-driver work routes to a human; harness-test and doc work does not.
 
-**The residual risk this partition creates, named at the moment it was created.** Gating
-`agent-session-driver.sh` while leaving `driver/test-driver.sh` drivable means **the routing is
-protected and the fixtures protecting it are not**. A run cannot edit the parking case lists, but it
+**Agent-requested writes use the validated manifest allowlist in
+`src/agent_sessions/driver/writes.py`.** `writes.KINDS` covers issue comments, bodies, and creation;
+label changes and creation; branch pushes; PR creation and edits; and project-item additions and
+edits. It has no merge kind. The coordinator separately owns fixed operational writes for queue
+labels, board status, distributed lock refs, and Lab Notebook run reports; those do not come from
+the agent's manifest. The narrower 2026-07-29 policy allowed issue metadata only; #191's
+credential-containment decision superseded it on 2026-08-10 by moving agent-requested writes behind
+the schema. **Widening `writes.KINDS` or the coordinator's operational-write surface is a decision
+to put to the human, not a drift to discover in a diff.**
+
+**The residual risk this partition creates, named at the moment it was created.** Gating the Python
+coordinator while leaving `driver/test_*.py` drivable means **the routing is protected and the
+fixtures protecting it are not**. A run cannot edit the parking case lists, but it
 can weaken the assertions that would have caught someone else doing so, and `make driver-test` would
 stay green. This is deliberate — the fixture suites are a large share of what makes this repo
 dogfoodable, and defect class 1 has never once been an implementer sabotaging a test it was allowed
-to touch. The mitigations are `make driver-check`, running watched, and a human at the merge gate.
+to touch. `make driver-check` currently inspects only the compatibility launcher; issue #248 owns
+the shipping-Python gap. The present mitigations are running watched and a human at the merge gate.
 **Do not resolve a future case by analogy to this line**; the allowlist above is the answer.
 
 ## Governing principle
@@ -195,9 +218,10 @@ section as its rationale.
 
 A distinct failure shape, and the audit pass does not catch it: **inherited** stale claims get caught
 by re-verification, but a claim *you* falsify yourself, in the same session, by doing ordinary work,
-has no trigger. This file said all of `driver/` was drivable; four hours later the classifier moved
-into `driver/gate.py`, which made it false, and nobody noticed until it came up for an unrelated
-reason.
+has no trigger. This file said all of `driver/` was drivable; four hours later, on 2026-07-29, the
+classifier moved into the then-current `driver/gate.py`, which made it false, and nobody noticed
+until it came up for an unrelated reason. The 2026-08-09 conversion superseded that path with
+`src/agent_sessions/driver/gate.py`; the lesson remains the same.
 
 So when you move or add something oracle-bearing, check the two lists that describe the partition:
 **Risk-gated paths** above, and `design.md`'s architecture sections. Moving code that grades a run is

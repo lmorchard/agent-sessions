@@ -9,6 +9,27 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from agent_sessions.driver import agent_runner, credentials  # noqa: E402
 
+EXPECTED_DEFAULT_ALLOWED_TOOLS = [
+    "Read",
+    "Write",
+    "Edit",
+    "Glob",
+    "Grep",
+    "Task",
+    "TodoWrite",
+    "BashOutput",
+    "KillShell",
+    "NotebookEdit",
+    "Bash(*)",
+]
+
+EXPECTED_BASE_DENIED_TOOLS = [
+    "Bash(gh pr merge:*)",
+    "Bash(gh pr merge *)",
+    "Bash(git push --force:*)",
+    "Bash(gh repo delete:*)",
+]
+
 
 def test_parse_result_stream_claude(tmp_path: Path):
     raw = tmp_path / "stream.jsonl"
@@ -74,6 +95,35 @@ def test_partial_trailing_line_handling(tmp_path: Path):
     assert agent_runner.has_success_result("claude", raw) is True
 
 
+def test_missing_prompt_writes_nested_stderr_and_returns_configuration_error(
+    tmp_path: Path,
+):
+    prompt = tmp_path / "missing" / "prompt.txt"
+    stderr = tmp_path / "run" / "stderr.txt"
+
+    result = agent_runner.run_agent(
+        [
+            "--backend",
+            "claude",
+            "--repo-path",
+            str(tmp_path),
+            "--skill-dir",
+            str(tmp_path),
+            "--prompt-file",
+            str(prompt),
+            "--raw-output",
+            str(tmp_path / "run" / "stream.jsonl"),
+            "--stderr-output",
+            str(stderr),
+        ]
+    )
+
+    assert result == 2
+    assert stderr.read_text(encoding="utf-8") == (
+        f"error: prompt file not found: {prompt.resolve()}\n"
+    )
+
+
 def test_run_agent_model_tiers(tmp_path: Path, monkeypatch):
     prompt = tmp_path / "prompt.txt"
     prompt.write_text("Hello", encoding="utf-8")
@@ -128,14 +178,15 @@ def test_run_agent_model_tiers(tmp_path: Path, monkeypatch):
 
 
 
-def _run_and_capture_env(tmp_path: Path, monkeypatch, extra_argv=()):
-    """Invoke `run_agent` against a stubbed `subprocess.Popen` and return the child env."""
+def run_and_capture(tmp_path: Path, monkeypatch, extra_argv=()):
+    """Invoke `run_agent` and return the command and environment passed to Popen."""
     prompt = tmp_path / "prompt.txt"
     prompt.write_text("Hello", encoding="utf-8")
     captured = {}
 
     class MockPopen:
         def __init__(self, cmd, *args, **kwargs):
+            captured["command"] = cmd
             captured["env"] = kwargs.get("env")
             self.stdin = type("Pipe", (), {"write": lambda self, x: None, "close": lambda self: None})()
             self.returncode = 0
@@ -156,7 +207,99 @@ def _run_and_capture_env(tmp_path: Path, monkeypatch, extra_argv=()):
         "--stderr-output", str(tmp_path / "stderr.txt"),
         *extra_argv,
     ])
-    return captured["env"]
+    return captured["command"], captured["env"]
+
+
+def option_value(command: list[str], name: str) -> str:
+    return command[command.index(name) + 1]
+
+
+def expected_denied_tools(skill_dir: Path, additional: list[str] | None = None) -> list[str]:
+    return [
+        *EXPECTED_BASE_DENIED_TOOLS,
+        f"Edit(/{skill_dir.resolve()}/**)",
+        f"Write(/{skill_dir.resolve()}/**)",
+        f"NotebookEdit(/{skill_dir.resolve()}/**)",
+        *(additional or []),
+    ]
+
+
+def assert_permission_options(
+    command: list[str], *, allowed: list[str], denied: list[str]
+) -> None:
+    assert command.count("--allowedTools") == 1
+    assert command.count("--disallowedTools") == 1
+    assert option_value(command, "--allowedTools").split(",") == allowed
+    assert option_value(command, "--disallowedTools").split(",") == denied
+
+
+def test_claude_command_restores_mandatory_permission_policy(tmp_path, monkeypatch):
+    command, _ = run_and_capture(tmp_path, monkeypatch)
+    assert_permission_options(
+        command,
+        allowed=EXPECTED_DEFAULT_ALLOWED_TOOLS,
+        denied=expected_denied_tools(tmp_path),
+    )
+
+
+def test_caller_rules_cannot_replace_mandatory_denials(tmp_path, monkeypatch):
+    command, _ = run_and_capture(
+        tmp_path,
+        monkeypatch,
+        extra_argv=(
+            "--allowed-tools",
+            "Task,Read,Grep",
+            "--disallowed-tools",
+            "Bash(rm:*),Bash(git clean:*)",
+        ),
+    )
+    assert_permission_options(
+        command,
+        allowed=["Task", "Read", "Grep"],
+        denied=expected_denied_tools(
+            tmp_path, ["Bash(rm:*)", "Bash(git clean:*)"]
+        ),
+    )
+
+
+def test_caller_cannot_broaden_default_allowed_tools(tmp_path, monkeypatch):
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("Hello", encoding="utf-8")
+    stderr = tmp_path / "stderr.txt"
+    launched = False
+
+    class FailIfLaunched:
+        def __init__(self, *args, **kwargs):
+            nonlocal launched
+            launched = True
+            raise AssertionError("Popen must not run for a widened allow list")
+
+    monkeypatch.setattr("subprocess.Popen", FailIfLaunched)
+    result = agent_runner.run_agent(
+        [
+            "--backend",
+            "claude",
+            "--repo-path",
+            str(tmp_path),
+            "--skill-dir",
+            str(tmp_path),
+            "--prompt-file",
+            str(prompt),
+            "--raw-output",
+            str(tmp_path / "stream.jsonl"),
+            "--stderr-output",
+            str(stderr),
+            "--allowed-tools",
+            "Read,WebFetch",
+        ]
+    )
+
+    assert result == 2
+    assert launched is False
+    assert (
+        stderr.read_text(encoding="utf-8")
+        == "error: --allowed-tools may only narrow the default; unsupported rule(s): WebFetch\n"
+    )
 
 
 def test_agent_child_env_carries_the_read_token_only(tmp_path: Path, monkeypatch):
@@ -165,7 +308,7 @@ def test_agent_child_env_carries_the_read_token_only(tmp_path: Path, monkeypatch
     monkeypatch.setenv(credentials.WRITE_TOKEN_VAR, "write-token")
     monkeypatch.setenv("GH_TOKEN", "write-token")
 
-    env = _run_and_capture_env(tmp_path, monkeypatch)
+    _, env = run_and_capture(tmp_path, monkeypatch)
 
     assert env["GH_TOKEN"] == "read-token"
     assert env["GITHUB_TOKEN"] == "read-token"
@@ -180,7 +323,7 @@ def test_agent_child_env_hands_over_nothing_when_no_read_token_is_configured(tmp
     monkeypatch.delenv(credentials.READ_TOKEN_VAR, raising=False)
     monkeypatch.setenv("GH_TOKEN", "host-token")
 
-    env = _run_and_capture_env(tmp_path, monkeypatch)
+    _, env = run_and_capture(tmp_path, monkeypatch)
 
     assert "GH_TOKEN" not in env
     assert "host-token" not in env.values()
@@ -190,7 +333,7 @@ def test_writes_file_is_exported_to_the_agent(tmp_path: Path, monkeypatch):
     monkeypatch.delenv(credentials.READ_TOKEN_VAR, raising=False)
     writes_file = tmp_path / "runs" / "writes.jsonl"
 
-    env = _run_and_capture_env(tmp_path, monkeypatch, ["--writes-file", str(writes_file)])
+    _, env = run_and_capture(tmp_path, monkeypatch, ["--writes-file", str(writes_file)])
 
     assert env[agent_runner.WRITES_FILE_VAR] == str(writes_file.resolve())
 

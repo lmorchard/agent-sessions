@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Detect presence-grep assertions in the bash fixture suites.
+"""Detect presence-grep assertions in harness tests.
 
 Why this exists
 ---------------
@@ -13,12 +13,12 @@ comment. `findings.md` (defect class 5) calls that *"a spelling check, not a
 test"*: it grades the spelling of the subject rather than its behaviour, and a
 comment describing the behaviour satisfies it just as well as the behaviour.
 
-Eight of them shipped in `driver/test-driver.sh`, and the warning against them
-sat **in a comment** at `test-driver.sh:177-179` and `test-park-state.sh:19` --
-next to the thing it warned about, for two days, without preventing it. That is
-this project's most-repeated lesson: an exhortation measures away, a detector
-does not (`findings.md` defect class 4, and CLAUDE.md's rationale for
-`docs_check.py`). So this is a detector.
+The original defect shipped in the former Bash fixture suites, while a warning
+against it sat in a nearby comment without preventing it. The current Python
+harness tests still embed shell fixtures and commands, so the detector follows
+those live files. That is this project's most-repeated lesson: an exhortation
+measures away, a detector does not (`findings.md` defect class 4, and the
+instruction files' rationale for `docs_check.py`).
 
 The rule
 --------
@@ -50,12 +50,10 @@ the operator to wave the mechanism through (`findings.md`):
 
 Scope
 -----
-`driver/test-*.sh` only. The `Makefile`'s own `grep -qF` guards are excluded on
-purpose: `skill-readonly` asserts that a deny rule is *literally present* in the
-driver, so there presence IS the property being tested -- unlike a test suite,
-where a presence-grep stands in for behaviour. Flagging it would be a false
-positive. Widening the scope is a separate call for a human, not a drift to
-discover in a diff (issue #28, first design decision).
+`driver/test_*.py` only. The Makefile is out of scope: this detector guards
+harness assertions, while `skill-readonly` now verifies captured command
+arguments at the `Popen` boundary. Widening the scope is a separate call for a
+human, not a drift to discover in a diff (issue #28, first design decision).
 
 """
 
