@@ -10,8 +10,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import secrets
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 try:
@@ -36,6 +40,27 @@ BASE_DENIED_TOOLS = (
     "Bash(gh pr merge *)",
     "Bash(git push --force:*)",
     "Bash(gh repo delete:*)",
+)
+
+OPENCODE_CONFIG_VAR = "OPENCODE_CONFIG_CONTENT"
+OPENCODE_AGENT_PREFIX = "agent-session"
+OPENCODE_VERSION_TIMEOUT_SECONDS = 10
+OPENCODE_INHERITED_OVERRIDES = (
+    "OPENCODE_CONFIG",
+    "OPENCODE_CONFIG_DIR",
+    "OPENCODE_PERMISSION",
+    "OPENCODE_TEST_HOME",
+)
+SUPPORTED_OPENCODE_VERSION = (1, 18, 18)
+OPENCODE_DENIED_COMMANDS = (
+    "gh pr merge",
+    "gh pr merge *",
+    "git push --force",
+    "git push --force *",
+    "gh repo delete",
+    "gh repo delete *",
+    "gh api *pulls/*/merge*",
+    "curl *pulls/*/merge*",
 )
 
 
@@ -63,6 +88,106 @@ def compose_disallowed_tools(skill_dir: Path, additional: str = "") -> str:
     rules = [*mandatory_disallowed_tools(skill_dir)]
     rules.extend(rule for rule in additional.split(",") if rule)
     return ",".join(rules)
+
+
+def opencode_permission_policy(
+    skill_dir: Path, agent_name: str
+) -> dict[str, object]:
+    skill = str(skill_dir.resolve())
+    # OpenCode 1.18.18 evaluates `external_directory` against the canonical absolute
+    # path, but evaluates `edit` against that path with its leading slash removed.
+    # Cover both resource shapes; the live probe for issue #250 caught this mismatch.
+    edit_resource = skill.removeprefix("/")
+    permissions = {
+        "edit": {
+            "*": "allow",
+            skill: "deny",
+            f"{skill}/**": "deny",
+            edit_resource: "deny",
+            f"{edit_resource}/**": "deny",
+        },
+        "external_directory": {
+            "*": "deny",
+            skill: "allow",
+            f"{skill}/**": "allow",
+        },
+        "bash": {
+            "*": "allow",
+            **dict.fromkeys(OPENCODE_DENIED_COMMANDS, "deny"),
+        },
+        # OpenCode 1.18.18 does not propagate an agent's configured mandatory
+        # policy to delegated agents. Re-enable only with an independently enforced
+        # subagent boundary.
+        "task": "deny",
+    }
+    # Repeat the floor on a random selected agent as defense in depth. Target and
+    # user component config are isolated separately at the child-env boundary.
+    return {
+        "permission": permissions,
+        "agent": {
+            agent_name: {
+                "mode": "primary",
+                "disable": False,
+                "permission": permissions,
+            }
+        },
+    }
+
+
+def verified_opencode_command() -> tuple[str, str]:
+    command = shutil.which("opencode")
+    if command is None:
+        return "", "could not find OpenCode executable"
+    try:
+        resolved_command = str(Path(command).resolve(strict=True))
+    except OSError as error:
+        return "", f"could not resolve OpenCode executable: {type(error).__name__}"
+
+    try:
+        result = subprocess.run(
+            [resolved_command, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=OPENCODE_VERSION_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return "", "OpenCode version probe timed out"
+    except OSError as error:
+        return "", f"could not run OpenCode version probe: {type(error).__name__}"
+
+    if result.returncode != 0:
+        return "", f"OpenCode version probe exited {result.returncode}"
+
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", (result.stdout or "").strip())
+    if match is None:
+        return "", "could not parse OpenCode version"
+
+    version = tuple(int(part) for part in match.groups())
+    if version != SUPPORTED_OPENCODE_VERSION:
+        rendered = ".".join(str(part) for part in version)
+        return "", f"unsupported OpenCode version {rendered}"
+    return resolved_command, ""
+
+
+def isolated_opencode_env(
+    base_env: dict[str, str], policy: str, config_home: Path
+) -> dict[str, str]:
+    """Return an OpenCode child environment isolated from target configuration."""
+    env = dict(base_env)
+    for variable in OPENCODE_INHERITED_OVERRIDES:
+        env.pop(variable, None)
+    env.update(
+        {
+            OPENCODE_CONFIG_VAR: policy,
+            "OPENCODE_DISABLE_PROJECT_CONFIG": "true",
+            # v1.18.18 scans Global.Path.home/.opencode even when project config is
+            # disabled. Its version-gated test-home hook is the only supported way
+            # to isolate that loader without repurposing the child's HOME.
+            "OPENCODE_TEST_HOME": str(config_home),
+            "XDG_CONFIG_HOME": str(config_home),
+        }
+    )
+    return env
 
 
 def run_agent(argv: list[str] | None = None) -> int:
@@ -119,6 +244,8 @@ def run_agent(argv: list[str] | None = None) -> int:
         else:
             target_model = os.environ.get("MODEL", "")
 
+    opencode_config_home: tempfile.TemporaryDirectory[str] | None = None
+
     if args.backend == "claude":
         try:
             allowed_tools = compose_allowed_tools(args.allowed_tools)
@@ -149,13 +276,56 @@ def run_agent(argv: list[str] | None = None) -> int:
             cmd.extend(["--model", target_model])
         stdin_data = prompt_text.encode("utf-8")
     elif args.backend == "opencode":
+        for option, value in (
+            ("--allowed-tools", args.allowed_tools),
+            ("--disallowed-tools", args.disallowed_tools),
+        ):
+            if value:
+                stderr_output.write_text(
+                    f"error: {option} is only supported by the Claude backend\n",
+                    encoding="utf-8",
+                )
+                return 2
+
+        opencode_command, version_error = verified_opencode_command()
+        if version_error:
+            stderr_output.write_text(f"error: {version_error}\n", encoding="utf-8")
+            return 2
+
+        agent_name = f"{OPENCODE_AGENT_PREFIX}-{secrets.token_hex(8)}"
+        try:
+            policy = json.dumps(
+                opencode_permission_policy(skill_dir, agent_name),
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError):
+            stderr_output.write_text(
+                "error: could not serialize OpenCode permission policy\n",
+                encoding="utf-8",
+            )
+            return 2
+
+        try:
+            opencode_config_home = tempfile.TemporaryDirectory(
+                prefix="agent-session-opencode-"
+            )
+        except OSError as error:
+            stderr_output.write_text(
+                "error: could not create OpenCode config home: "
+                f"{type(error).__name__}\n",
+                encoding="utf-8",
+            )
+            return 2
         cmd = [
-            "opencode",
+            opencode_command,
+            "--pure",
             "run",
             prompt_text,
             "--format",
             "json",
             "--auto",
+            "--agent",
+            agent_name,
             "--dir",
             str(repo_path),
         ]
@@ -172,6 +342,11 @@ def run_agent(argv: list[str] | None = None) -> int:
     # token and strips every write-capable one. This is the containment layer --
     # the prompt and the PreToolUse hook are defence in depth behind it.
     env = credentials.agent_env(dict(os.environ), credentials.resolve())
+    if args.backend == "opencode":
+        assert opencode_config_home is not None
+        env = isolated_opencode_env(
+            env, policy, Path(opencode_config_home.name)
+        )
     if args.writes_file:
         env[WRITES_FILE_VAR] = str(Path(args.writes_file).resolve())
     if args.high_tier_model:
@@ -234,6 +409,23 @@ def run_agent(argv: list[str] | None = None) -> int:
         with open(stderr_output, "ab") as err_f:
             err_f.write(f"error: execution failed: {e}\n".encode("utf-8"))
         return 1
+    finally:
+        if opencode_config_home is not None:
+            try:
+                opencode_config_home.cleanup()
+            except OSError as error:
+                # The child has already exited and its result is authoritative. The
+                # OS temp root remains the fallback cleanup boundary.
+                try:
+                    with open(stderr_output, "ab") as err_f:
+                        err_f.write(
+                            (
+                                "warning: could not remove OpenCode config home: "
+                                f"{type(error).__name__}\n"
+                            ).encode("utf-8")
+                        )
+                except OSError:
+                    pass
 
 
 def parse_result_stream(backend: str, raw_path: Path) -> dict:

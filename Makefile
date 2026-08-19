@@ -4,7 +4,7 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help doctor doctor-self check board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly lint typecheck
+.PHONY: help doctor doctor-self check board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly backend-permission-probe opencode-policy-contract lint typecheck
 
 help:
 	@echo "check            run every check -- the targets listed below, in one go"
@@ -16,7 +16,9 @@ help:
 	@echo "driver-test      Python harness and fixture tests (alias of gate-test)"
 	@echo "gate-test        pytest over the Python harness and detector suites"
 	@echo "park-test        frozen acceptance checks for #5 (park state as a label)"
-	@echo "skill-readonly   assert the hosted run cannot write to the skill directory"
+	@echo "skill-readonly   assert native agent tools cannot write to the skill directory"
+	@echo "backend-permission-probe  run one live, harmless backend permission probe"
+	@echo "opencode-policy-contract  verify config isolation against installed OpenCode"
 	@echo "docs-check       detect doc rot: links, tables, counts, risk-policy drift"
 	@echo "assertion-lint   detect presence-grep assertions -- a spelling check, not a test"
 	@echo "guard-lint       detect pinned test count guards in issue bodies"
@@ -74,14 +76,31 @@ park-test: gate-test
 # inconvenient -- but the boundary it protected is still live, so this asserts the
 # ongoing invariant instead of the frozen fact.
 #
-# The invariant: --add-dir grants the hosted run access to the skill directory, so
-# without a deny rule the run could edit the instructions grading it. The named
-# tests capture the command at the Popen boundary and assert the runtime policy,
-# including the required double-slash absolute path form.
+# The invariant: each backend grants the hosted run read access to the skill
+# directory, so without a deny rule its native editing tools could change the
+# instructions grading it. The named tests capture the Popen boundary and assert
+# each backend's complete runtime policy.
 skill-readonly:
 	@uv run pytest -q \
 	  driver/test_agent_runner.py::test_claude_command_restores_mandatory_permission_policy \
-	  driver/test_agent_runner.py::test_caller_rules_cannot_replace_mandatory_denials
+	  driver/test_agent_runner.py::test_caller_rules_cannot_replace_mandatory_denials \
+	  driver/test_agent_runner.py::test_opencode_command_applies_mandatory_permission_policy
+
+# Live evidence for the backend permission boundary. Deliberately excluded from
+# `check`: it invokes a configured model and requires the operator to inspect the
+# recorded denial events. See issue #250.
+backend-permission-probe:
+	@test -n "$(BACKEND)" || { echo "BACKEND=claude|opencode is required"; exit 2; }
+	@test -n "$(EVIDENCE_DIR)" || { echo "EVIDENCE_DIR=/path is required"; exit 2; }
+	@uv run python -m agent_sessions.scripts.backend_permission_probe \
+	  --backend "$(BACKEND)" --output-dir "$(EVIDENCE_DIR)" $(if $(MODEL),--model "$(MODEL)",)
+
+# Model-free feature gate for the exact supported OpenCode binary. It seeds
+# adversarial target config and target/home custom-tool fixtures, then proves the
+# runner-owned agent and native denials remain effective. Kept outside `check`
+# because OpenCode is not a repository dependency.
+opencode-policy-contract:
+	@uv run python -m agent_sessions.scripts.opencode_policy_contract
 
 # Documentation rot is mechanical, so detect it mechanically. Every doc defect this
 # project hit was a fact derivable from a live source, or prose duplicating one --
