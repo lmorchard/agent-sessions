@@ -158,8 +158,10 @@ def select(
         if prline:
             prnum = prline.split("\t")[0]
             pr_data = pr_details_map.get(prnum, {})
+            # Use PR's human comment flag if available, fallback to issue's
+            pr_has_human = pr_data.get("has_new_human_comment", has_human)
             pr_evt = reconciler.PollingAdapter.synthesize_pr_event(
-                n, prnum, pr_data, has_new_human_comment=has_human
+                n, prnum, pr_data, has_new_human_comment=pr_has_human
             )
             dec = reconciler.handle_pr_reconcile(pr_evt)
             if dec.action == "skip":
