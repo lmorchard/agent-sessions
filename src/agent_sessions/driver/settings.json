@@ -3,7 +3,7 @@
     "PreToolUse": [
       {
         "tool_name": "Bash",
-        "command": "/Users/lorchard/devel/agent-sessions/driver/merge-block-hook.sh"
+        "command": "__rendered_by_lifecycle.render_hook_settings__"
       }
     ]
   }

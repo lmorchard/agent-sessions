@@ -30,6 +30,9 @@ EXPECTED_BASE_DENIED_TOOLS = [
     "Bash(gh pr merge:*)",
     "Bash(gh pr merge *)",
     "Bash(git push --force:*)",
+    "Bash(git push --force *)",
+    "Bash(git push -f:*)",
+    "Bash(git push -f *)",
     "Bash(gh repo delete:*)",
 ]
 
@@ -351,6 +354,8 @@ def test_opencode_command_applies_mandatory_permission_policy(tmp_path, monkeypa
             "gh pr merge *": "deny",
             "git push --force": "deny",
             "git push --force *": "deny",
+            "git push -f": "deny",
+            "git push -f *": "deny",
             "gh repo delete": "deny",
             "gh repo delete *": "deny",
             "gh api *pulls/*/merge*": "deny",

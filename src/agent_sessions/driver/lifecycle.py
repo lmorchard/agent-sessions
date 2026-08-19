@@ -122,6 +122,61 @@ def die(msg: str, code: int = 2) -> None:
     sys.exit(code)
 
 
+def hook_template_path() -> Path:
+    """The PreToolUse settings template, resolved beside the module that loads it.
+
+    A separate function so a test can replace it, and because *where* these two assets
+    live is the thing that broke: they sat in repo-root `driver/` while this module
+    looked for them beside itself, so the render silently never ran. They now ship inside
+    the package, which is also what makes them present in an installed wheel.
+    """
+    return Path(__file__).parent / "settings.json"
+
+
+def hook_script_path() -> Path:
+    """The merge-block hook script. See `hook_template_path` for why this is a function."""
+    return Path(__file__).parent / "merge-block-hook.sh"
+
+
+def render_hook_settings(state_dir: Path) -> Path:
+    """Write the run's Claude settings file with the merge-block hook wired in.
+
+    Fails closed. The previous version guarded the whole body with
+    `if template.is_file():` and wrapped it in `except Exception: pass`, so a missing or
+    unreadable asset produced no hook, no message, and a green `make check` -- while
+    `invoke_agent` went on passing `--settings <path that was never written>`. This hook
+    is one of the layers standing between an unattended run and merging its own PR; when
+    it cannot be installed, the run must not start.
+    """
+    template = hook_template_path()
+    script = hook_script_path()
+
+    if not template.is_file():
+        die(f"merge-block hook template missing: {template}")
+    if not script.is_file():
+        die(f"merge-block hook script missing: {script}")
+    if not os.access(script, os.X_OK):
+        die(f"merge-block hook script is not executable: {script}")
+
+    try:
+        data = json.loads(template.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        die(f"merge-block hook template is unreadable: {template}: {exc}")
+
+    hooks = data.setdefault("hooks", {})
+    pre = hooks.setdefault("PreToolUse", [{}])
+    if not pre:
+        pre.append({})
+    pre[0]["command"] = str(script.resolve())
+
+    settings_file = state_dir / "settings.json"
+    try:
+        settings_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except OSError as exc:
+        die(f"could not write hook settings to {settings_file}: {exc}")
+    return settings_file
+
+
 def abspath(p: str) -> Path:
     path = Path(p)
     if path.is_absolute():
@@ -371,20 +426,7 @@ def preflight(argv: list[str] | None = None) -> RunContext:
         except Exception:
             pass
 
-    hook_settings_template = Path(__file__).parent / "settings.json"
-    hook_script = Path(__file__).parent / "merge-block-hook.sh"
-    hook_settings_file = state_dir / "settings.json"
-    if hook_settings_template.is_file():
-        try:
-            template_data = json.loads(hook_settings_template.read_text(encoding="utf-8"))
-            if "hooks" not in template_data:
-                template_data["hooks"] = {}
-            if "PreToolUse" not in template_data["hooks"]:
-                template_data["hooks"]["PreToolUse"] = [{}]
-            template_data["hooks"]["PreToolUse"][0]["command"] = str(hook_script.resolve())
-            hook_settings_file.write_text(json.dumps(template_data, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+    hook_settings_file = render_hook_settings(state_dir)
 
     return RunContext(
         repo=repo,
