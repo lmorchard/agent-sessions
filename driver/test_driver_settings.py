@@ -5,8 +5,10 @@ from pathlib import Path
 
 
 def test_c3_settings_in_argv():
-    with open("src/agent_sessions/driver/agent_session_driver.py") as f:
-        content = f.read()
+    driver_file = Path("src/agent_sessions/driver/lifecycle.py")
+    if not driver_file.exists():
+        driver_file = Path("src/agent_sessions/driver/agent_session_driver.py")
+    content = driver_file.read_text(encoding="utf-8")
     assert '--settings' in content, "C3: driver does not pass --settings to claude"
 
 def test_c3_hook_json_structure():
