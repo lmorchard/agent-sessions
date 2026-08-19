@@ -16,8 +16,8 @@ This phase is triggered by the orchestrator when a PR has failing CI checks.
 ## Process
 
 1. **Assess the CI failures:**
-   Fetch the failed CI checks using `gh pr checks <n> --failed`.
-   Read the logs of the failed jobs to understand the root cause. If necessary, use `gh run view` to see the logs.
+   Summary details of failed CI checks have been pre-fetched and provided in your context.
+   Read the logs of the failed jobs to understand the root cause. If necessary, use `gh run view` or inspect logs for additional details.
    
    If the failure is a known flake or infrastructural issue unrelated to your changes, note this and stop without making code changes.
 

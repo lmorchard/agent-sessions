@@ -724,6 +724,18 @@ def invoke_agent(
                     extra_context += "Unresolved Review Threads:\n"
                     extra_context += unresolved_text
 
+                if phase == "fix_ci":
+                    try:
+                        res_checks = subprocess.run(
+                            ["gh", "pr", "checks", str(prnum), "--repo", ctx.repo, "--failed"],
+                            capture_output=True,
+                            text=True,
+                        )
+                        if res_checks.returncode == 0 and res_checks.stdout.strip():
+                            extra_context += f"Failed CI Checks:\n{res_checks.stdout.strip()}\n\n"
+                    except Exception:
+                        pass
+
         except Exception:
             pass
 
@@ -754,7 +766,7 @@ def invoke_agent(
     except Exception:
         pass
 
-    if phase == "triage":
+    if phase in ("triage", "refine"):
         query = """query($owner:String!,$repo:String!,$issue:Int!){
           repository(owner:$owner,name:$repo){
             issue(number:$issue){
@@ -806,7 +818,7 @@ def invoke_agent(
 
                 if nodes:
                     extra_context += "\nIssue Comments with Reactions:\n"
-                    for c in nodes[-5:]:  # Limit to 5 most recent
+                    for c in nodes[-10:]:  # Limit to 10 most recent
                         author = c.get("author", {}).get("login", "unknown") if c.get("author") else "unknown"
                         body = c.get("body", "")
                         if len(body) > 500:

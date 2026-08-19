@@ -17,7 +17,7 @@ This is a human-in-the-loop phase, typically triggered interactively when an ope
 
 ## Process
 
-1. **Fetch the current issue.** Read the issue body (`gh issue view <url> --json body`). Identify the active spec sections (Goal, Acceptance Criteria, Regression Guards, Design Decisions, Tier) and the `<!-- agent-session:spec -->` marker.
+1. **Fetch the current issue.** Target issue details including title, body, and labels have been pre-fetched and supplied in your context. Identify the active spec sections (Goal, Acceptance Criteria, Regression Guards, Design Decisions, Tier) and the `<!-- agent-session:spec -->` marker.
 
 2. **Harvest the Learnings.** Ask the user: *"What did we learn from the failed attempt, and what is the new direction?"* This ensures the pivot is grounded and explicitly captures the failure mode as a new constraint.
 
