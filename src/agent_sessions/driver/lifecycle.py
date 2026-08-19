@@ -986,14 +986,20 @@ def classify_and_record(
         outcome = "failed"
         reason = f"{ctx.backend} exited {inv.exit_code}" if inv.cost_known else f"{ctx.backend} exited {inv.exit_code}; cost undetermined"
     else:
-        prs_json = open_prs if open_prs is not None else []
-        if inv.writes_result.get("applied") or not prs_json:
+        if open_prs is None:
             try:
                 prs_json = gh_query.fetch_open_prs(ctx.repo)
             except Exception as e:
                 log(f"warning: failed to refresh PRs during classification: {e}")
-                if prs_json is None:
-                    prs_json = []
+                prs_json = []
+        elif inv.writes_result.get("applied"):
+            try:
+                prs_json = gh_query.fetch_open_prs(ctx.repo)
+            except Exception as e:
+                log(f"warning: failed to refresh PRs during classification: {e}")
+                prs_json = open_prs
+        else:
+            prs_json = open_prs
 
         prline = gh_query.pr_for_issue(inv.issue_num, prs_json)
         if not prline:
