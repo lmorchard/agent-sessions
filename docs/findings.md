@@ -758,6 +758,15 @@ the entries most likely to be silently re-broken.**
 | **The hosted run is not hermetic.** A `SessionStart` hook fires and injects this machine's global context. That is the price of not using `--bare`, and it bounds what a local run proves about a GHA run. | move 3 |
 | **The denial detector greps the permission layer's phrasing only.** A `PreToolUse` hook block would go uncounted — if that hook lands, teach the detector about it. | move 3 |
 
+### OpenCode CLI
+
+| Fact | How it was verified |
+|---|---|
+| **OpenCode 1.18.18 uses two path shapes for one external file.** `external_directory` evaluates the canonical absolute path, while `edit` removes its leading slash. An absolute edit-deny rule therefore resolves in `debug agent build` yet does not match the tool call. Cover both shapes until the supported CLI no longer emits the relative one. | live runner probe, model-free `debug agent build --tool edit`, and the permission-evaluation log; issue #250, 2026-08-18 |
+| **A later inline named-agent policy is not an isolation boundary.** OpenCode deep-merges named agents; overwritten keys keep their earlier order, `disable: true` survives when omitted later, and a missing selected agent falls back to the default. Disable project config, scrub inherited override sources, use a per-run agent with `disable: false`, and verify exact-agent resolution against the supported binary. | adversarial target `opencode.json`, OpenCode 1.18.18 source, model-free contract, and live runner probe; issue #250, 2026-08-18 |
+| **`--pure` disables external plugins, not executable custom tools.** Target and user-home `{tool,tools}/*.{js,ts}` modules still load during tool discovery. Disable project config and point both XDG and OpenCode 1.18.18's separate legacy-home loader at clean runner-owned roots; an inline permission object cannot contain code that executes while its own boundary is being assembled. | adversarial target and inherited-home `.opencode/tools` fixtures plus the model-free contract; issue #250, 2026-08-18 |
+| **OpenCode 1.18.18 subagents do not inherit the selected agent's configured floor.** The `task` tool propagates session denials, not the primary agent definition's full mandatory rules. Deny delegation until every reachable subagent has an independently non-overridable boundary. | OpenCode 1.18.18 source and resolved-agent contract; issue #250, 2026-08-18 |
+
 ### `gh`
 
 | Fact | How it was verified |
