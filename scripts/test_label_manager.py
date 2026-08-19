@@ -1,12 +1,12 @@
 """Tests for `label_manager` — written after a live run broke on it.
 
-`park` removes the interactive label and all three attempt labels unconditionally.
-`gh issue edit --remove-label X` exits 0 when the *issue* lacks X but the repo has
-it — a gotcha already recorded in findings.md — but **errors when the repo itself
-has no such label**, which is a different case and the one that fired. A fresh
-target repo has only the labels something has already created, so the driver's own
-park failed with `'agent-session:needs-human-interactive' not found` and warned
-that the issue stayed selectable.
+`park` used to remove the interactive label and all three attempt labels
+unconditionally. `gh issue edit --remove-label X` exits 0 when the *issue* lacks X
+but the repo has it — a gotcha already recorded in findings.md — but **errors when
+the repo itself has no such label**, which is a different case and the one that
+fired. A fresh target repo has only the labels something has already created, so
+the driver's own park failed with `'agent-session:needs-human-interactive' not
+found` and warned that the issue stayed selectable.
 
 It was harmless that time only because the agent's write manifest had already
 applied the park label. A run whose agent recorded no label entry would have been
@@ -102,20 +102,21 @@ def test_park_survives_a_repo_missing_the_interactive_and_higher_attempt_labels(
 
 def test_park_only_removes_labels_the_issue_actually_carries(gh):
     label_manager.cmd_park(args())
-    assert removed(gh) == ["agent-session:attempt-1"]
+    assert removed(gh) == []
     assert "agent-session:needs-human-interactive" not in removed(gh)
 
 
-def test_park_still_clears_the_attempt_label(gh):
-    """The reset the loop breaker depends on. Filtering must not quietly drop it."""
+def test_park_preserves_the_attempt_label(gh):
+    """Parking pauses an attempt sequence; it does not start a new one."""
     label_manager.cmd_park(args())
-    assert "agent-session:attempt-1" not in gh.issue_labels
+    assert "agent-session:attempt-1" in gh.issue_labels
 
 
-def test_unpark_survives_the_same_repo(gh):
+def test_unpark_removes_parking_but_preserves_the_attempt_label(gh):
+    gh.issue_labels.append("agent-session:needs-human")
     label_manager.cmd_unpark(args())
-    assert removed(gh) == ["agent-session:attempt-1"]
-    assert "agent-session:attempt-1" not in gh.issue_labels
+    assert removed(gh) == ["agent-session:needs-human"]
+    assert "agent-session:attempt-1" in gh.issue_labels
 
 
 def test_clear_attempts_survives_the_same_repo(gh):

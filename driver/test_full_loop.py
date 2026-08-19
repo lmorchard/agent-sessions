@@ -1158,7 +1158,7 @@ def test_agent_park_comment_under_driver_identity_does_not_unpark(loop):
     It fails without `DRIVER_GH_LOGIN`. The driver's account is a PAT-backed machine
     user, so its login carries no `[bot]` suffix and nothing about the name says
     machine — its own park explanation reads as a human reply, the next pass unparks,
-    the attempt counters reset, and the loop breaker can never fire.
+    and the agent runs again without a human signal.
     """
     gh = FakeGitHub(
         issues=[issue(102, body="Something vague.", labels=["P2"])],
@@ -1188,6 +1188,30 @@ def test_agent_park_comment_under_driver_identity_does_not_unpark(loop):
     assert gh.label_ops == ops_after_first_pass
     assert agent_session_driver.PARK_LABEL in gh.labels_of(102)
     # And the agent was not dispatched a second time.
+    assert len(agent.calls) == 1
+
+
+def test_refine_that_still_needs_review_parks_after_one_pass(loop):
+    """A conclusive refine may leave the authoritative tier unchanged. That is a
+    human handoff, not permission for the driver to spend another attempt on the
+    same inputs.
+    """
+    gh = FakeGitHub(
+        issues=[issue(104, body=spec_body("needs-review"), labels=["P1"])],
+        board_items=[board_item(104)],
+    )
+    agent = StubAgent(
+        stream=agent_stream(final="The risk-gated change still requires human review."),
+    )
+
+    first_code, _ = loop.run(gh, agent=agent)
+    assert first_code == 0
+    assert agent_session_driver.PARK_LABEL in gh.labels_of(104)
+    assert loop.rows("runs.jsonl")[0]["outcome"] == "parked"
+
+    second_code, out = loop.run(gh, agent=agent)
+    assert second_code == 0
+    assert "SKIP    #104" in out
     assert len(agent.calls) == 1
 
 

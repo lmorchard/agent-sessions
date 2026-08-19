@@ -136,20 +136,20 @@ def cmd_park(args: argparse.Namespace) -> None:
     if args.interactive:
         ensure_label_exists(INTERACTIVE_LABEL, "D4C5F9", "interactive CLI session required", repo=args.repo)
 
-    to_remove = removable(args.issue, [other_label] + ATTEMPT_LABELS, repo=args.repo,
+    to_remove = removable(args.issue, [other_label], repo=args.repo,
                           override=getattr(args, "current_labels", None))
     edit_issue_labels(args.issue, add=[target_label], remove=to_remove, repo=args.repo)
-    print(f"Parked #{args.issue} with {target_label} and cleared attempt labels.")
+    print(f"Parked #{args.issue} with {target_label}.")
 
 
 def cmd_unpark(args: argparse.Namespace) -> None:
-    to_remove = removable(args.issue, [PARK_LABEL, INTERACTIVE_LABEL] + ATTEMPT_LABELS, repo=args.repo,
+    to_remove = removable(args.issue, [PARK_LABEL, INTERACTIVE_LABEL], repo=args.repo,
                           override=getattr(args, "current_labels", None))
     if not to_remove:
         print(f"Unparked #{args.issue}: nothing to clear.")
         return
     edit_issue_labels(args.issue, remove=to_remove, repo=args.repo)
-    print(f"Unparked #{args.issue} and cleared parking/attempt labels.")
+    print(f"Unparked #{args.issue} and cleared parking labels.")
 
 
 def cmd_attempt(args: argparse.Namespace) -> None:
