@@ -1802,10 +1802,22 @@ def main(argv: list[str] | None = None) -> int:
             if not prline:
                 if phase in ("triage", "refine"):
                     try:
-                        res = subprocess.run(["gh", "issue", "view", num, "--repo", repo, "--json", "labels"], capture_output=True, text=True, check=True)
-                        lbls = [l.get("name") for l in json.loads(res.stdout).get("labels", []) if isinstance(l, dict)]
+                        res = subprocess.run(
+                            ["gh", "issue", "view", num, "--repo", repo, "--json", "body,labels"],
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                        )
+                        issue_state = json.loads(res.stdout)
+                        lbls = [
+                            label.get("name")
+                            for label in issue_state.get("labels", [])
+                            if isinstance(label, dict)
+                        ]
+                        issue_tier = gate.tier_of(issue_state.get("body", ""))
                     except Exception:
                         lbls = []
+                        issue_tier = "missing"
                     if PARK_LABEL in lbls or INTERACTIVE_LABEL in lbls:
                         outcome = "parked"
                         if "inconclusive" in final_text.lower():
@@ -1813,6 +1825,9 @@ def main(argv: list[str] | None = None) -> int:
                             decrement_attempts(num, repo)
                         else:
                             reason = f"parked by agent during {phase}: {final_text[:400]}"
+                    elif phase == "refine" and issue_tier == "needs-review":
+                        outcome = "parked"
+                        reason = f"refine completed; issue still needs human review: {final_text[:400]}"
                     else:
                         outcome = "incomplete"
                         reason = f"{phase} completed; issue unparked for re-evaluation: {final_text[:400]}"
