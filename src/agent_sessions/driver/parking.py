@@ -5,10 +5,9 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from datetime import timezone
 from pathlib import Path
 
-from agent_sessions.driver import credentials
+from agent_sessions.driver import credentials, output
 
 PARK_LABEL = "agent-session:needs-human"
 INTERACTIVE_LABEL = "agent-session:needs-human-interactive"
@@ -17,8 +16,7 @@ SPEC_LABEL = "agent-session:spec"
 MARKER = "<!-- agent-session:spec -->"
 
 
-def say(msg: str) -> None:
-    sys.stdout.write(f"{msg}\n")
+say = output.say
 
 
 def is_specced(iss: dict) -> bool:
@@ -292,9 +290,8 @@ def get_park_time(issue_number: str | int, state_dir: Path | None) -> str:
 
 
 def notify_human(issue_number: str | int, reason: str, state_dir: Path | None) -> None:
-    from agent_sessions.driver import agent_session_driver
 
-    ts = agent_session_driver.datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = output.now().strftime("%Y%m%dT%H%M%SZ")
     if state_dir and state_dir.exists():
         inbox = state_dir / "inbox.md"
         with open(inbox, "a", encoding="utf-8") as f:

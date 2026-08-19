@@ -1,17 +1,35 @@
 #!/usr/bin/env python3
-"""Agent session board driver and reconciliation loop in Python.
+"""Entry point for the agent session board driver. **Defines nothing itself.**
 
-Stateless state machine that evaluates GitHub repository state (issues, PRs,
-review comments, CI status) and dispatches tightly-scoped, short-lived LLM agents.
+The driver is a stateless state machine: it evaluates GitHub repository state (issues,
+PRs, review comments, CI status) and dispatches tightly-scoped, short-lived LLM agents.
+None of that logic is here.
+
+**Where the code actually lives**, because this file's name suggests otherwise and that
+has sent people to the wrong place:
+
+- `lifecycle.py` -- the run lifecycle and `main()`. `preflight`, `select_queue`,
+  `invoke_agent`, `classify_and_record`, `report_results`. This is the file you want.
+- `router.py` -- which issue, which phase; a pure function over fetched state.
+- `gate.py` -- parses the merge-gate block and classifies the outcome.
+- `writes.py` -- validates and executes the agent's requested writes.
+- `agent_runner.py` -- the backend boundary and its mandatory permission policy.
+- `output.py` -- `say`/`log`/`die` and `now()`, the driver's clock.
+
+This module is a facade kept for two reasons: `pyproject.toml`'s `[project.scripts]`
+entry and `driver/agent-session-driver.sh` both name it, and a large amount of the test
+suite imports symbols through it. It re-exports rather than re-implements.
+
+It used to be more than that. It re-exported the stdlib `datetime` so tests could freeze
+time by patching one attribute, which made five other modules import this one from inside
+function bodies purely to reach the clock -- an import cycle in service of a seam. The
+clock is now `output.now()`. If you are adding something here, that is a sign it belongs
+in one of the modules above instead.
 """
 
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent))
 
 from agent_sessions.driver.board import (
     _BOARD_METADATA_CACHE,
@@ -104,7 +122,6 @@ __all__ = [
     "check_pr_unresolved_threads",
     "classify_and_record",
     "clear_attempt_labels",
-    "datetime",
     "decrement_attempts",
     "die",
     "fetch_board_json",
@@ -134,7 +151,6 @@ __all__ = [
     "run_classify_only",
     "say",
     "select_queue",
-    "timezone",
     "whoami",
     "writes_summary",
 ]

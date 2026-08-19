@@ -5,16 +5,13 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import requests
 
-from agent_sessions.driver import agent_runner, writes
+from agent_sessions.driver import agent_runner, output, writes
 
-
-def say(msg: str) -> None:
-    sys.stdout.write(f"{msg}\n")
+say = output.say
 
 
 def get_pr_unresolved_threads_text(repo: str, pr_num: str | int, token: str) -> str:

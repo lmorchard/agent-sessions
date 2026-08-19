@@ -4,20 +4,16 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 import time
 import uuid
-from datetime import timezone
 from pathlib import Path
+
+from agent_sessions.driver import output
 
 CURRENT_LOCK_ISSUE: str | None = None
 
 
-def log(msg: str) -> None:
-    from agent_sessions.driver import agent_session_driver
-
-    ts = agent_session_driver.datetime.now(timezone.utc).strftime("%H:%M:%SZ")
-    sys.stderr.write(f"{ts}  {msg}\n")
+log = output.log
 
 
 def release_lock(repo_path: Path) -> None:

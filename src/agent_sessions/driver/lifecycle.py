@@ -7,9 +7,7 @@ import atexit
 import json
 import os
 import subprocess
-import sys
 from dataclasses import dataclass
-from datetime import timezone
 from pathlib import Path
 
 import requests
@@ -20,6 +18,7 @@ from agent_sessions.driver import (
     discussion_manager,
     gate,
     gh_query,
+    output,
     router,
     workspace,
 )
@@ -106,20 +105,12 @@ class RunOutcome:
     exit_code: int = 0
 
 
-def log(msg: str) -> None:
-    from agent_sessions.driver import agent_session_driver
-
-    ts = agent_session_driver.datetime.now(timezone.utc).strftime("%H:%M:%SZ")
-    sys.stderr.write(f"{ts}  {msg}\n")
-
-
-def say(msg: str) -> None:
-    sys.stdout.write(f"{msg}\n")
-
-
-def die(msg: str, code: int = 2) -> None:
-    sys.stderr.write(f"error: {msg}\n")
-    sys.exit(code)
+# say/log/die and the clock live in `output`, which imports nothing from this package.
+# They are re-exported here because `agent_session_driver` and the tests import them from
+# this module; the definitions are not duplicated.
+say = output.say
+log = output.log
+die = output.die
 
 
 def hook_template_path() -> Path:
@@ -482,7 +473,7 @@ def run_classify_only(ctx: RunContext) -> int:
 
     cost = 0.0
     session = ""
-    ts = agent_session_driver.datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = output.now().strftime("%Y%m%dT%H%M%SZ")
 
     if rundir and (rundir / "stream.jsonl").is_file():
         say(f"  run dir  {rundir}")
@@ -676,7 +667,7 @@ def select_queue(ctx: RunContext) -> SelectionResult:
     for msg in sel_res["messages"]:
         say(msg)
 
-    ts_str = agent_session_driver.datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts_str = output.now().strftime("%Y%m%dT%H%M%SZ")
     for m in sel_res["unpark_actions"]:
         agent_session_driver.park_label_remove(m, ctx.repo)
 
@@ -738,7 +729,7 @@ def invoke_agent(
 
     agent_session_driver.increment_attempts(issue_num, ctx.repo)
     url = f"https://github.com/{ctx.repo}/issues/{issue_num}"
-    ts = agent_session_driver.datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = output.now().strftime("%Y%m%dT%H%M%SZ")
     rundir = ctx.runs_dir / f"{issue_num}-{ts}"
     rundir.mkdir(parents=True, exist_ok=True)
     raw_output = rundir / "stream.jsonl"

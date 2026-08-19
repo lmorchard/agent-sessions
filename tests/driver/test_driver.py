@@ -425,7 +425,10 @@ def test_mark_board_in_progress_failure_logs_stderr(monkeypatch):
 
     monkeypatch.setattr("subprocess.run", mock_run)
     monkeypatch.setattr("time.sleep", lambda s: None)
-    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.log", logs.append)
+    # Patch the module that emits, not a re-export of it. `board.log` is bound from
+    # `output` at import, so patching `agent_session_driver.log` no longer reaches it --
+    # the same shape as the CURRENT_LOCK_ISSUE patch that silently did nothing.
+    monkeypatch.setattr("agent_sessions.driver.board.log", logs.append)
 
     ok = agent_session_driver.mark_board_in_progress("owner/6", "ITEM_1", retries=2)
     assert ok is False
