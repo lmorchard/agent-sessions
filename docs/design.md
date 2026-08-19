@@ -602,7 +602,9 @@ Closed, but the *reasoning* is still load-bearing.
   uid, a container, or a different machine (#3's GHA host would do it). The spike's proposal — give
   the verifier no `Bash` at all and have the parent run the manifest's named commands — narrows the
   verifier case specifically, and remains unbuilt.
-- **Where park state lives** → **decided 2026-07-29 (#5): a `driver-parked` label on the issue.**
+- **Where park state lives** → **decided 2026-07-29 (#5): a label on the issue.** It shipped as
+  `driver-parked` and was renamed to `agent-session:needs-human` by Epic #145, which moved every
+  marker to a namespaced label.
   This **revises D1 in part**, and the revision is the interesting half. Triage had settled D1 —
   derive the park list from the latest outcome per issue in `runs.jsonl` — and the handoff said not
   to re-litigate it. What reopened it was a different question: *where does the durable store live?*
