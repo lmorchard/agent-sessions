@@ -24,7 +24,7 @@ This phase is triggered by the orchestrator when a PR has passed CI and has no u
     | Tamper diff clean, or every difference logged as an amendment | The verdict recorded at step 5 — and still re-runnable, since the freeze commit is an ancestor of the pushed head. `clean-by-substitute` counts, bare `clean` on an empty `Check files` list does not |
     | Local project gates green | `make check` in the worktree |
     | CI checks on the pushed head all pass | `gh pr checks` — the query below. A local `make check` is **not** a substitute |
-    | No unresolved review threads | The GraphQL query below — there is no `--json reviewThreads` field |
+    | No unresolved review threads and no unaddressed human comments | The GraphQL query below AND `gh pr view <n> --json reviews,comments` |
     | Tier is `auto-ok` (and not downgraded by an amendment) | `spec.md` Tier section |
     | PR touches no risk-gated path | The diff vs. `acceptance-criteria.md`'s risk list |
 
@@ -39,8 +39,9 @@ This phase is triggered by the orchestrator when a PR has passed CI and has no u
     ```
 
     Note that a bot review carrying **no** inline comments produces zero threads while still
-    registering as a review — so check the review itself landed (`gh pr view <n> --json reviews`)
-    rather than reading `0 unresolved` as proof a reviewer ran. If no review has arrived yet,
+    registering as a review — so check the review itself landed (`gh pr view <n> --json reviews,comments`)
+    rather than reading `0 unresolved` as proof a reviewer ran. 
+    Also verify there are no new human PR comments or top-level reviews (like "COMMENTED" or "CHANGES_REQUESTED") that need addressing. If there are new human comments since you last updated the PR, you must count them as unresolved review threads. If no review has arrived yet,
     report `threads: no review yet` and set `verdict: pending` — a review that hasn't arrived is not
     a failure and not a pass; it is not yet derivable.
 

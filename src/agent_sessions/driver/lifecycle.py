@@ -595,6 +595,10 @@ def select_queue(ctx: RunContext) -> SelectionResult:
         else:
             req_rev, revd, rev_decision = agent_session_driver.check_pr_reviews(ctx.repo, prnum)
 
+        has_human_pr = False
+        if "commits" in pr and ("comments" in pr or "reviews" in pr):
+            has_human_pr = gh_query.parse_pr_human_comments(pr, ctx.driver_bots)
+
         pr_details_map[prnum] = {
             "unresolved": unresolved,
             "failed_ci": failed_ci,
@@ -604,6 +608,7 @@ def select_queue(ctx: RunContext) -> SelectionResult:
             "rev_decision": rev_decision,
             "merge_state_status": pr.get("mergeStateStatus"),
             "mergeable": pr.get("mergeable"),
+            "has_new_human_comment": has_human_pr,
         }
 
     config = {

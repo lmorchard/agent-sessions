@@ -62,7 +62,7 @@ def fetch_prs(repo: str, state: str = "open", limit: int = 30) -> list[dict]:
         "--limit",
         str(limit),
         "--json",
-        "number,title,body,headRefName,url,closingIssuesReferences,mergeStateStatus,mergeable,reviewDecision,reviewRequests,reviews,statusCheckRollup,commits",
+        "number,title,body,headRefName,url,closingIssuesReferences,mergeStateStatus,mergeable,reviewDecision,reviewRequests,reviews,statusCheckRollup,commits,comments",
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -187,7 +187,54 @@ def parse_pr_reviews(pr: dict) -> tuple[int, int, str]:
     return req, rev, str(decision)
 
 
+
+def parse_pr_human_comments(pr: dict, bot_logins: frozenset[str] | set[str]) -> bool:
+    """Determine if the PR has a human comment or review newer than the latest bot action."""
+    bot_logins_lower = {b.lower() for b in bot_logins}
+    latest_bot_action = ""
+
+    for commit in pr.get("commits", []):
+        if isinstance(commit, dict):
+            cd = commit.get("committedDate", "")
+            if cd > latest_bot_action:
+                latest_bot_action = cd
+
+    for comment in pr.get("comments", []):
+        if isinstance(comment, dict):
+            author = comment.get("author") or {}
+            if author.get("login", "").lower() in bot_logins_lower:
+                cd = comment.get("createdAt", "")
+                if cd > latest_bot_action:
+                    latest_bot_action = cd
+
+    for review in pr.get("reviews", []):
+        if isinstance(review, dict):
+            author = review.get("author") or {}
+            if author.get("login", "").lower() in bot_logins_lower:
+                rd = review.get("submittedAt", "")
+                if rd > latest_bot_action:
+                    latest_bot_action = rd
+
+    for review in pr.get("reviews", []):
+        if isinstance(review, dict):
+            author = review.get("author") or {}
+            if author.get("login", "").lower() not in bot_logins_lower:
+                rd = review.get("submittedAt", "")
+                if rd > latest_bot_action:
+                    return True
+
+    for comment in pr.get("comments", []):
+        if isinstance(comment, dict):
+            author = comment.get("author") or {}
+            if author.get("login", "").lower() not in bot_logins_lower:
+                cd = comment.get("createdAt", "")
+                if cd > latest_bot_action:
+                    return True
+
+    return False
+
 def fetch_open_prs(repo: str) -> list[dict]:
+
     """Fetch open PRs from GitHub for the given repo."""
     return fetch_prs(repo, state="open")
 
