@@ -120,12 +120,11 @@ gate. Revisit if an unattended run ever weakens a test to admit its own change.
 ### Drivable (the allowlist)
 
 - **`tests/**` and `driver/**`, except `driver/agent-session-driver.sh`** — compatibility assets, fixtures, and
-  the `tests/driver/test_*.py` harness tests. Note what this leaves: the tests are drivable, while the
+  the `tests/driver/test_*.py` and `tests/scripts/test_*.py` harness tests. Note what this leaves: the tests are drivable, while the
   launcher and every unlisted `src/**` implementation path remain `needs-review`.
 - **`docs/`** — including `findings.md` and session notes.
 - **`Makefile`**.
-- **`scripts/**`** — root-level tests and support assets, including
-  `scripts/test_docs_check.py`. This does not include the shipping implementations under
+- **`scripts/**`** — support scripts and assets. This does not include the shipping implementations under
   `src/agent_sessions/scripts/`, which remain gated by default. Added 2026-07-29; it was unlisted
   from creation until then, which is what prompted the allowlist.
 

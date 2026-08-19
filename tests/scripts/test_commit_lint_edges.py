@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from agent_sessions.scripts import commit_lint  # noqa: E402
 
 # --- defect 1: a doubled backtick run was not recognised as quoting ----------
@@ -129,7 +129,7 @@ def test_a_tilde_fence_is_not_treated_as_quoting():
 
 # --- entry-point regressions, from the Copilot review on PR #49 -------------
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: A range with one known quoted keyword: the commit that closed issue 7.
 DIRTY_RANGE = "2cbe106~1..2cbe106"

@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 MAKEFILE = REPO_ROOT / "Makefile"
 
 _TARGET = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*)\s*:(?!=)")

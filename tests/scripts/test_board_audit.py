@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from agent_sessions.scripts import board_audit  # noqa: E402
 
 
@@ -573,7 +573,7 @@ def test_cli_rejects_invalid_project_and_repository_arguments(arguments):
 def test_make_board_audit_binds_this_repository():
     completed = subprocess.run(
         ["make", "--no-print-directory", "-n", "board-audit"],
-        cwd=Path(__file__).resolve().parent.parent,
+        cwd=Path(__file__).resolve().parents[2],
         capture_output=True,
         text=True,
         check=True,
