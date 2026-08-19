@@ -112,15 +112,15 @@ under `src/agent_sessions/scripts/` and their root-level tests under `scripts/`.
 
 **The residual risk, named rather than gated away.** Drivable harness tests can weaken the
 assertions that protect gated shipping code. The broad reading would close that, but it would also
-sweep in `driver/test_driver.py`, `driver/test_gate.py`, `driver/test_park_state.py`, root-level
+sweep in `tests/driver/test_driver.py`, `tests/driver/test_gate.py`, `tests/driver/test_park_state.py`, root-level
 detector tests, and the `Makefile` recipes — all needed for this repo to dogfood itself. The
 mitigations are tests that import what ships, `make check` in every PR, and a human at the merge
 gate. Revisit if an unattended run ever weakens a test to admit its own change.
 
 ### Drivable (the allowlist)
 
-- **`driver/**`, except `driver/agent-session-driver.sh`** — compatibility assets, fixtures, and
-  the `driver/test_*.py` harness tests. Note what this leaves: the tests are drivable, while the
+- **`tests/**` and `driver/**`, except `driver/agent-session-driver.sh`** — compatibility assets, fixtures, and
+  the `tests/driver/test_*.py` harness tests. Note what this leaves: the tests are drivable, while the
   launcher and every unlisted `src/**` implementation path remain `needs-review`.
 - **`docs/`** — including `findings.md` and session notes.
 - **`Makefile`**.
@@ -147,7 +147,7 @@ the schema. **Widening `writes.KINDS` or the coordinator's operational-write sur
 to put to the human, not a drift to discover in a diff.**
 
 **The residual risk this partition creates, named at the moment it was created.** Gating the Python
-coordinator while leaving `driver/test_*.py` drivable means **the routing is protected and the
+coordinator while leaving `tests/driver/test_*.py` drivable means **the routing is protected and the
 fixtures protecting it are not**. A run cannot edit the parking case lists, but it
 can weaken the assertions that would have caught someone else doing so, and `make driver-test` would
 stay green. This is deliberate — the fixture suites are a large share of what makes this repo

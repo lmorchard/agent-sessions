@@ -66,7 +66,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 
 #: The linted files, as a glob relative to ROOT. See "Scope" above.
-SCOPE = "driver/test_*.py"
+SCOPE = "tests/driver/test_*.py"
 
 #: `grep -q`, `-qE` or `-qF` with no `#` earlier on the line. `[^#]*` cannot
 #: consume a `#`, so a commented-out grep can never match -- that false positive
