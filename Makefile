@@ -66,7 +66,7 @@ driver-check:
 driver-test: gate-test
 
 gate-test:
-	@uv run --quiet pytest -n auto driver/test_*.py scripts/test_*.py
+	@uv run --quiet pytest -n auto tests/driver/test_*.py scripts/test_*.py
 
 park-test: gate-test
 
@@ -82,9 +82,9 @@ park-test: gate-test
 # each backend's complete runtime policy.
 skill-readonly:
 	@uv run pytest -q \
-	  driver/test_agent_runner.py::test_claude_command_restores_mandatory_permission_policy \
-	  driver/test_agent_runner.py::test_caller_rules_cannot_replace_mandatory_denials \
-	  driver/test_agent_runner.py::test_opencode_command_applies_mandatory_permission_policy
+	  tests/driver/test_agent_runner.py::test_claude_command_restores_mandatory_permission_policy \
+	  tests/driver/test_agent_runner.py::test_caller_rules_cannot_replace_mandatory_denials \
+	  tests/driver/test_agent_runner.py::test_opencode_command_applies_mandatory_permission_policy
 
 # Live evidence for the backend permission boundary. Deliberately excluded from
 # `check`: it invokes a configured model and requires the operator to inspect the
@@ -118,7 +118,7 @@ docs-check:
 # next to eight live instances for two days without preventing a ninth. So: a
 # detector, not an exhortation. Same reasoning as docs-check above.
 #
-# Scope is driver/test_*.py. See issue #28 and
+# Scope is tests/driver/test_*.py. See issue #28 and
 # src/agent_sessions/scripts/assertion_lint.py.
 assertion-lint:
 	@uv run python -m agent_sessions.scripts.assertion_lint

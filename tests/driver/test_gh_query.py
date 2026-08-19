@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from agent_sessions.driver import gh_query
 
 
 def test_module_imports_without_site_packages():
     """Verify the module relies only on the stdlib."""
-    module_path = Path(__file__).parent.parent / "src" / "agent_sessions" / "driver" / "gh_query.py"
+    module_path = Path(__file__).resolve().parents[2] / "src" / "agent_sessions" / "driver" / "gh_query.py"
     cmd = [sys.executable, "-I", "-S", "-c", f"import sys; sys.path.insert(0, '{module_path.parent}'); import gh_query"]
     result = subprocess.run(cmd, capture_output=True, text=True)
     assert result.returncode == 0, f"Module failed to import without site-packages: {result.stderr}"

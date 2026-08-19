@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from agent_sessions.driver import agent_session_driver
 
 
@@ -57,7 +57,7 @@ def test_build_prompt(tmp_path: Path, monkeypatch):
 
 
 def test_driver_cli_help(tmp_path: Path):
-    driver_script = Path(__file__).parent / "agent-session-driver.sh"
+    driver_script = Path(__file__).resolve().parents[2] / "driver" / "agent-session-driver.sh"
     res = subprocess.run([str(driver_script), "--help"], capture_output=True, text=True)
     assert res.returncode == 0
     assert "--repo" in res.stdout

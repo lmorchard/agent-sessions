@@ -58,7 +58,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from agent_sessions.driver import agent_runner, agent_session_driver, credentials
 
 REPO = "owner/repo"
@@ -1128,7 +1128,7 @@ def test_selection_output_is_byte_identical_to_the_golden(loop):
         GOLDEN.parent.mkdir(parents=True, exist_ok=True)
         GOLDEN.write_text(out, encoding="utf-8")
         pytest.fail(
-            f"rewrote {GOLDEN.relative_to(Path(__file__).parent.parent)} from this run. "
+            f"rewrote {GOLDEN.relative_to(Path(__file__).resolve().parents[2])} from this run. "
             "Read the diff, then re-run without UPDATE_SELECT_GOLDEN."
         )
 

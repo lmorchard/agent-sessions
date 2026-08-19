@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from agent_sessions.driver import gate  # noqa: E402
 
 
@@ -218,7 +218,7 @@ def test_shipped_spec_template_parses_through_the_shipped_parser():
     adjacent to what the check names. This asserts the tier anchor alone.
     """
     template = (
-        Path(__file__).parent.parent
+        Path(__file__).resolve().parents[2]
         / "skills/agent-session/references/spec-template.md"
     ).read_text()
     assert gate.tier_of(template) in ("auto-ok", "needs-review")
@@ -242,7 +242,7 @@ def test_budget_reclass(outcome, cost, budget, expected):
 def _run(args, stdin):
     r = subprocess.run([sys.executable, "-m", "agent_sessions.driver.gate", *args],
                        input=stdin, capture_output=True, text=True, check=True,
-                       env={**os.environ, "PYTHONPATH": str(Path(__file__).parent.parent / "src")})
+                       env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")})
     return json.loads(r.stdout)
 
 
@@ -264,7 +264,7 @@ def test_cli_budget_reclass():
 
 def test_module_imports_without_site_packages():
     """C5: gate.py must stay stdlib-only so the driver remains portable."""
-    d = Path(__file__).parent.parent / "src" / "agent_sessions" / "driver"
+    d = Path(__file__).resolve().parents[2] / "src" / "agent_sessions" / "driver"
     subprocess.run([sys.executable, "-I", "-S", "-c",
                     f"import sys; sys.path.insert(0, {str(d)!r}); import gate"],
                    check=True, capture_output=True)

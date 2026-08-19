@@ -172,7 +172,7 @@ def live_bash_assertions() -> int | None:
     try:
         env = dict(os.environ)
         env["AGENT_SESSIONS_GATE_TEST_WIRING_INNER_RUN"] = "1"
-        r = subprocess.run(["uv", "run", "pytest", "--collect-only", "-q", "driver/test_*.py", "scripts/test_*.py"],
+        r = subprocess.run(["uv", "run", "pytest", "--collect-only", "-q", "tests/driver/test_*.py", "scripts/test_*.py"],
                            capture_output=True, text=True, cwd=ROOT, timeout=10, env=env)
         if r.returncode not in (0, 5):
             return None

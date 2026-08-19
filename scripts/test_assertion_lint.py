@@ -119,29 +119,29 @@ check "unparseable sha warns instead of reading as current" "1" "$(_warn_count "
 # --- conjunct 1: the presence grep is reported ------------------------------
 
 def test_presence_grep_assertion_is_reported(isolate):
-    f = write(isolate, "driver/test_example.py", PRESENCE_GREP)
+    f = write(isolate, "tests/driver/test_example.py", PRESENCE_GREP)
     assert assertion_lint.scan_file(f) == [(PRESENCE_GREP_LINE, PRESENCE_GREP_TEXT)]
 
 
 def test_every_presence_grep_variant_is_reported(isolate):
     """-qE and -qF are the same defect, and every offending line is reported."""
-    f = write(isolate, "driver/test_example.py", PRESENCE_GREP_VARIANTS)
+    f = write(isolate, "tests/driver/test_example.py", PRESENCE_GREP_VARIANTS)
     assert [n for n, _ in assertion_lint.scan_file(f)] == [3, 4, 9]
 
 
 # --- conjunct 2: a count comparison is not reported -------------------------
 
 def test_count_comparison_is_not_reported(isolate):
-    f = write(isolate, "driver/test_example.py", COUNT_COMPARISON)
+    f = write(isolate, "tests/driver/test_example.py", COUNT_COMPARISON)
     assert assertion_lint.scan_file(f) == []
 
 
-# --- conjunct 3: the real driver/test_park_state.py is clean ----------------
+# --- conjunct 3: the real tests/driver/test_park_state.py is clean ----------------
 
 def test_real_park_state_suite_reports_nothing():
     """Deliberately the live file, not a copy: a detector that flags everything
     passes a synthetic clean fixture, and this one it cannot."""
-    target = REPO_ROOT / "driver" / "test_park_state.py"
+    target = REPO_ROOT / "tests" / "driver" / "test_park_state.py"
     assert target.exists(), f"negative fixture is missing: {target}"
     assert assertion_lint.scan_file(target) == []
 
@@ -149,22 +149,22 @@ def test_real_park_state_suite_reports_nothing():
 # --- the false positive that bit the issue's own author ---------------------
 
 def test_a_comment_describing_a_presence_grep_is_not_reported(isolate):
-    f = write(isolate, "driver/test_example.py", COMMENT_ONLY)
+    f = write(isolate, "tests/driver/test_example.py", COMMENT_ONLY)
     assert assertion_lint.scan_file(f) == []
 
 
-# --- scope: driver/test_*.py, and the Makefile is out of it -----------------
+# --- scope: tests/driver/test_*.py, and the Makefile is out of it -----------------
 
 def test_lint_files_reports_the_offending_file_and_line(isolate):
-    write(isolate, "driver/test_example.py", PRESENCE_GREP)
+    write(isolate, "tests/driver/test_example.py", PRESENCE_GREP)
     assertion_lint.lint_files()
     assert len(assertion_lint.failures) == 1
-    assert "driver/test_example.py" in assertion_lint.failures[0]
+    assert "tests/driver/test_example.py" in assertion_lint.failures[0]
     assert str(PRESENCE_GREP_LINE) in assertion_lint.failures[0]
 
 
 def test_files_outside_the_declared_scope_are_not_linted(isolate):
-    """Scope is `driver/test_*.py`; non-test files remain outside it."""
+    """Scope is `tests/driver/test_*.py`; non-test files remain outside it."""
     write(isolate, "Makefile", PRESENCE_GREP)
     write(isolate, "driver/agent-session-driver.sh", PRESENCE_GREP)
     assertion_lint.lint_files()

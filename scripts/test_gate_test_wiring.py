@@ -48,7 +48,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 INNER_RUN_ENV = "AGENT_SESSIONS_GATE_TEST_WIRING_INNER_RUN"
 
 #: The globs the criteria are written against.
-TEST_FILE_GLOBS = ("driver/test_*.py", "scripts/test_*.py")
+TEST_FILE_GLOBS = ("tests/driver/test_*.py", "scripts/test_*.py")
 
 _NODE_ID = re.compile(r"^(?P<path>\S+\.py)::(?P<rest>\S.*)$")
 _MAKE_NOISE = re.compile(r"^make(\[\d+\])?:")
