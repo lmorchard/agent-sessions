@@ -41,14 +41,14 @@ import pytest
 
 pytestmark = pytest.mark.xdist_group(name="gate_wiring")
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: Set only on the `make gate-test` subprocess C2 spawns. Nothing else in the repo
 #: sets or reads it; if you see it in an environment, a C2 run is in progress.
 INNER_RUN_ENV = "AGENT_SESSIONS_GATE_TEST_WIRING_INNER_RUN"
 
 #: The globs the criteria are written against.
-TEST_FILE_GLOBS = ("tests/driver/test_*.py", "scripts/test_*.py")
+TEST_FILE_GLOBS = ("tests/driver/test_*.py", "tests/scripts/test_*.py")
 
 _NODE_ID = re.compile(r"^(?P<path>\S+\.py)::(?P<rest>\S.*)$")
 _MAKE_NOISE = re.compile(r"^make(\[\d+\])?:")
@@ -267,6 +267,7 @@ def test_new_test_file_runs_under_gate_test_with_no_makefile_edit():
 
     probe = (
         REPO_ROOT
+        / "tests"
         / "scripts"
         / f"test_zz_gate_wiring_probe_{os.getpid()}_{secrets.token_hex(4)}.py"
     )

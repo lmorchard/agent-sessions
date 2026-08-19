@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-PHASES = sorted((Path(__file__).resolve().parent.parent / "skills" / "agent-session" / "phases").glob("*.md"))
+PHASES = sorted((Path(__file__).resolve().parents[2] / "skills" / "agent-session" / "phases").glob("*.md"))
 
 #: Commands that write to GitHub, and are therefore refused by a read-scoped token.
 WRITE_COMMANDS = (
@@ -80,11 +80,11 @@ def test_the_manifest_reference_exists_and_lists_every_kind():
     """The doc the phases now point at has to agree with the code they run under."""
     import sys
 
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
     from agent_sessions.driver import writes
 
     doc = (
-        Path(__file__).resolve().parent.parent
+        Path(__file__).resolve().parents[2]
         / "skills" / "agent-session" / "references" / "write-manifest.md"
     ).read_text(encoding="utf-8")
 

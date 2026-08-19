@@ -66,7 +66,7 @@ driver-check:
 driver-test: gate-test
 
 gate-test:
-	@uv run --quiet pytest -n auto tests/driver/test_*.py scripts/test_*.py
+	@uv run --quiet pytest -n auto tests/driver/test_*.py tests/scripts/test_*.py
 
 park-test: gate-test
 
