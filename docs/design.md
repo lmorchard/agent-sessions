@@ -391,20 +391,16 @@ written to have less to be wrong about.)*
 **The backlog is not maintained here any more.** It is on [project 9](https://github.com/users/lmorchard/projects/9) as issues carrying
 criteria, guards, a tier, and the check results that were actually run.
 
-Move 7 moved it there because prose is a bad backlog, and this section proved the point twice: it was
-reconciled at a **5-of-11 stale rate**, then rotted again within two days — one item was done, one had
-been resolved, and the numbering had a gap where a removed item used to be.
+Move 7 moved it there because prose is a bad backlog, and this section proved the point three
+times. It was reconciled at a **5-of-11 stale rate**; it rotted again within two days; and then it
+grew the table back anyway — eight rows, of which seven were closed issues by 2026-08-19. CLAUDE.md
+cites this very section as the reason not to duplicate a live source in prose, which did not stop it.
 
-| Theme | Issue |
-|---|---|
-| `PreToolUse` merge-block hook — **blocks phase 3** | [#1](https://github.com/lmorchard/agent-sessions/issues/1) |
-| Adjacent-evidence sweep — **blocks phase 3** | [#2](https://github.com/lmorchard/agent-sessions/issues/2) |
-| GHA host | [#3](https://github.com/lmorchard/agent-sessions/issues/3) |
-| `parked.jsonl` — no un-park record, and per-machine | [#5](https://github.com/lmorchard/agent-sessions/issues/5) |
-| `ci-stale` firing on a real PR | [#6](https://github.com/lmorchard/agent-sessions/issues/6) |
-| Multi-phase `execute` (vehicle: decafclaw #625) | [#7](https://github.com/lmorchard/agent-sessions/issues/7) |
-| Nothing validates the frozen checks before they lock | [#12](https://github.com/lmorchard/agent-sessions/issues/12) |
-| Driver silently drops marker-less issues | [#13](https://github.com/lmorchard/agent-sessions/issues/13) |
+So there is no table here now. Run the query instead:
+
+```sh
+gh issue list --repo lmorchard/agent-sessions --state open
+```
 
 **Not on the board, because it is another project's call:** decafclaw **#566** carries three open
 questions for a human — a loop would have to pick the design rather than implement one.

@@ -17,9 +17,11 @@ conventions + gotchas only.
 - **An autonomy harness with a skill component.** The system's orchestration lives in
   `src/agent_sessions/driver/`; `driver/agent-session-driver.sh` is a compatibility launcher. The
   skill component lives at `skills/agent-session/` in *this repo* — it is NOT installed in
-  `~/.claude/skills/`. Test it by running its phase files manually (dogfooding), not via a
+  any harness's skills directory (`~/.claude/skills/`, `~/.codex/skills/`). Test it by running its
+  phase files manually (dogfooding), not via a
   registered skill.
-- **The reference skill it derives from** is at `~/.claude/skills/dev-session/` (phases +
+- **The reference skill it derives from** is `dev-session`, installed per harness
+  (`~/.claude/skills/dev-session/`, `~/.codex/skills/dev-session/` -- separate copies) (phases +
   references). Adapt from it; don't edit it.
 
 ## Project board
@@ -181,7 +183,8 @@ implementation). Every mode moves a weak-oracle "a human decides" toward a stron
   execution's per-phase work). Working context stays in the subagent, not the main loop.
 - **The board-driver is NOT part of the skill.** The unattended burndown loop (pick Ready
   issue → run → tiered merge) is orchestration that *invokes* the skill, each run a fresh
-  context. It lives above the skill (headless `claude -p` / GHA). Don't build it into a mode.
+  context. It lives above the skill (headless `claude -p`, `codex exec`, or GHA). Don't build it
+  into a mode.
 
 ## Criteria + tier (the core contract)
 
