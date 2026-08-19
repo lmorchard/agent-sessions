@@ -215,7 +215,7 @@ def build_prompt(url_or_number: str | int, phase: str, skill_dir: Path, writes_f
 
     phase_file = "phases/express.md" if phase == "execute" else f"phases/{phase}.md"
     comments_note = ""
-    if phase == "triage":
+    if phase in ("triage", "refine"):
         comments_note = (
             "\nWhen viewing the issue using gh issue view, pass --comments so you read the full comment thread.\n"
         )

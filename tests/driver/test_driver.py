@@ -55,6 +55,9 @@ def test_build_prompt(tmp_path: Path, monkeypatch):
     prompt = agent_session_driver.build_prompt(42, "express", tmp_path)
     assert "issue #42" in prompt
 
+    prompt_refine = agent_session_driver.build_prompt(42, "refine", tmp_path)
+    assert "pass --comments" in prompt_refine
+
 
 def test_driver_cli_help(tmp_path: Path):
     driver_script = Path(__file__).resolve().parents[2] / "driver" / "agent-session-driver.sh"
