@@ -33,10 +33,17 @@ def run_gh(cmd: list[str], repo: str | None = None) -> str:
 
 
 def ensure_label_exists(name: str, color: str, description: str, repo: str | None = None) -> None:
+    """Create `name` if absent. Tolerates "already exists" and nothing else.
+
+    The bare `except RuntimeError: pass` made a 403 from a read-only token look exactly
+    like the intended already-exists case, so a token that could not create labels
+    reported success and the caller went on to reference a label that was never made.
+    """
     try:
         run_gh(["label", "create", name, "--color", color, "--description", description], repo=repo)
-    except RuntimeError:
-        pass
+    except RuntimeError as e:
+        if "already exists" not in str(e).lower():
+            raise
 
 
 def removable(issue: int, wanted: list[str], repo: str | None = None, override: str | None = None) -> list[str]:
@@ -67,13 +74,26 @@ def edit_issue_labels(issue: int, add: list[str] | None = None, remove: list[str
 
 
 def get_current_labels(issue: int, repo: str | None = None, override: str | None = None) -> list[str]:
+    """The issue's current labels. Raises rather than reporting "no labels" on failure.
+
+    This used to `except Exception: return []`, which made a rate limit, an auth error
+    and a genuinely unlabelled issue indistinguishable -- and every caller reads the
+    result as fact:
+
+    - `validate_transition` computes `is_parked` from it, so an empty list means "not
+      parked" and the guard permits re-speccing or re-attempting a parked issue;
+    - `removable` narrows every remove list with it, so an empty list silently skips
+      removals the command was asked to perform.
+
+    Both failure modes are a null rendering as a positive, which is this project's
+    defect class 2. Propagating lets `main` exit non-zero, and lets the driver's callers
+    -- which wrap these invocations in `except Exception` -- degrade to a no-op instead
+    of a wrong action.
+    """
     if override is not None:
         return [l.strip() for l in override.split(",") if l.strip()]
-    try:
-        out = run_gh(["issue", "view", str(issue), "--json", "labels", "--jq", ".labels[].name"], repo=repo)
-        return [l.strip() for l in out.splitlines() if l.strip()]
-    except Exception:
-        return []
+    out = run_gh(["issue", "view", str(issue), "--json", "labels", "--jq", ".labels[].name"], repo=repo)
+    return [l.strip() for l in out.splitlines() if l.strip()]
 
 
 def validate_transition(command: str, current_labels: list[str], args: argparse.Namespace) -> str | None:
@@ -112,7 +132,8 @@ def cmd_spec(args: argparse.Namespace) -> None:
     tier_label = AUTO_OK_LABEL if getattr(args, "tier", "auto-ok") == "auto-ok" else NEEDS_REVIEW_LABEL
     other_tier = NEEDS_REVIEW_LABEL if getattr(args, "tier", "auto-ok") == "auto-ok" else AUTO_OK_LABEL
     ensure_label_exists(tier_label, "0E8A16" if getattr(args, "tier", "auto-ok") == "auto-ok" else "FBCA04", "Tier label", repo=args.repo)
-    to_remove = [PARK_LABEL, INTERACTIVE_LABEL, other_tier] + ATTEMPT_LABELS
+    to_remove = removable(args.issue, [PARK_LABEL, INTERACTIVE_LABEL, other_tier] + ATTEMPT_LABELS,
+                          repo=args.repo, override=getattr(args, "current_labels", None))
     edit_issue_labels(args.issue, add=[SPEC_LABEL, tier_label], remove=to_remove, repo=args.repo)
     print(f"Applied {SPEC_LABEL} ({tier_label}) to #{args.issue} and cleared parking/attempt labels.")
 
@@ -160,7 +181,8 @@ def cmd_attempt(args: argparse.Namespace) -> None:
     ensure_label_exists(attempt_label, "D93F0B", "Execution attempt counter", repo=args.repo)
 
     other_attempts = [l for l in ATTEMPT_LABELS if l != attempt_label]
-    to_remove = [PARK_LABEL, INTERACTIVE_LABEL] + other_attempts
+    to_remove = removable(args.issue, [PARK_LABEL, INTERACTIVE_LABEL] + other_attempts,
+                          repo=args.repo, override=getattr(args, "current_labels", None))
     edit_issue_labels(args.issue, add=[attempt_label], remove=to_remove, repo=args.repo)
     print(f"Set {attempt_label} on #{args.issue}.")
 
@@ -177,7 +199,8 @@ def cmd_clear_attempts(args: argparse.Namespace) -> None:
 
 def cmd_merge_ready(args: argparse.Namespace) -> None:
     ensure_label_exists(MERGE_READY_LABEL, "2E8A16", "Eligible for auto-merge", repo=args.repo)
-    to_remove = [PARK_LABEL, INTERACTIVE_LABEL] + ATTEMPT_LABELS
+    to_remove = removable(args.issue, [PARK_LABEL, INTERACTIVE_LABEL] + ATTEMPT_LABELS,
+                          repo=args.repo, override=getattr(args, "current_labels", None))
     edit_issue_labels(args.issue, add=[MERGE_READY_LABEL], remove=to_remove, repo=args.repo)
     print(f"Set {MERGE_READY_LABEL} on #{args.issue} and cleared parking/attempt labels.")
 
@@ -226,7 +249,14 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
-    current = get_current_labels(args.issue, repo=args.repo, override=args.current_labels)
+    try:
+        current = get_current_labels(args.issue, repo=args.repo, override=args.current_labels)
+    except RuntimeError as e:
+        # Fail closed: without the issue's labels neither the transition guard nor the
+        # remove-list narrowing can be trusted, so do not proceed on a guess.
+        print(f"Error: could not read labels for #{args.issue}: {e}", file=sys.stderr)
+        return 1
+
     err = validate_transition(args.command, current, args)
     if err:
         print(f"Error: {err}", file=sys.stderr)
