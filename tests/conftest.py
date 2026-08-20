@@ -34,8 +34,10 @@ would be an assertion that something is true rather than a check that it is.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+import subprocess
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -130,3 +132,110 @@ def clear_git_lock_global() -> Iterator[None]:
     """
     yield
     locks.CURRENT_LOCK_ISSUE = None
+
+
+# --- a GitHub fake that cannot answer an unmodelled call ----------------------
+#
+# `recording_gh` exists because two suites answered **every unmodelled `gh` call with
+# success**:
+#
+#     class MockResult:
+#         stdout = "{}"
+#         returncode = 0
+#
+#     def mock_run(cmd, *args, **kwargs):
+#         if <one specific shape>:
+#             return <a modelled answer>
+#         return MockResult()          # <- everything else
+#
+# `test_full_loop.py`'s docstring names this exact anti-pattern as the reason
+# `FakeGitHub.unhandled` and `field_gaps` exist: *"a stub that ignores the requested field
+# list cannot see a missing field."* The consequence is that
+# `test_workspace_driver_integration.py` would pass if the driver started issuing a
+# completely different set of GitHub calls — it asserts what the driver does with the
+# answers, never that it asked the questions.
+#
+# The property this restores is the load-bearing one: **an unmodelled call is not free.**
+# It is recorded, and the test fails on it, so a new external call cannot slip in behind a
+# catch-all. The driver wraps nearly every `subprocess.run` in `except Exception`, so a
+# fake that *raised* would be swallowed and the pass would quietly take a fallback branch —
+# which is why unhandled calls are collected and asserted at the end rather than thrown.
+#
+# **This is deliberately not `FakeGitHub`.** That models issues, PRs, board items and
+# reactions as mutable fixture state, which is right for a full driver pass and far more
+# than a `preflight` unit test needs. Moving `FakeGitHub`, `StubAgent` and `LoopHarness`
+# here so all three suites can share them is the other half of #261's X2 and is left
+# undone: it is a ~700-line mechanical move of a working harness, and the defect X2 is
+# actually about is the silent success, which this closes without it.
+
+
+class Result:
+    """The shape of `subprocess.CompletedProcess` the driver actually reads."""
+
+    def __init__(self, stdout: str = "", returncode: int = 0, stderr: str = ""):
+        self.stdout = stdout
+        self.returncode = returncode
+        self.stderr = stderr
+
+
+class RecordingGh:
+    """A `subprocess.run` replacement that records what it was not asked to model.
+
+    Matchers are `(predicate, response)` pairs, tried in order. `git` is passed through
+    to the real `subprocess.run` unless a matcher claims it first, because several
+    suites drive a real throwaway repository.
+    """
+
+    def __init__(self, real_run: Callable[..., Any]):
+        self._real_run = real_run
+        self._matchers: list[tuple[Callable[[list[str]], bool], Callable[[list[str]], Any]]] = []
+        self.calls: list[list[str]] = []
+        self.unhandled: list[list[str]] = []
+        self.pass_through_git = True
+
+    def on(self, predicate, response) -> RecordingGh:
+        """Register a matcher, tried in registration order.
+
+        `response` may be a `Result`, a plain string (taken as stdout with exit 0, which
+        is what almost every call wants), or a callable taking the argv.
+        """
+        if callable(response):
+            handler = response
+        elif isinstance(response, str):
+            handler = lambda _argv, text=response: Result(stdout=text)  # noqa: E731
+        else:
+            handler = lambda _argv, value=response: value  # noqa: E731
+        self._matchers.append((predicate, handler))
+        return self
+
+    def __call__(self, cmd, *args, **kwargs):
+        argv = [str(c) for c in cmd] if isinstance(cmd, (list, tuple)) else [str(cmd)]
+        self.calls.append(argv)
+        for predicate, response in self._matchers:
+            if predicate(argv):
+                return response(argv)
+        if self.pass_through_git and argv[:1] == ["git"]:
+            return self._real_run(cmd, *args, **kwargs)
+        # Recorded, not raised: the driver swallows exceptions from nearly every
+        # subprocess call, so raising here would be caught and the test would silently
+        # grade a fallback branch instead of the path under test.
+        self.unhandled.append(argv)
+        return Result(stdout="", returncode=1)
+
+    def assert_fully_modelled(self) -> None:
+        assert self.unhandled == [], (
+            "the code under test issued command(s) this fake does not model, so it took an "
+            f"error fallback rather than the path being graded: {self.unhandled}"
+        )
+
+
+@pytest.fixture
+def recording_gh(monkeypatch: pytest.MonkeyPatch) -> Iterator[RecordingGh]:
+    """Install a `RecordingGh` over `subprocess.run` and assert it was fully modelled.
+
+    The assertion runs on teardown, so a test cannot pass by forgetting to check.
+    """
+    fake = RecordingGh(subprocess.run)
+    monkeypatch.setattr("subprocess.run", fake)
+    yield fake
+    fake.assert_fully_modelled()
