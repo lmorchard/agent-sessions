@@ -26,9 +26,8 @@ of them is how a Codex-hosted run ends up unable to see its own board configurat
   - `done: Done`
 ```
 
-*(The example uses the casing GitHub's own templates ship — lowercase `progress`/`review`. An
-earlier version of this file wrote `In Progress` / `In Review` three lines above a warning that real
-boards don't use that casing.)*
+*(The example uses the casing GitHub's own templates ship — lowercase `progress`/`review`. Read the
+board's real option names before relying on either casing; they differ per board.)*
 
 The skill reads these as declarative names and resolves the underlying GraphQL IDs at runtime
 — don't hand-write IDs into the instruction file, they're noisy and tied to the field schema.
