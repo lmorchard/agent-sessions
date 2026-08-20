@@ -384,9 +384,60 @@ def risk_policy_section(path: Path) -> str:
     return "\n".join(line.rstrip() for line in lines[starts[0] : ends[0]]).strip()
 
 
+#: A pointer file defers to another instruction file rather than restating it. The
+#: ceiling is generous on purpose: it exists to stop a full second instruction file
+#: qualifying as a pointer by mentioning the first, not to police a preamble.
+POINTER_MAX_LINES = 40
+
+
+def is_policy_pointer(path: Path, target: str = "CLAUDE.md") -> bool:
+    """True if `path` defers its risk-path policy to `target` instead of carrying one.
+
+    Three conditions, and the first is the one that matters: a file carrying its own
+    `## Risk-gated paths` section is **not** a pointer, however prominently it also
+    links the target. That half-migrated shape -- a link plus a surviving copy -- is
+    exactly what this whole change exists to prevent, because the copy is what drifts.
+    Linking must not buy an exemption from parity.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    lines = text.splitlines()
+    if any(line.startswith("## Risk-gated paths") for line in lines):
+        return False
+    if len([ln for ln in lines if ln.strip()]) > POINTER_MAX_LINES:
+        return False
+    return target in text
+
+
 def check_risk_policy_parity() -> None:
-    """AGENTS.md and CLAUDE.md must expose one identical risk-path policy."""
-    paths = (ROOT / "AGENTS.md", ROOT / "CLAUDE.md")
+    """One risk-path policy, whether AGENTS.md copies CLAUDE.md's or defers to it.
+
+    The two files were byte-identical and only this section was guarded. Everything
+    outside it drifted: a find-and-replace rewrote a filesystem path to one that exists
+    nowhere, a second invented a `Codex -p` flag, and one section quietly lost a rule
+    from AGENTS.md alone. The guarded part stayed in sync and the unguarded remainder
+    did not -- and there is no bound on how much unguarded remainder there will be. So
+    a pointer is an accepted shape, and the checks are about the ways a pointer can be
+    wrong rather than a relaxation of the rule.
+    """
+    agents, claude = ROOT / "AGENTS.md", ROOT / "CLAUDE.md"
+
+    if is_policy_pointer(agents):
+        # The pointer is only worth anything if the target has a policy to point at.
+        # Without this, deleting CLAUDE.md's section would leave *neither* file with
+        # one and the parity check with nothing to compare -- passing on an empty set,
+        # which is the null-as-positive shape this detector exists to catch.
+        try:
+            risk_policy_section(claude)
+        except (OSError, ValueError) as e:
+            failures.append(
+                f"AGENTS.md defers to CLAUDE.md, which carries no usable risk-path policy: {e}"
+            )
+        return
+
+    paths = (agents, claude)
     try:
         policies = [risk_policy_section(path) for path in paths]
     except (OSError, ValueError) as e:

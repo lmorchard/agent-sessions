@@ -77,7 +77,7 @@ one place they're all defined.
 | **amendment** | Changing what a frozen check *asserts*. Allowed, but costly on purpose: stop, get a human, log it, and downgrade the run to `needs-review`. A merely cosmetic rewording is a *clarification* and is free. |
 | **marker** | A hidden HTML comment (`<!-- agent-session:spec -->`) stamped into an issue body once it has been through intake or triage. The working modes refuse to run without it, so an under-specified issue can't be picked up by accident. |
 | **tier** | `auto-ok` or `needs-review`, written into the issue body. Derived, not chosen: everything checkable and nothing risky touched → `auto-ok`; any human-judgment criterion *or* any risk-gated path → `needs-review`. It controls **where a run surfaces to a human**, not whether it runs. |
-| **risk-gated path** | Code an unattended run isn't allowed to touch: auth, secrets, data migration, deploy/CI config, dependencies — plus whatever the project's own `AGENTS.md` names. In *this* repo the list is an allowlist, so anything unlisted is gated by default. |
+| **risk-gated path** | Code an unattended run isn't allowed to touch: auth, secrets, data migration, deploy/CI config, dependencies — plus whatever the project's own instruction file names. In *this* repo the list is an allowlist, so anything unlisted is gated by default. |
 | **gate** | The list of conditions the `pr` mode evaluates at the end of a run, and the machine-readable block it writes into the PR body reporting the result. |
 | **verdict** | The gate's output: `eligible-for-auto-merge`, `human-merge-required`, or `pending`. The first one is **a finding the system reports, not an action it takes.** |
 | **mode** | One of the skill's six entry points (`intake`, `triage`, `plan`, `execute`, `pr`, `express`). You name the one you want; the skill reads only that mode's file. |
@@ -365,17 +365,18 @@ itself.
 
 **The risk-gated path list is an allowlist, not a denylist.** A directory that nobody has
 classified is `needs-review` by default. This was decided after the partition went stale by
-omission twice in two days. Read the list in [../AGENTS.md](../AGENTS.md) before assuming
+omission twice in two days. Read the list in [../CLAUDE.md](../CLAUDE.md) before assuming
 anything is drivable.
 
 **The called-out boundaries are off-limits to unattended work for structural reasons, not stylistic
 ones.** `skills/**`, because there the implementer's work product *is* the instructions grading it;
 `src/agent_sessions/driver/gate.py`, because it classifies whether the run succeeded; and
-`src/agent_sessions/driver/agent_session_driver.py`, because it routes the result. The compatibility
-launcher also remains gated. **The allowlist itself is not restated here** — an earlier version of
+`src/agent_sessions/driver/lifecycle.py`, because it routes the result. The facade
+`agent_session_driver.py` and the compatibility launcher also remain gated, as entry points --
+becoming thin does not widen the partition. **The allowlist itself is not restated here** — an earlier version of
 this paragraph did restate it, and drifted out of date by omitting `tests/**` entirely, which is
 exactly the failure the no-duplicate-live-sources rule exists to prevent. Read it in
-[../AGENTS.md](../AGENTS.md) before assuming a path is drivable; nothing unlisted there is.
+[../CLAUDE.md](../CLAUDE.md) before assuming a path is drivable; nothing unlisted there is.
 
 **No document may state a fact a command can print.** Cite the command instead. If you must state
 a countable fact, date it, so it becomes history rather than an error. `make docs-check` enforces
@@ -407,8 +408,8 @@ Roughly in the order you'll want them:
 - [findings.md](findings.md) — the durable lessons: recurring defect classes, what was measured
   and what it showed, and a list of verified command-line gotchas. **Read the gotchas before
   writing any flag list or gate condition** — several are the opposite of what they look like.
-- [../AGENTS.md](../AGENTS.md) — conventions for working in this repo, and the risk-gated
-  partition.
+- [../CLAUDE.md](../CLAUDE.md) — conventions for working in this repo, and the risk-gated
+  partition. `AGENTS.md` is a pointer to it, for harnesses that look for that name.
 - [prior-art.md](prior-art.md) — survey of related work, with each claim marked verified or not.
 - [archive/build-log.md](archive/build-log.md) — chronological account of the early work, closed.
   Read it for the incidents behind the rules, not for state.

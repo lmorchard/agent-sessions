@@ -58,6 +58,79 @@ def test_risk_policy_parity_rejects_controlled_divergence(policy_root):
     ]
 
 
+# --- parity: AGENTS.md may point at CLAUDE.md instead of copying it ----------
+#
+# The two files were byte-identical, and the parity check enforced only the
+# `Risk-gated paths` section. Everything outside it drifted -- a find-and-replace that
+# rewrote a filesystem path, a second that invented a `Codex -p` flag the binary does
+# not have in that sense, and one section where AGENTS.md silently lost a rule. The
+# guarded part stayed in sync; the unguarded remainder did not, and there is no bound
+# on how much unguarded remainder there will be.
+#
+# So a pointer is now an accepted shape. The checks below are about the ways a pointer
+# can be wrong, which is the whole reason this needed teaching rather than relaxing.
+
+
+POINTER = "# agent-sessions\n\nRead [CLAUDE.md](CLAUDE.md). It is the single instruction file.\n"
+
+
+def test_parity_accepts_agents_md_as_a_pointer(policy_root):
+    (policy_root / "AGENTS.md").write_text(POINTER, encoding="utf-8")
+    write_policy_doc(policy_root, "CLAUDE.md", "Claude instructions")
+
+    docs_check.check_risk_policy_parity()
+
+    assert docs_check.failures == []
+
+
+def test_parity_rejects_a_pointer_that_names_no_instruction_file(policy_root):
+    """A short file is not a pointer just by being short."""
+    (policy_root / "AGENTS.md").write_text("# agent-sessions\n\nSee the docs.\n", encoding="utf-8")
+    write_policy_doc(policy_root, "CLAUDE.md", "Claude instructions")
+
+    docs_check.check_risk_policy_parity()
+
+    assert len(docs_check.failures) == 1
+    assert "CLAUDE.md" in docs_check.failures[0]
+
+
+def test_parity_rejects_a_pointer_whose_target_carries_no_policy(policy_root):
+    """Pointing somewhere is worthless if the target has nothing to point at.
+
+    This is the failure that would otherwise be silent: delete the risk section from
+    CLAUDE.md and, with AGENTS.md reduced to a pointer, *neither* file would have one
+    and the parity check would have nothing to compare and pass.
+    """
+    (policy_root / "AGENTS.md").write_text(POINTER, encoding="utf-8")
+    (policy_root / "CLAUDE.md").write_text("# agent-sessions\n\nNo policy here.\n", encoding="utf-8")
+
+    docs_check.check_risk_policy_parity()
+
+    assert len(docs_check.failures) == 1
+    assert "risk" in docs_check.failures[0].lower()
+
+
+def test_a_file_that_carries_its_own_policy_is_not_a_pointer(policy_root):
+    """The half-migrated case, and the reason the pointer test is not just "links to".
+
+    An AGENTS.md that links CLAUDE.md *and* keeps a copy of the policy is the exact
+    state this change exists to prevent, because the copy is what drifts. Linking must
+    not buy an exemption from parity.
+    """
+    write_policy_doc(
+        policy_root,
+        "AGENTS.md",
+        "Codex instructions. Read [CLAUDE.md](CLAUDE.md) as well.",
+        RISK_POLICY.replace("`docs/**`", "`documentation/**`"),
+    )
+    write_policy_doc(policy_root, "CLAUDE.md", "Claude instructions")
+
+    docs_check.check_risk_policy_parity()
+
+    assert len(docs_check.failures) == 1
+    assert "differ" in docs_check.failures[0]
+
+
 # --- check_world_state_claims: driven through the shipped function -----------
 #
 # This block used to reimplement `docs_check.check_world_state_claims` as a local
