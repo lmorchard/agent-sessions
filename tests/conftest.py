@@ -33,6 +33,7 @@ would be an assertion that something is true rather than a check that it is.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -52,6 +53,53 @@ def isolate_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     state_root.mkdir(exist_ok=True)
     monkeypatch.setenv("XDG_STATE_HOME", str(state_root))
     return state_root
+
+
+@pytest.fixture(autouse=True)
+def isolate_git_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Cut the operator's git configuration out of every `git` the suites run.
+
+    Six suites build a throwaway repo with `git init`, and only two of them set
+    `user.name`/`user.email` on it. Everything else in `git config --global` still
+    applied. On a machine with `commit.gpgsign = true` -- an ordinary setting, and the
+    default on some managed images -- eight tests fail:
+
+        ERROR tests/driver/test_workspace.py::test_ensure_workspace_creates_worktree...
+        ERROR tests/driver/test_workspace_driver_integration.py::...
+        subprocess.CalledProcessError
+
+    Reproduced by pointing `GIT_CONFIG_GLOBAL` at a two-line config, which is how that
+    count was arrived at rather than estimated. The failure mode is what makes it worth
+    a fixture: it arrives as `CalledProcessError` from a `git commit` a *fixture* ran,
+    so it reads as the code under test being broken. `commit.gpgsign` and
+    `core.hooksPath` are the two that bite; there is no point enumerating them.
+
+    Done at the environment layer, because that is the only one that reaches a `git` the
+    *code under test* invokes, and that subprocesses the tests spawn inherit -- including
+    the inner `make gate-test` in test_gate_test_wiring.py.
+
+    **Why a stub config file and not `GIT_CONFIG_GLOBAL=/dev/null` plus `GIT_AUTHOR_*`.**
+    That was the first attempt, and `test_repo_level_identity_still_wins` rejected it:
+    `GIT_AUTHOR_NAME` and `GIT_COMMITTER_NAME` outrank *repo-level* config, so supplying
+    the identity through the environment would silently re-author the commits in the two
+    fixtures that set their own -- passing suites, wrong authorship, and nothing to say
+    so. A global config file sits below repo config in git's precedence, which is the
+    ordering the fixtures were written against. It provides an identity for the four
+    fixtures that never set one, and yields to the two that do.
+    """
+    config = tmp_path / "gitconfig-stub"
+    config.write_text(
+        "[user]\n"
+        "\tname = agent-sessions tests\n"
+        "\temail = tests@example.invalid\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for var in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.delenv(var, raising=False)
+    return config
 
 
 @pytest.fixture(autouse=True)

@@ -58,7 +58,6 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from agent_sessions.driver import agent_runner, agent_session_driver, credentials, gate, locks, output
 
 REPO = "owner/repo"
@@ -332,6 +331,11 @@ class FakeGitHub:
                     if sub is None:
                         sub = tok
                     i += 1
+            # Widening the annotation to `str | None` would let a malformed call through
+            # as a silent `(None, ...)` row that no expected-list would ever match on
+            # purpose. Every `label_manager` invocation carries a subcommand; if one does
+            # not, that is the finding.
+            assert sub is not None, f"label_manager invoked with no subcommand: {rest}"
             ops.append((sub, issue_num, count))
         return ops
 

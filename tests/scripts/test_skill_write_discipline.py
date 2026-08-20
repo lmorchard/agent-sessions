@@ -78,9 +78,7 @@ def test_no_phase_instructs_a_github_write_directly(phase: Path):
 
 def test_the_manifest_reference_exists_and_lists_every_kind():
     """The doc the phases now point at has to agree with the code they run under."""
-    import sys
 
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
     from agent_sessions.driver import writes
 
     doc = (

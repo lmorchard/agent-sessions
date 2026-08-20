@@ -16,8 +16,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from agent_sessions.driver import gate  # noqa: E402
+from agent_sessions.driver import gate
 
 
 def body_with(

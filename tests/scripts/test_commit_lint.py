@@ -68,8 +68,7 @@ from types import SimpleNamespace
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from agent_sessions.scripts import commit_lint  # noqa: E402
+from agent_sessions.scripts import commit_lint
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "src" / "agent_sessions" / "scripts" / "commit_lint.py"

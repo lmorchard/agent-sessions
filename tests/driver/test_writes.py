@@ -8,13 +8,11 @@ driver is a *validator*, not a pipe, and there is no manifest entry that can mer
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from agent_sessions.driver import writes  # noqa: E402
+from agent_sessions.driver import writes
 
 REPO = "owner/target"
 

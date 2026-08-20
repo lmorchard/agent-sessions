@@ -31,12 +31,10 @@ repo path on purpose. It is unaffected by the autouse `isolate` fixture because
 `scan_file` takes an explicit path and does not consult `ROOT`.
 """
 
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from agent_sessions.scripts import assertion_lint
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

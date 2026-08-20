@@ -1,4 +1,3 @@
-import re
 
 import pytest
 
@@ -59,45 +58,84 @@ def test_risk_policy_parity_rejects_controlled_divergence(policy_root):
     ]
 
 
-def check_line(line: str) -> list:
-    failures = []
-    forbidden_patterns = [
-        (r"\bnot proven\b", "claim wears the clothes of a judgment; use `make evidence` instead"),
-        (r"\bnever been driven\b", "claim wears the clothes of a judgment; use `make evidence` instead"),
-        (r"\b([a-z]+) repositories\b", "bare repo count; use `make evidence` instead"),
-        (r"\b([a-z]+) PRs\b", "bare PR count; use `make evidence` instead", lambda m: m.group(0) not in ("open PRs", "draft PRs", "the PRs", "all PRs", "those PRs")),
-    ]
+# --- check_world_state_claims: driven through the shipped function -----------
+#
+# This block used to reimplement `docs_check.check_world_state_claims` as a local
+# `check_line()` and assert against the copy. `docs_check` was never called, so the
+# newest doc-rot rule had zero coverage through shipping code -- `findings.md` defect
+# class 1, instance 9, inside the doc-rot detector's own suite, and the residual risk
+# CLAUDE.md names about leaving `tests/**` drivable.
+#
+# The copy had already drifted. Its repo-count pattern was `\b([a-z]+) repositories\b`
+# where the shipped one is `\b(one|two|...|ten|\d+) repositories\b`, so
+# "Runs against many repositories" was a failure in the test and a pass in production.
+# It also carried an exemption the shipped code lacks and omitted two it has, and its
+# 3-tuple predicate row kept alive a code path that is permanently dead in the shipped
+# table -- which is 2-tuples throughout, making `cond = item[2:]` always empty. The
+# mechanism existed only in the test.
+#
+# It also produced three of the four errors `mypy src tests` reports and `mypy src`
+# hides, including `"str" not callable`.
+#
+# So: one doc under a patched ROOT, and the real function.
 
-    line_lower = line.lower()
-    if "not proven" in line_lower and ("list survived" in line_lower or "count in disguise" in line_lower):
-        return failures
-    if "never been driven" in line_lower and "count in disguise" in line_lower:
-        return failures
-    if "repositories" in line_lower and "runs against two repositories" in line_lower and "count in disguise" in line_lower:
-        return failures
-    if "not proven" in line_lower and ("list" in line_lower or "count" in line_lower or "defect class" in line_lower):
-        return failures
-    if re.search(r"\d{4}-\d{2}-\d{2}", line):
-        return failures
 
-    for pattern, reason, *cond in forbidden_patterns:
-        m = re.search(pattern, line, re.IGNORECASE)
-        if m:
-            if cond and not cond[0](m):
-                continue
-            failures.append(m.group(0))
-    return failures
+def write_doc(root, body: str, name: str = "docs/probe.md"):
+    path = root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    return path
 
-def test_docs_check_world_state_claims():
-    assert len(check_line("This is not proven yet")) == 1
-    assert len(check_line("It has never been driven before")) == 1
-    assert len(check_line("Runs against two repositories")) == 1
-    assert len(check_line("We have seven PRs open")) == 1
 
-    # Exclusions
-    assert len(check_line("We have open PRs")) == 0
-    assert len(check_line("As of 2026-08-10, it is not proven")) == 0 # Dated fact escape hatch
-    assert len(check_line("The not proven list survived")) == 0 # Rule explanation
+def claims_in(root, body: str) -> list[str]:
+    write_doc(root, body)
+    docs_check.check_world_state_claims()
+    return list(docs_check.failures)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "This is not proven yet",
+        "It has never been driven before",
+        "Runs against two repositories",
+        "We have seven PRs open",
+    ],
+)
+def test_world_state_claims_are_flagged(policy_root, line):
+    assert len(claims_in(policy_root, line + "\n")) == 1, (
+        f"the shipped detector let this through: {line!r}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("line", "why"),
+    [
+        ("We have open PRs", "no count, so no claim"),
+        ("As of 2026-08-10, it is not proven", "the dated-fact escape hatch"),
+        ("The not proven list survived", "a line explaining the rule, not asserting state"),
+    ],
+)
+def test_world_state_exemptions_hold(policy_root, line, why):
+    assert claims_in(policy_root, line + "\n") == [], why
+
+
+def test_the_repo_count_pattern_requires_a_count_word(policy_root):
+    """Controlled divergence -- the exact line the deleted clone got wrong.
+
+    The clone matched any lowercase word before "repositories", so it flagged this
+    and the suite was green over a detector that does not. Pinned in the direction
+    the shipped code actually behaves, so a future widening of the pattern shows up
+    here as a decision rather than arriving silently.
+    """
+    assert claims_in(policy_root, "Runs against many repositories\n") == []
+
+
+def test_a_flagged_claim_reports_its_file_and_line(policy_root):
+    """The clone returned bare match text, so nothing pinned the citation format."""
+    failures = claims_in(policy_root, "intro\n\nWe have seven PRs open\n")
+    assert len(failures) == 1
+    assert failures[0].startswith("docs/probe.md:3: seven PRs -- ")
 
 
 # --- is_shim: the guard against a partition naming a facade -------------------

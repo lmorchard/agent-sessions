@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from agent_sessions.scripts import guard_lint  # noqa: E402
+from agent_sessions.scripts import guard_lint
 
 
 def test_pinned_count_guard_detected():

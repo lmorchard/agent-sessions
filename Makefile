@@ -35,7 +35,8 @@ help:
 	@echo "run-self         drive THIS repo (needs --allow-nested-skill-dir)"
 	@echo "dry-run-self     selection only against this repo's own board"
 	@echo "                 ISSUE=n pin one issue, bypassing selection (run, run-self)"
-	@echo "                 ISSUES=n BUDGET=n override queue depth / per-issue ceiling"
+	@echo "                 ISSUES=n BUDGET=n override queue depth (loop, run) /"
+	@echo "                 per-issue ceiling; BUDGET is per issue, not per invocation"
 	@echo ""
 	@echo "  REPO=$(REPO)  REPO_PATH=$(REPO_PATH)  BOARD=$(BOARD)"
 
@@ -62,8 +63,13 @@ check-parallel: gate-test skill-readonly docs-check assertion-lint commit-lint l
 lint:
 	@uv run ruff check .
 
+# `mypy src` was correct when src/ was the only Python tree. tests/{driver,scripts}/
+# came later and were never added, so four errors sat hidden -- three of them one
+# defect: tests/scripts/test_docs_check.py had cloned a detector instead of calling it,
+# which surfaced here as `"str" not callable`. Nothing recorded the narrow scope as a
+# decision, so this is repairing an omission rather than reversing one.
 typecheck:
-	@uv run mypy src
+	@uv run mypy src tests
 
 board-audit:
 	@uv run python -m agent_sessions.scripts.board_audit --owner lmorchard --project 9 --repo lmorchard/agent-sessions
@@ -82,10 +88,22 @@ driver-check:
 # modules rather than carrying hand-copied implementations.
 driver-test: gate-test
 
+# `--dist loadgroup` is load-bearing, not tuning. tests/scripts/test_gate_test_wiring.py
+# marks its module `xdist_group` because one of its checks writes a probe test file into
+# the working tree while the other collects that same tree -- and xdist honours the
+# marker only under `--dist loadgroup`. Under a bare `-n auto` the marker did nothing.
+# Tests carrying no group are still distributed by load, so this costs nothing.
 gate-test:
-	@uv run --quiet pytest -n auto tests/driver/test_*.py tests/scripts/test_*.py
+	@uv run --quiet pytest -n auto --dist loadgroup tests/driver/test_*.py tests/scripts/test_*.py
 
-park-test: gate-test
+# H7. This was an alias of `gate-test`, so `help`'s promise of "frozen acceptance
+# checks for #5 (park state as a label)" delivered the entire suite -- the help line
+# actively misdescribed it. Repointed at the suite it names rather than deleted, since
+# a named shortcut to one frozen set is worth having and the description is now true.
+# `driver-test` stays an alias: CLAUDE.md cites it by name, including in the
+# risk-partition discussion.
+park-test:
+	@uv run --quiet pytest -n auto tests/driver/test_park_state.py
 
 # Replaces move 3's `skill-untouched` guard, which pinned skills/ to a snapshot to
 # prove the driver needed no skill edit. That claim is now verified and permanently
@@ -211,8 +229,28 @@ run:
 
 # The multi-issue burndown. Same target as `run` with a bigger queue depth --
 # separate only because it was assembled by hand twice and is worth discovering.
+#
+# `ISSUES=$(or $(ISSUES_OVERRIDE),2)` used to sit on the sub-make line, where a
+# recursive command-line assignment beats the caller's: `make loop ISSUES=7` ran two
+# issues, silently, while `make help` promised the override worked. And since
+# `BUDGET ?= 35` is *per issue*, a swallowed `ISSUES=5` is a wrong-sized spend rather
+# than a wrong-sized queue. #71, one variable over. Resolving `$(or ...)` here in the
+# parent make reads the outer `ISSUES` at expansion time, so nothing is overridden on
+# the child's command line. tests/scripts/test_loop_queue_depth.py freezes it, and
+# covers the slice the run/dry-run suites deliberately leave alone.
+#
+# `$(or $(ISSUES),$(LOOP_ISSUES))` was the obvious first attempt and it is wrong:
+# `ISSUES ?= 1` above means $(ISSUES) is never empty, so `$(or ...)` cannot tell "the
+# caller asked for a depth" from "the file's default applied", and a bare `make loop`
+# collapsed to one issue. That regression is what C2 in the frozen suite exists to
+# catch, and it caught it. `$(origin)` is the thing that distinguishes them.
+LOOP_ISSUES ?= 2
+ifneq ($(filter command environment,$(firstword $(origin ISSUES))),)
+  LOOP_ISSUES := $(ISSUES)
+endif
+
 loop:
-	@$(MAKE) run ISSUES=$(or $(ISSUES_OVERRIDE),2)
+	@$(MAKE) run ISSUES=$(LOOP_ISSUES)
 
 # `run` and `run-self` print nothing between "== invoke #N ==" and the exit line,
 # so a run is a black box for as long as it lasts -- while megabytes of live signal

@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from agent_sessions.driver import agent_runner, credentials  # noqa: E402
+from agent_sessions.driver import agent_runner, credentials
 
 EXPECTED_DEFAULT_ALLOWED_TOOLS = [
     "Read",

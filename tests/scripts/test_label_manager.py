@@ -16,13 +16,10 @@ There were no tests here at all before this file, which is why three commands
 carried the same bug.
 """
 
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from agent_sessions.scripts import label_manager  # noqa: E402
+from agent_sessions.scripts import label_manager
 
 REPO = "owner/repo"
 

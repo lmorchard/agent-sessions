@@ -23,13 +23,11 @@ reads commit messages and PR bodies, not source. The issue numbers are
 five-digit and do not exist.)*
 """
 
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from agent_sessions.scripts import commit_lint  # noqa: E402
+from agent_sessions.scripts import commit_lint
 
 # --- defect 1: a doubled backtick run was not recognised as quoting ----------
 
