@@ -605,3 +605,25 @@ def test_lifecycle_classify_and_record(tmp_path: Path, monkeypatch):
     assert row["cost_usd"] == 0.5
 
 
+
+
+def test_the_facade_does_not_re_export_the_output_helpers():
+    """`say`/`log`/`die` originate in `output`; the facade must not offer a copy.
+
+    It used to import them *from `lifecycle`* — which had aliased them from `output` —
+    and re-export them, and nothing anywhere consumed the result. What that buys is a
+    trap: `monkeypatch.setattr(agent_session_driver, "log", ...)` looks like it patches
+    the emitter and patches a bound copy instead, exactly as the `CURRENT_LOCK_ISSUE`
+    re-export did. `test_board_marks_item_in_progress_logs_graphql_failure` above patches
+    `board.log` for that reason, and its comment says so.
+
+    Asserted rather than left to review because the re-export is one line and reads as
+    harmless. Patch the module that emits.
+    """
+    from agent_sessions.driver import agent_session_driver as facade
+
+    offered = [name for name in ("say", "log", "die") if name in facade.__all__]
+    assert offered == [], (
+        f"the facade re-exports {offered}; patching those reaches a copy, not the "
+        f"emitter. Import them from `agent_sessions.driver.output`."
+    )

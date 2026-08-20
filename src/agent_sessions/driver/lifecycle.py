@@ -23,6 +23,14 @@ from agent_sessions.driver import (
     workspace,
 )
 
+# Imported, not aliased. `say`/`log`/`die` originate in `output`; binding them here is
+# for brevity in a module that calls `say` dozens of times, and binding them by import
+# keeps `lifecycle.say` patchable the way the suites already patch `board.log`.
+#
+# The clock stays `output.now()`, called through the module on purpose: a bound copy
+# could not be frozen, and freezing it is how the suites get deterministic timestamps.
+from agent_sessions.driver.output import die, log, say
+
 PHASE_TIERS = {
     "triage": "low",
     "refine": "low",
@@ -105,12 +113,6 @@ class RunOutcome:
     exit_code: int = 0
 
 
-# say/log/die and the clock live in `output`, which imports nothing from this package.
-# They are re-exported here because `agent_session_driver` and the tests import them from
-# this module; the definitions are not duplicated.
-say = output.say
-log = output.log
-die = output.die
 
 
 def hook_template_path() -> Path:

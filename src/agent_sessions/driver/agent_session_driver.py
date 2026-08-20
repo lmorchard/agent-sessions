@@ -14,7 +14,11 @@ has sent people to the wrong place:
 - `gate.py` -- parses the merge-gate block and classifies the outcome.
 - `writes.py` -- validates and executes the agent's requested writes.
 - `agent_runner.py` -- the backend boundary and its mandatory permission policy.
-- `output.py` -- `say`/`log`/`die` and `now()`, the driver's clock.
+- `output.py` -- `say`/`log`/`die` and `now()`, the driver's clock. **Not re-exported
+  here.** Nothing imported them through this module, and leaving them would invite
+  `monkeypatch.setattr(agent_session_driver, "log", ...)`, which binds a copy and
+  silently patches nothing -- the same trap `CURRENT_LOCK_ISSUE` set. Patch the module
+  that emits.
 
 This module is a facade kept for two reasons: `pyproject.toml`'s `[project.scripts]`
 entry and `driver/agent-session-driver.sh` both name it, and a large amount of the test
@@ -48,17 +52,14 @@ from agent_sessions.driver.lifecycle import (
     SelectionResult,
     abspath,
     classify_and_record,
-    die,
     invoke_agent,
     is_git_ignored,
     load_env_file,
-    log,
     main,
     preflight,
     prepare_workspace,
     report_results,
     run_classify_only,
-    say,
     select_queue,
     whoami,
 )
@@ -123,7 +124,6 @@ __all__ = [
     "classify_and_record",
     "clear_attempt_labels",
     "decrement_attempts",
-    "die",
     "fetch_board_json",
     "get_attempts",
     "get_board_metadata",
@@ -135,7 +135,6 @@ __all__ = [
     "is_git_ignored",
     "is_specced",
     "load_env_file",
-    "log",
     "main",
     "mark_board_in_progress",
     "notify_human",
@@ -149,7 +148,6 @@ __all__ = [
     "release_lock",
     "report_results",
     "run_classify_only",
-    "say",
     "select_queue",
     "whoami",
     "writes_summary",

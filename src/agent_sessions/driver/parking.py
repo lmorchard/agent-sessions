@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from agent_sessions.driver import credentials, output
+from agent_sessions.driver.output import say
 
 PARK_LABEL = "agent-session:needs-human"
 INTERACTIVE_LABEL = "agent-session:needs-human-interactive"
@@ -16,7 +17,6 @@ SPEC_LABEL = "agent-session:spec"
 MARKER = "<!-- agent-session:spec -->"
 
 
-say = output.say
 
 
 def is_specced(iss: dict) -> bool:

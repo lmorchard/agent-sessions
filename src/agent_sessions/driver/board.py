@@ -9,11 +9,7 @@ import time
 from datetime import datetime, timezone
 
 from agent_sessions.driver import credentials, gh_query, output
-
-say = output.say
-log = output.log
-die = output.die
-
+from agent_sessions.driver.output import die, log, say
 
 _BOARD_METADATA_CACHE: dict[str, dict | None] = {}
 

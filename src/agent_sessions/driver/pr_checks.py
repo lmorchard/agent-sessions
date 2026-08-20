@@ -9,9 +9,7 @@ from pathlib import Path
 
 import requests
 
-from agent_sessions.driver import agent_runner, output, writes
-
-say = output.say
+from agent_sessions.driver import agent_runner, writes
 
 
 def get_pr_unresolved_threads_text(repo: str, pr_num: str | int, token: str) -> str:
