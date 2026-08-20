@@ -50,10 +50,26 @@ the operator to wave the mechanism through (`findings.md`):
 
 Scope
 -----
-`driver/test_*.py` only. The Makefile is out of scope: this detector guards
-harness assertions, while `skill-readonly` now verifies captured command
-arguments at the `Popen` boundary. Widening the scope is a separate call for a
-human, not a drift to discover in a diff (issue #28, first design decision).
+`SCOPE` below, and it is the single source of that fact -- this paragraph used to
+say `driver/test_*.py`, which #257/#258 falsified when they moved the suites under
+`tests/`. A docstring wrong about its own detector's scope is the shape this repo
+keeps hitting, so the value is not repeated here.
+
+The Makefile is out of scope: this detector guards harness assertions, while
+`skill-readonly` verifies captured command arguments at the `Popen` boundary.
+
+**The narrow glob is load-bearing, not an oversight.** `commit_lint.py`'s own Scope
+section records why, from the outside: *"`assertion_lint` had to solve the same
+self-matching problem by narrowing its glob."* This module's fixtures are shell
+snippets containing the very idiom it detects, and they live in
+`tests/scripts/test_assertion_lint.py` as string constants because that is where they
+are readable next to the assertions they define. Widening the glob to
+`tests/scripts/test_*.py` puts the detector on its own back: measured on this branch,
+it reports six lines, all six of them in that file, and finds nothing else anywhere.
+So widening it is not a free improvement -- it costs either an exemption mechanism
+this detector deliberately does not have, or a restructuring of the fixtures away from
+the assertions they serve. Still a call for a human, and now a call with a number
+attached (issue #28's first design decision; #261's X1).
 
 """
 

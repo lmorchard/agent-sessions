@@ -89,17 +89,32 @@ def test_the_uses_pattern_finds_the_steps_that_are_there():
             )
 
 
+#: `fetch-depth:` as a mapping key with its value, so a mention in a comment or a
+#: prose line cannot satisfy the check.
+_FETCH_DEPTH = re.compile(r"^\s*fetch-depth:\s*(?P<value>\S+)\s*(?:#.*)?$", re.MULTILINE)
+
+
 def test_the_checkout_step_keeps_a_full_clone():
     """`commit-lint` scopes to `origin/main..HEAD`, so a shallow clone grades nothing.
 
-    Asserted because it is the one input in this file whose loss is silent: a shallow
-    clone does not fail the checkout, and `commit-lint` over an empty range prints a pass.
+    Asserted because it is the one input here whose loss is silent: a shallow clone does
+    not fail the checkout, and `commit-lint` over an empty range prints a pass.
+
+    Read as a key/value pair rather than as a substring. `assert "fetch-depth: 0" in
+    text` was the first draft, and it is the defect class `assertion-lint` exists for --
+    a comment saying *"fetch-depth: 0 was removed because..."* satisfies it exactly as
+    well as the setting does. Grading the parsed value cannot be satisfied by prose.
     """
     for path in _workflow_files():
         text = path.read_text(encoding="utf-8")
         if "actions/checkout@" not in text:
             continue
-        assert "fetch-depth: 0" in text, (
-            f"{path.relative_to(REPO_ROOT)} checks out shallowly; commit-lint's "
-            f"origin/main..HEAD range would be empty and pass"
+        depths = [m.group("value") for m in _FETCH_DEPTH.finditer(text)]
+        assert depths, (
+            f"{path.relative_to(REPO_ROOT)} checks out with no fetch-depth: at all, so "
+            f"it takes the shallow default and commit-lint's range would be empty"
+        )
+        assert depths == ["0"], (
+            f"{path.relative_to(REPO_ROOT)} checks out shallowly ({depths}); "
+            f"commit-lint's origin/main..HEAD range would be empty and pass"
         )
