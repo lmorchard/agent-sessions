@@ -4,7 +4,7 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help doctor doctor-self check venv evidence board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly backend-permission-probe opencode-policy-contract lint typecheck
+.PHONY: help doctor doctor-self check venv clean clean-venvs prune-state evidence board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly backend-permission-probe opencode-policy-contract lint typecheck
 
 help:
 	@echo "check            run every check -- the targets listed below, in one go"
@@ -13,6 +13,11 @@ help:
 	@echo "venv             populate .venv once -- check does this before it fans out"
 	@echo "lint             run ruff linter"
 	@echo "typecheck        run mypy type checker"
+	@echo "clean            remove tool caches and __pycache__; leaves all run state"
+	@echo "clean-venvs      remove per-worktree virtualenvs"
+	@echo "prune-state      drop old run dirs; dry run unless CONFIRM=1. WORKSPACES=1"
+	@echo "                 also prunes per-issue worktrees, skipping any that are dirty"
+	@echo "evidence         what has actually run: phases, repos, outcomes, from the ledgers"
 	@echo "board-audit      audit this repo's live GitHub project (read-only)"
 	@echo "driver-check     scan the Bash compatibility launcher for merge commands"
 	@echo "driver-test      Python harness and fixture tests (alias of gate-test)"
@@ -136,6 +141,32 @@ backend-permission-probe:
 # because OpenCode is not a repository dependency.
 opencode-policy-contract:
 	@uv run python -m agent_sessions.scripts.opencode_policy_contract
+
+# Housekeeping, split three ways so destructiveness is opt-in by name. None of them
+# touches `runs.jsonl`, `parked.jsonl`, `inbox.md` or `inflight.json` -- the ledger is
+# this project's per-run provenance and the other three are live operator state.
+# tests/scripts/test_prune_run_state.py asserts that rather than trusting it.
+clean:
+	@rm -rf .pytest_cache .ruff_cache .mypy_cache
+	@find . -name __pycache__ -type d -prune -not -path './.venv/*' -exec rm -rf {} +
+	@echo "clean: caches removed. State and .driver-state/ untouched -- see prune-state."
+
+# The per-worktree virtualenvs. ~1 GB across this repo's worktrees, and `uv sync`
+# rebuilds one in seconds, so this is the cheapest space in the tree.
+clean-venvs:
+	@find . -maxdepth 3 -name .venv -type d -prune -exec rm -rf {} + 2>/dev/null || true
+	@echo "clean-venvs: virtualenvs removed. Run 'make venv' to rebuild."
+
+# Dry run by default; CONFIRM=1 to remove. WORKSPACES=1 additionally prunes the per-issue
+# git worktrees, which is where the volume actually is -- 3.1 GB against runs/'s 79 MB when
+# this was written. Workspaces are pruned by *dirtiness*, never by age: one holding
+# uncommitted content is kept and reported. That is deliberately the opposite of the
+# driver's own --clean-workspaces, which force-removes.
+KEEP_DAYS ?= 30
+
+prune-state:
+	@uv run python scripts/prune_run_state.py --keep-days $(KEEP_DAYS) \
+	  $(if $(WORKSPACES),--workspaces,) $(if $(CONFIRM),--confirm,)
 
 # The report CLAUDE.md tells you to cite instead of writing a number down. Reads every
 # per-repo runs.jsonl under the live state root; pass --repo owner/name or --state-dir to
