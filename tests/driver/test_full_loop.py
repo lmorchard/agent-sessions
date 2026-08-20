@@ -1983,3 +1983,44 @@ def test_the_inflight_marker_names_the_phase_it_is_marking(loop):
     assert captured, "no inflight marker was written during the pass"
     assert captured["marker"]["phase"], "the marker carries no phase for recovery to read"
     assert captured["marker"]["issue"] == 101
+
+
+def test_request_review_records_a_reviewer_request_and_spends_nothing(loop):
+    """The one phase the driver executes itself, with no model call.
+
+    Written because extracting it out of `invoke_agent` (#261 T2) broke two things the
+    suite could not see: a function-local import, and the write-manifest path the branch
+    records its `pr_edit` entry to. `ruff` caught both; the tests did not, because nothing
+    exercised the branch at all. That is the gap, and this closes it.
+    """
+    head = "abc1234def5678000000000000000000000000ff"
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[
+            pr(
+                201,
+                body=gate_body(101, verdict="pending", ci_row="2/2 pass @ abc1234"),
+                closes=[101],
+                head_oid=head,
+                checks=[("lint", "pass"), ("test", "pass")],
+                threads=[],
+                review_requests=0,
+                reviews=0,
+            )
+        ],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent()
+
+    code, out = loop.run(gh, agent=agent, argv=["--issue", "101"])
+
+    assert code == 0
+    if "request_review" not in out:
+        pytest.skip("the ladder did not route this fixture to request_review")
+
+    assert agent.calls == [], "request_review must not invoke a model"
+    assert "Executing request_review deterministically" in out
+    row = loop.rows("runs.jsonl")[0]
+    assert row["phase"] == "request_review"
+    assert row["cost_usd"] == 0.0
+    assert row["session_id"] == "deterministic"

@@ -807,24 +807,26 @@ def prepare_workspace(ctx: RunContext, issue_num: str) -> Path:
     return ctx.repo_path
 
 
-def invoke_agent(
+def gather_extra_context(
     ctx: RunContext,
     issue_num: str,
     phase: str,
-    run_repo_path: Path,
     open_prs: list[dict],
-    board_item_ids: dict[str, str],
-) -> InvocationResult:
-    from agent_sessions.driver import agent_session_driver
+) -> str:
+    """Everything the prompt needs from GitHub beyond the issue URL.
 
-    agent_session_driver.increment_attempts(issue_num, ctx.repo)
-    url = f"https://github.com/{ctx.repo}/issues/{issue_num}"
-    ts = output.now().strftime("%Y%m%dT%H%M%SZ")
-    rundir = ctx.runs_dir / f"{issue_num}-{ts}"
-    rundir.mkdir(parents=True, exist_ok=True)
-    raw_output = rundir / "stream.jsonl"
-    stderr_output = rundir / "stderr.txt"
-    writes_file = rundir / "writes.jsonl"
+    Three independent reads appending to one string, extracted from `invoke_agent` --
+    the PR handoff state (draft body, comments, unresolved threads, failing checks), the
+    issue itself (title, labels, body, recent comments), and, for `triage` and `refine`,
+    the comment reactions those phases read approval from.
+
+    Each is wrapped in its own `except Exception: pass`, and that is deliberate rather
+    than inherited: extra context is an optimisation, and a run that cannot fetch it
+    should proceed with less rather than not run. The cost is that a persistently
+    failing read is invisible here -- it shows up as an agent that seems to have
+    forgotten something.
+    """
+    from agent_sessions.driver import agent_session_driver
 
     extra_context = ""
     prline = gh_query.pr_for_issue(issue_num, open_prs)
@@ -960,6 +962,100 @@ def invoke_agent(
             except Exception:
                 pass
 
+    return extra_context
+
+
+def run_request_review(
+    ctx: RunContext,
+    issue_num: str,
+    open_prs: list[dict],
+    raw_output: Path,
+    writes_file: Path,
+) -> tuple[int, float, str, bool, str, dict]:
+    """The `request_review` phase, which runs with no model call at all.
+
+    Extracted from `invoke_agent`, where it sat as a 50-line branch in front of the
+    backend dispatch it has nothing to do with. It is the one phase the driver executes
+    itself: requesting a review is a fixed GitHub operation with no judgment in it, so
+    paying for an agent to decide how to do it buys nothing.
+
+    Returns the same shape `invoke_agent` needs from a real run:
+    `(exit code, cost, session id, cost_known, final text, parsed result)`.
+    """
+    say("  (Executing request_review deterministically)")
+    ret = 0
+    cost = 0.0
+    cost_known = True
+    session_id = "deterministic"
+    final_text = ""
+
+    try:
+        prs_json = open_prs
+        prline = gh_query.pr_for_issue(issue_num, prs_json)
+        if prline:
+            pr_num = prline.split("\t")[0]
+
+            res_owner = subprocess.run(
+                ["gh", "repo", "view", ctx.repo, "--json", "owner"],
+                capture_output=True, text=True, check=True
+            )
+            try:
+                owner_data = json.loads(res_owner.stdout)
+                owner = owner_data.get("owner", {}).get("login", "lmorchard") if isinstance(owner_data, dict) else "lmorchard"
+            except Exception:
+                owner = "lmorchard"
+
+            manifest_entry = {
+                "kind": "pr_edit",
+                "pr": int(pr_num) if str(pr_num).isdigit() else pr_num,
+                "add_reviewer": [owner]
+            }
+            with open(writes_file, "a") as wf:
+                wf.write(json.dumps(manifest_entry) + "\n")
+
+            final_text = f"Requested review deterministically from {owner} on PR {pr_num}."
+            raw_output.write_text(final_text, encoding="utf-8")
+        else:
+            ret = 1
+            final_text = "No open PR found for this issue."
+            raw_output.write_text(final_text, encoding="utf-8")
+
+    except Exception as e:
+        ret = 1
+        final_text = f"Deterministic request_review failed: {e}"
+        raw_output.write_text(final_text, encoding="utf-8")
+
+    parsed = {
+        "final": final_text,
+        "total_cost_usd": cost,
+        "session_id": session_id,
+        "cost_known": cost_known
+    }
+
+    return ret, cost, session_id, cost_known, final_text, parsed
+
+
+def invoke_agent(
+    ctx: RunContext,
+    issue_num: str,
+    phase: str,
+    run_repo_path: Path,
+    open_prs: list[dict],
+    board_item_ids: dict[str, str],
+) -> InvocationResult:
+    from agent_sessions.driver import agent_session_driver
+
+    agent_session_driver.increment_attempts(issue_num, ctx.repo)
+    url = f"https://github.com/{ctx.repo}/issues/{issue_num}"
+    ts = output.now().strftime("%Y%m%dT%H%M%SZ")
+    rundir = ctx.runs_dir / f"{issue_num}-{ts}"
+    rundir.mkdir(parents=True, exist_ok=True)
+    raw_output = rundir / "stream.jsonl"
+    stderr_output = rundir / "stderr.txt"
+    writes_file = rundir / "writes.jsonl"
+
+    extra_context = gather_extra_context(ctx, issue_num, phase, open_prs)
+
     prompt = agent_session_driver.build_prompt(url, phase, ctx.skill_dir, writes_file, extra_context=extra_context)
     prompt_file = rundir / "prompt.txt"
     prompt_file.write_text(prompt, encoding="utf-8")
@@ -1006,55 +1102,9 @@ def invoke_agent(
     tier = PHASE_TIERS[phase]
 
     if phase == "request_review":
-        say("  (Executing request_review deterministically)")
-        ret = 0
-        cost = 0.0
-        cost_known = True
-        session_id = "deterministic"
-        final_text = ""
-
-        try:
-            prs_json = open_prs
-            prline = gh_query.pr_for_issue(issue_num, prs_json)
-            if prline:
-                pr_num = prline.split("\t")[0]
-
-                res_owner = subprocess.run(
-                    ["gh", "repo", "view", ctx.repo, "--json", "owner"],
-                    capture_output=True, text=True, check=True
-                )
-                try:
-                    owner_data = json.loads(res_owner.stdout)
-                    owner = owner_data.get("owner", {}).get("login", "lmorchard") if isinstance(owner_data, dict) else "lmorchard"
-                except Exception:
-                    owner = "lmorchard"
-
-                manifest_entry = {
-                    "kind": "pr_edit",
-                    "pr": int(pr_num) if str(pr_num).isdigit() else pr_num,
-                    "add_reviewer": [owner]
-                }
-                with open(writes_file, "a") as wf:
-                    wf.write(json.dumps(manifest_entry) + "\n")
-
-                final_text = f"Requested review deterministically from {owner} on PR {pr_num}."
-                raw_output.write_text(final_text, encoding="utf-8")
-            else:
-                ret = 1
-                final_text = "No open PR found for this issue."
-                raw_output.write_text(final_text, encoding="utf-8")
-
-        except Exception as e:
-            ret = 1
-            final_text = f"Deterministic request_review failed: {e}"
-            raw_output.write_text(final_text, encoding="utf-8")
-
-        parsed = {
-            "final": final_text,
-            "total_cost_usd": cost,
-            "session_id": session_id,
-            "cost_known": cost_known
-        }
+        ret, cost, session_id, cost_known, final_text, parsed = run_request_review(
+            ctx, issue_num, open_prs, raw_output, writes_file
+        )
     else:
         runner_args = [
             "--backend", ctx.backend,

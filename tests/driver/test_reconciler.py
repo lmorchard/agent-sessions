@@ -218,4 +218,26 @@ def test_webhook_reconciler_does_not_acquire_git_lock():
 
     assert res["decision"].action == "eligible"
     assert res["decision"].phase == "grade_gate"
-    assert res["acquired_git_lock"] is False
+    # The key reports a *requirement*, not an acquisition. It was named
+    # `acquired_git_lock` and set to True on the other branch, which claimed something
+    # that had not happened -- this function takes no lock and never reaches
+    # `locks.acquire_lock`. Renamed rather than implemented (#261 T6): the webhook half
+    # has no host, and inventing an acquisition to match a field name is the wrong repair.
+    assert res["needs_git_lock"] is False
+    assert "acquired_git_lock" not in res
+
+
+def test_webhook_reconciler_reports_needing_a_lock_when_the_host_provides_none():
+    """The other branch, which is where the false claim lived.
+
+    With no host-provided concurrency group the caller has to take a lock itself, and
+    this is how it finds out. The function still takes none.
+    """
+    payload = {"issue_number": "301", "pull_request": {"number": 401}, "reviews": 1}
+
+    res = reconciler.run_webhook_reconciler(
+        "pull_request_review", payload, host_provides_lock=False
+    )
+
+    assert res["decision"].action == "eligible"
+    assert res["needs_git_lock"] is True

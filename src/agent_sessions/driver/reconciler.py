@@ -273,8 +273,13 @@ def run_webhook_reconciler(
     res = {
         "event": evt,
         "decision": decision,
-        "acquired_git_lock": False,
+        "needs_git_lock": False,
     }
+    # Deliberately reports the *requirement*, not an acquisition. This function takes no
+    # lock -- `locks.acquire_lock` is never reached from here -- so a key named
+    # `acquired_git_lock` set to True was a claim about something that had not happened.
+    # Renamed rather than implemented: the webhook path has no host, and inventing a lock
+    # acquisition to match a field name would be the wrong repair.
     if not host_provides_lock and decision.action == "eligible":
-        res["acquired_git_lock"] = True
+        res["needs_git_lock"] = True
     return res
