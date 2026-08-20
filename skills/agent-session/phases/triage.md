@@ -97,8 +97,8 @@ Every escalation below is two manifest entries — an `issue_comment` and a `lab
 ensure-exists step, and that edit errors outright when the repository has no such label — so on a
 target repo seeing its first run, the whole entry fails, `write-manifest.md`'s all-or-nothing rule
 stops the rest of the manifest, and **the issue is never parked**. It then
-stays selectable and the loop picks it again. The colours in use are `D93F0B` for
-`agent-session:needs-human` and `D4C5F9` for `agent-session:needs-human-interactive`.
+stays selectable and the loop picks it again. `label_manager` is the source of the colours; a
+`label_create` entry that disagrees with it just makes the label look wrong.
 
 - An issue's intent is genuinely unclear or lacking baseline detail (not just under-specified) → record a new top-level comment explaining the ambiguity, record the `agent-session:needs-human` label, and stop.
 - The scan surfaces duplicate/obsolete issues → record a new top-level comment suggesting closure (never edit past comments in place), record the `agent-session:needs-human` label, and stop.
