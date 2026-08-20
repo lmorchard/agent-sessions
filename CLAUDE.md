@@ -260,6 +260,17 @@ the specific move that invalidates them.
   read every flagged match by hand; variance is the metric). **Don't add nuance clauses** to
   a winning recipe — they degrade it consistent→noisy. **Dogfood after building** (run a real
   case; the dogfood catches what review + micro-tests can't).
+- **Skill files are runtime instructions, not a changelog.** `skills/agent-session/` is read by a
+  fresh-context agent, one phase file at a time, mid-run — a reader with no memory of previous
+  revisions. So *"this section used to say X"* buys nothing there, and turns actively harmful when
+  it quotes the old value: during the 2026-08-19 audit, a paragraph explaining that a label colour
+  was wrong left the wrong colour sitting in the agent's context. Provenance goes in the commit
+  message and the issue, which persist and are addressed to someone who wants it. **Keep the
+  rationale that changes what the agent does** — *"emit `label_create` first, or the whole entry
+  fails and the issue is never parked"* earns its tokens; *"this used to be absent"* does not.
+  Note the inversion: everywhere else here — `findings.md` above all — the history *is* the value,
+  because the reader is a maintainer. This line has no detector behind it, so it is a review habit
+  rather than a guard.
 - **gh CLI** for GitHub reads/writes; confirm auth before writing. When augmenting an issue,
   **preserve the author's text verbatim** (concatenate, don't regenerate).
 - **Verify, don't assume** — this project's recurring theme. Check a claim (grep/run/read)
