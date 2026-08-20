@@ -11,12 +11,15 @@ used instead of pinned numbers.
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+#: `gh issue list` defaults to 30. The Makefile passes this explicitly; the default here
+#: matches `board_audit`'s so a hand invocation behaves the same way.
+DEFAULT_LIMIT = 500
 
 # Matches bare test counts like "3234 passed", "34 failed", "49 skipped", "100 tests", or reversed.
 PINNED_COUNT = re.compile(
@@ -50,47 +53,97 @@ def lint_source(text: str, source: str) -> None:
         failures.append(f"{source}:{lineno}: pinned test count guard: {line.strip()}")
 
 
-def main() -> int:
-    global failures
-    inputs = sys.argv[1:]
+def _issue_label(item: object, index: int) -> str:
+    """Prefer the real issue number. The old label was the array index, so `issue #1`
+    meant "the newest issue in the page" -- unfindable, and misleading in the one
+    direction that matters, since it reads like an issue number."""
+    if isinstance(item, dict):
+        number = item.get("number")
+        if isinstance(number, int):
+            return f"issue #{number}"
+    return f"record {index + 1}"
 
-    content = ""
-    if inputs:
-        for path_str in inputs:
+
+def _body_of(item: object) -> str:
+    if isinstance(item, dict):
+        return str(item.get("body", "") or item.get("title", "") or "")
+    if isinstance(item, str):
+        return item
+    return ""
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Scan issue bodies or files, and say how many were examined.
+
+    The count in the success line is the point, not decoration. Piping
+    `gh issue list --json body` with no `--limit` gave the detector `gh`'s default 30
+    newest issues, over which it printed "no pinned test count guards found" -- a clean
+    bill over an arbitrary slice, indistinguishable from a clean bill over the backlog.
+    A detector that cannot say what it examined cannot be trusted when it finds nothing.
+    """
+    global failures
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("paths", nargs="*", help="Text files to scan; omit to read JSON on stdin")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_LIMIT,
+        help="the record limit the caller asked its query for; a full page is treated as truncated",
+    )
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+
+    scanned = 0
+    noun = "source"
+
+    if args.paths:
+        for path_str in args.paths:
             path = Path(path_str)
             if path.exists():
-                text = path.read_text(encoding="utf-8", errors="replace")
-                lint_source(text, str(path))
+                lint_source(path.read_text(encoding="utf-8", errors="replace"), str(path))
+                scanned += 1
     else:
-        if not sys.stdin.isatty():
-            content = sys.stdin.read()
-
-    if content:
-        try:
-            data = json.loads(content)
-            if isinstance(data, list):
-                for i, item in enumerate(data):
-                    body = ""
-                    if isinstance(item, dict):
-                        body = item.get("body", "") or item.get("title", "")
-                    elif isinstance(item, str):
-                        body = item
+        content = "" if sys.stdin.isatty() else sys.stdin.read()
+        if content:
+            noun = "issue body"
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError:
+                lint_source(content, "<stdin>")
+                scanned = 1
+                noun = "source"
+            else:
+                if isinstance(data, list):
+                    # At the limit, not past it: a full page is exactly the case where
+                    # truncation and coincidence are indistinguishable. Same rule as
+                    # board_audit.bounded_records, for the same reason.
+                    if len(data) >= args.limit:
+                        print(
+                            f"  FAIL  scan is potentially truncated at limit {args.limit}: "
+                            f"{len(data)} record(s) returned. Raise --limit and the query's "
+                            f"own limit; a clean result over an unknown slice is not a clean result."
+                        )
+                        return 2
+                    for i, item in enumerate(data):
+                        body = _body_of(item)
+                        if body:
+                            lint_source(body, _issue_label(item, i))
+                        scanned += 1
+                elif isinstance(data, dict):
+                    body = _body_of(data)
                     if body:
-                        lint_source(body, f"issue #{i+1}")
-            elif isinstance(data, dict):
-                body = data.get("body", "")
-                if body:
-                    lint_source(body, "issue")
-        except json.JSONDecodeError:
-            lint_source(content, "<stdin>")
+                        lint_source(body, _issue_label(data, 0))
+                    scanned = 1
 
     if failures:
         for f in failures:
             print(f"  FAIL  {f}")
-        print(f"\nguard-lint: {len(failures)} pinned test count guard(s) found. Use invariants instead of pinned counts (see issue #68).")
+        print(
+            f"\nguard-lint: {len(failures)} pinned test count guard(s) found in {scanned} "
+            f"{noun}(s). Use invariants instead of pinned counts (see issue #68)."
+        )
         return 1
 
-    print("guard-lint: no pinned test count guards found")
+    print(f"guard-lint: no pinned test count guards in {scanned} {noun}(s)")
     return 0
 
 

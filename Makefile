@@ -162,8 +162,17 @@ assertion-lint:
 commit-lint:
 	@uv run python -m agent_sessions.scripts.commit_lint
 
+# `gh issue list` defaults to 30 records, so this used to scan the newest 30 open
+# issues and print "no pinned test count guards found" -- a clean bill over an
+# arbitrary slice, indistinguishable from a clean bill over the backlog. The limit is
+# now explicit on both sides: `gh` is asked for a bounded page, and `guard_lint` is told
+# what was asked for so a full page fails as possibly-truncated rather than passing.
+# `number` is in the projection so findings cite a real issue, not an array index.
+GUARD_LINT_LIMIT ?= 500
+
 guard-lint:
-	@gh issue list --json body | uv run python -m agent_sessions.scripts.guard_lint
+	@gh issue list --limit $(GUARD_LINT_LIMIT) --json number,body \
+	  | uv run python -m agent_sessions.scripts.guard_lint --limit $(GUARD_LINT_LIMIT)
 
 # Credential preflight. Not in `check`: it makes live GitHub calls and depends on
 # the operator's own tokens, so it is a thing you run when setting a machine up or
