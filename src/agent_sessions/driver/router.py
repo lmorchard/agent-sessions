@@ -13,8 +13,11 @@ from __future__ import annotations
 
 from typing import Any
 
-PARK_LABEL = "agent-session:needs-human"
-MERGE_READY_LABEL = "agent-session:merge-ready"
+from agent_sessions.driver.labels import (  # noqa: F401 - re-exported for existing importers
+    MERGE_READY_LABEL,
+    PARK_LABEL,
+    is_specced,
+)
 
 
 def select(
@@ -81,13 +84,6 @@ def select(
                 filtered_issues.append(iss)
     else:
         filtered_issues = open_issues
-
-    def is_specced(iss: dict) -> bool:
-        labels = [l.get("name", "") for l in iss.get("labels", []) if isinstance(l, dict)]
-        if "agent-session:spec" in labels:
-            return True
-        body = iss.get("body", "") or ""
-        return "<!-- agent-session:spec -->" in body
 
     candidates_json = [
         iss

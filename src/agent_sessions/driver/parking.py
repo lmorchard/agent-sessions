@@ -8,20 +8,15 @@ import sys
 from pathlib import Path
 
 from agent_sessions.driver import credentials, output
+from agent_sessions.driver.labels import (  # noqa: F401 - re-exported for existing importers
+    INTERACTIVE_LABEL,
+    MARKER,
+    MERGE_READY_LABEL,
+    PARK_LABEL,
+    SPEC_LABEL,
+    is_specced,
+)
 from agent_sessions.driver.output import say
-
-PARK_LABEL = "agent-session:needs-human"
-INTERACTIVE_LABEL = "agent-session:needs-human-interactive"
-MERGE_READY_LABEL = "agent-session:merge-ready"
-SPEC_LABEL = "agent-session:spec"
-MARKER = "<!-- agent-session:spec -->"
-
-
-
-
-def is_specced(iss: dict) -> bool:
-    labels = [l.get("name") for l in iss.get("labels", []) if isinstance(l, dict)]
-    return SPEC_LABEL in labels or MARKER in (iss.get("body") or "")
 
 
 def get_attempts(issue_number: str | int, repo: str, issues_json: list[dict] | None = None) -> int:

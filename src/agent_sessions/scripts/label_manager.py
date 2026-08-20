@@ -8,18 +8,18 @@ import argparse
 import subprocess
 import sys
 
-# Standard label vocabulary
-SPEC_LABEL = "agent-session:spec"
-AUTO_OK_LABEL = "agent-session:auto-ok"
-NEEDS_REVIEW_LABEL = "agent-session:needs-review"
-PARK_LABEL = "agent-session:needs-human"
-INTERACTIVE_LABEL = "agent-session:needs-human-interactive"
-MERGE_READY_LABEL = "agent-session:merge-ready"
-ATTEMPT_LABELS = [
-    "agent-session:attempt-1",
-    "agent-session:attempt-2",
-    "agent-session:attempt-3",
-]
+# The standard label vocabulary, owned by `driver/labels.py`. It was defined here too,
+# and in `parking.py`, and in `router.py` -- so a rename needed four edits and missing one
+# failed open, with an issue silently ceasing to be selected and nothing to say so.
+from agent_sessions.driver.labels import (  # noqa: F401 - re-exported for existing importers
+    ATTEMPT_LABELS,
+    AUTO_OK_LABEL,
+    INTERACTIVE_LABEL,
+    MERGE_READY_LABEL,
+    NEEDS_REVIEW_LABEL,
+    PARK_LABEL,
+    SPEC_LABEL,
+)
 
 
 def run_gh(cmd: list[str], repo: str | None = None) -> str:
