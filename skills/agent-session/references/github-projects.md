@@ -95,8 +95,7 @@ gh project item-list <number> --owner <owner> --format json \
 **The lookups above are reads, and you can run them. The two operations below are writes, and
 you cannot.** Under the board-driver your credential is read-scoped: board mutations go through
 the write manifest and the driver performs them after your run. See
-`references/write-manifest.md`, which this file previously never mentioned while three other
-phases correctly pointed *here* for the details.
+`references/write-manifest.md` for the entry format.
 
 If the issue isn't on the board yet (common right after `intake` creates it), record a
 `project_item_add` entry:

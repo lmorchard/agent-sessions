@@ -194,7 +194,7 @@ the case, run the substitutes in "When the criteria are commands, not test files
 
 Run this at the end of `execute`, and again in `open_pr` before pushing, so the verdict the gate cites was
 taken against the tree that ships. It's two seconds and it's the difference between a claim and a
-check — and because `open_pr` no longer rewrites history, the freeze commit ships with the branch and a
+check — and because `open_pr` does not rewrite history, the freeze commit ships with the branch and a
 reviewer can re-run the diff themselves rather than taking the recorded verdict on trust.
 
 ### When the criteria are commands, not test files

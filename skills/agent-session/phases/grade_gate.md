@@ -16,11 +16,10 @@ This phase is triggered by the orchestrator when a PR has passed CI and has no u
 
 1. **Derive the verdict.** Not a judgment call — read each row and take the result.
 
-    *(For small tasks there is no freeze commit, so the tamper and freeze rows are `none` and the
-    guards row may be. **The criteria row still applies**: every task size carries a `checks.md`
-    naming at least one runnable check, per `SKILL.md`'s Ceremony Threshold, and the independent
-    verifier's report on it is what the first row reads. This used to say to ignore the first four
-    rows outright, which left the modal unattended run graded on CI, threads and tier alone.)*
+    *(For a small task there is no freeze commit, so the tamper and freeze rows are `none` and the
+    guards row may be. **The criteria row still applies** — every task size carries a `checks.md`
+    naming at least one runnable check, and the independent verifier's report on it is what that
+    row reads.)*
 
     | Condition | Source |
     |---|---|
@@ -52,9 +51,9 @@ This phase is triggered by the orchestrator when a PR has passed CI and has no u
     a failure and not a pass; it is not yet derivable.
 
     **Rules on resolving review threads (audited autonomy):**
-    - **Whatever the tier, a thread you *disputed* stays open.** `address_comments.md` states this
-      as its rule and it is not overridden here: disputing is fine and often right, disputing *and*
-      clearing your own gate is not. Resolve a thread only when you fixed what it raised.
+    - **Whatever the tier, a thread you *disputed* stays open.** Disputing is fine and often
+      right; disputing *and* clearing your own gate is not. Resolve a thread only when you fixed
+      what it raised.
     - **For `auto-ok` tier issues:** within that limit, you may address feedback, reply, push
       fixes, and resolve the threads you fixed. As long as CI and all project-gates are completely
       green, the gate trusts the self-resolution.
@@ -62,10 +61,6 @@ This phase is triggered by the orchestrator when a PR has passed CI and has no u
       "Auditor" subagent is explicitly configured to audit and resolve). Leave them for the human
       reviewer. If you resolved any yourself on a `needs-review` issue, they count as unresolved
       for gate purposes.
-
-    *(The first bullet used to be absent, so this file and `address_comments.md` gave opposite
-    answers about the same act with no cross-reference between them. `findings.md`'s adjacency
-    instance 11 is a run that resolved its own thread and reported a clean `threads` row.)*
 
     **The CI row is a claim about a commit, so derive it LAST — after the final push — and record
     the sha it describes.** Anything that pushes afterwards invalidates it: a force-push to amend
@@ -113,19 +108,14 @@ This phase is triggered by the orchestrator when a PR has passed CI and has no u
     gh pr checks <n> --watch
     ```
 
-    One blocking command that returns when the checks finish. **Do not build a wait out of anything
-    else.** Measured: a run burned its entire budget on a `sleep` poll loop, a backgrounded shell and
-    the `Monitor` tool, never tried `--watch`, and ended at `verdict: pending` on a PR whose CI went
-    green minutes later.
+    One blocking command that returns when the checks finish. **Do not build a wait out of
+    anything else.** A `sleep` poll loop and a backgrounded shell are *permitted* by the permission
+    floor and will still ruin the run: each poll costs a turn, and a real run burned its entire
+    budget that way, never tried `--watch`, and ended at `verdict: pending` on a PR whose CI went
+    green minutes later. The `Monitor` tool is not available at all.
 
-    *(This used to say all three were **denied** under the permission floor. Checked against the
-    shipped policy: `DEFAULT_ALLOWED_TOOLS` grants `Bash(*)`, `BashOutput` and `KillShell`, so a
-    poll loop and a backgrounded shell are permitted. Only `Monitor` is genuinely unavailable. The
-    advice is unchanged and the incident is real — a poll loop costs one turn per poll and exhausts
-    a budget — but the stated reason was wrong, and a reader who checks it discounts the advice.)*
-
-    `--watch` is a single `gh` invocation, so it is covered by the same allow-rule as every other
-    `gh` call, and it costs one turn instead of one turn per poll.
+    `--watch` is one `gh` invocation, covered by the same allow-rule as every other `gh` call, and
+    it costs one turn however long the checks take.
 
     If the checks genuinely never settle, the verdict is **`pending`** — not
     `eligible-for-auto-merge` and not `human-merge-required`: nothing is wrong, it just isn't
@@ -133,12 +123,9 @@ This phase is triggered by the orchestrator when a PR has passed CI and has no u
 
     **All true → `eligible-for-auto-merge`. Any false → `human-merge-required`**, with the
     failing row as the reason. Write the verdict into the gate block and report it.
-    Do **not** write to `docs/agent-ledger.md` here. This step used to, and the append could never
-    land: this phase has no commit, no push and no `push` manifest entry, so the edit died in the
-    worktree. The ledger records eleven `eligible-for-auto-merge` verdicts and still says
-    *"(Initial placeholder)"*. And adding a push here would be worse than the bug — it would
-    invalidate the CI row this phase has just derived, per the rule directly above. The append
-    moved to `open_pr`, which pushes.
+    Do **not** write to `docs/agent-ledger.md` here. This phase makes no commit and records no
+    `push`, so an edit to it would die in the worktree — and pushing one would invalidate the CI row
+    just derived, per the rule directly above. `open_pr` writes the ledger.
 
     Any row satisfied by a substitute rather than by its cited mechanism is still a pass, but
     **name the substitute in the gate block** where the row would otherwise read as a clean

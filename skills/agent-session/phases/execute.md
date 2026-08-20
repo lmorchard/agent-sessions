@@ -44,20 +44,13 @@ to run first to observe failure, and the frozen check files by path with the rea
 Groups must touch strictly independent files or functions, or they produce merge conflicts
 instead of throughput.
 
-Dispatch them with the harness's own subagent mechanism. This section used to describe a
-`scripts/run_swarm.py` orchestrator invoked as `python3 scripts/run_swarm.py <prompt files>`;
-that script was unreachable through any entry point and broken if reached — it computed the repo
-root incorrectly after the src-layout move and looked for an `agent_runner.py` the Python
-conversion had deleted — and #261 removed it, along with the `scripts/validate_tdd.py` it called.
-Its `--tier low` flag was its own, not `agent_runner`'s, and the model name this paragraph used
-to give as an example of the low tier was invented: no model name is hardcoded anywhere, the
-mapping comes from `--low-tier-model` / `LOW_TIER_MODEL`.
+Dispatch them with the harness's own subagent mechanism. Which model each one gets is the
+driver's choice, from `--low-tier-model` / `LOW_TIER_MODEL`; do not name a model yourself.
 
-**On OpenCode, subagents cannot be dispatched at all.** `agent_runner.py` sets `"task": "deny"`
-for that backend, because OpenCode 1.18.18 does not propagate an agent's configured mandatory
-permission policy to delegated agents — so a subagent would run without the merge prohibition.
-Everything in this file that dispatches one, including the independent verifier, has to be done
-in the main context there. Recorded on #261 as K9.
+**On the OpenCode backend, subagents cannot be dispatched at all** — the runner denies delegation
+there, because OpenCode does not propagate the mandatory permission policy to a delegated agent, so
+a subagent would run without the merge prohibition. On that backend everything below that dispatches
+one, **including the independent verification**, has to happen in the main context.
 
 1. **Load and review.** Read `plan.md`, `checks.md`, and `spec.md`. Confirm the freeze commit
    exists (`checks.md`'s `Frozen at` sha resolves) — if it doesn't, Phase 0 never happened;

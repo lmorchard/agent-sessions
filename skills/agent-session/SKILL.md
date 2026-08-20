@@ -90,21 +90,13 @@ Not every task needs the full `plan` → `execute` → `open_pr` ceremony with f
 with the `todowrite` tool.
 
 **What you do not skip is the oracle.** Before you change anything, write a `checks.md` naming at
-least one runnable check — the exact command, and what its output has to say. It can be one line.
-Then run it and see it fail. That file is the independent verifier's *entire input*
-(`references/frozen-checks.md`), so skipping it does not make the verification lighter; it makes
-the verification impossible, and `execute.md` says the independent verification is never skipped
-*and* that most unattended issues are this size. Both cannot be true at once, and this is which
-one gives: **the frozen-check machinery is optional for small work, the check itself is not.**
+least one runnable check — the exact command, and what its output has to say. One line is enough.
+Then run it and watch it fail.
 
-There is no freeze commit for a one-line `checks.md` and no tamper diff to run against it. What
-remains is the part that matters — a named command, decided before the work, that the verifier can
-run and that could have failed.
-
-Without it, the gate for the modal unattended run reduces to CI, threads and tier, which is a
-materially weaker gate than this skill documents anywhere. Decided on
-[#261](https://github.com/lmorchard/agent-sessions/issues/261) (K9) rather than left implicit,
-because it had been settled in passing and never written down.
+`checks.md` is the independent verifier's *entire input*, so leaving it out does not make the
+verification lighter — it makes it impossible, and the gate then rests on CI, threads and tier
+alone. **The frozen-check machinery is optional at this size; the check itself is not.** No freeze
+commit, no tamper diff — just a named command, chosen before the work, that could have failed.
 
 **Large/Architectural (new features, multi-session work, high ambiguity):** Use the full structured flow below, freezing checks and building vertical slices to ensure verifiable outcomes.
 

@@ -60,20 +60,13 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
    Fix what you find. This catches what a bot reviewer misses, and vice versa.
 
    **Then append what you learned to `docs/agent-ledger.md`, if the file exists** — architectural
-   rules, stylistic choices, test patterns that a future run would want to know. `intake` reads it
-   as a source of architectural continuity, and this is the only phase positioned to write it: the
-   append has to ride along on a commit that gets pushed, and the push is a few steps below.
+   rules, stylistic choices, test patterns a future run would want to know. `intake` reads it for
+   architectural continuity, and this is the phase positioned to write it: the append rides along on
+   a commit that gets pushed, a few steps below.
 
-   It used to live in `grade_gate`, gated on the verdict, and could never land there — that phase
-   has no commit, no push and no `push` manifest entry, so the edit died in the worktree while the
-   ledger accumulated eleven `eligible-for-auto-merge` verdicts and stayed on its placeholder line.
-   Adding a push to `grade_gate` would have been worse than the bug: it would invalidate the CI row
-   that phase has just derived.
-
-   Note what moving it changes, deliberately: the append is **no longer conditional on the
-   verdict**. A pattern discovered on a run that ends `human-merge-required` is institutional
-   memory too, and the old condition discarded it. Keep the entries short and general; this is not
-   a run log.
+   Append **whatever the run's eventual verdict turns out to be** — a pattern found on work that
+   ends up needing human review is institutional memory too. Keep entries short and general; this
+   is not a run log.
 
 ## Push and open
 

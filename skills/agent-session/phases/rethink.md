@@ -31,8 +31,7 @@ This is a human-in-the-loop phase, typically triggered interactively when an ope
      - Record a `label` entry **removing** `agent-session:spec`.
 
      With only the marker retired, the routing query still sees the issue as specced and routes it
-     straight back to `execute` with the old tier — which is the outcome this step exists to
-     prevent, and was the outcome it produced for every issue specced by label.
+     straight back to `execute` with the old tier, which is what this step exists to prevent.
 
 4. **Clean up Local State.** 
    - If there is a known local worktree or session directory for the failed attempt, explicitly advise the user to delete it or abandon the branch. The new attempt must start from a clean slate so that old frozen checks (`checks.md`) do not pollute the new path.
