@@ -10,3 +10,5 @@ node_modules/
 # inside this one -- which a blanket `git add -A` will do silently. PR #10 adds this
 # on its own branch; main needs it too, and needed it an hour earlier.
 .worktrees/
+
+*.private-key.pem

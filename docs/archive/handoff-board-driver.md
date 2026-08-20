@@ -3,7 +3,7 @@
 > **Move 3 is complete.** This brief is now a record of what it asked for, not a task. The driver is
 > at `driver/agent-session-driver.sh`; the outcome is in
 > [design.md](../design.md)'s move-3 section and
-> [dev-sessions/2026-07-25-0926-board-driver/](../dev-sessions/2026-07-25-0926-board-driver/).
+> [dev-sessions/2026-07-25-0926-board-driver/](dev-sessions/2026-07-25-0926-board-driver/).
 >
 > **How the brief held up.** Its central bet paid off again: fresh context was load-bearing, and for
 > the reason it claimed. Four of its five "don't rediscover these" constraints were confirmed live

@@ -27,22 +27,28 @@ agent-session-driver = "agent_sessions.driver.agent_session_driver:main"
 packages = ["src/agent_sessions"]
 
 [tool.pytest.ini_options]
-testpaths = ["driver", "scripts"]
+# `tests`, not `driver`/`scripts`. Those held the suites until #257 and #258 relocated
+# them, and this line did not move with them -- so a bare `pytest` collected nothing
+# and exited 0, reporting a clean run having verified nothing. `make gate-test` passes
+# explicit paths, which is why CI stayed honest and only the default was a false green.
+testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-q"
+# The suites bootstrap `src` onto sys.path by hand in 24 files. Declaring it once here
+# is what lets those be deleted.
+pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-exclude = ["docs/dev-sessions"]
+# Both frozen trees, matching `docs_check.FROZEN`. Session artifacts are a historical
+# record, not maintained code -- some carry deliberately rough probe scripts. Archiving
+# a session used to move it out from under this exclude and into the linter.
+exclude = ["docs/dev-sessions", "docs/archive"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
 ignore = ["E501", "E741"]
-
-[tool.ruff.lint.per-file-ignores]
-"driver/*.py" = ["E402", "F403"]
-"scripts/*.py" = ["E402", "F403"]
 
 [tool.mypy]
 python_version = "3.11"

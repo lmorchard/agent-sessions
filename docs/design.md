@@ -544,7 +544,7 @@ Closed, but the *reasoning* is still load-bearing.
 
   **D2 — how the verifier's read-only-ness is enforced — was spiked, then decided for GitHub
   writes only (#191, 2026-08-10).** See
-  [the spike](dev-sessions/2026-08-01-1932-verifier-containment/spike-verifier-containment.md).
+  [the spike](archive/dev-sessions/2026-08-01-1932-verifier-containment/spike-verifier-containment.md).
   `--agents` honors an undocumented per-agent `tools` allowlist that yields an intersection rather
   than inheritance, which contains `Write`/`Edit` against a control. It does **not** contain a
   verifier that runs checks: `Bash(python3:*)` and `Bash(pytest:*)` are write primitives, and a

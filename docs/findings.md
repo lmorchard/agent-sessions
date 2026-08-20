@@ -291,7 +291,7 @@ file* made outcomes worse. The concept is already reachable from seven other pla
 
 **So: this belongs in a human's head and in review, not in another rule.** Before re-adding
 anything about discrimination, read
-`dev-sessions/2026-07-27-1403-measurement/microtest/results.md`. **The trim that looks obviously
+`archive/dev-sessions/2026-07-27-1403-measurement/microtest/results.md`. **The trim that looks obviously
 safe — reduce § 2 to "run the check and confirm it fails" — measured worst of all nine arms
 (2/15) and is the only arm that ever froze a vacuous check.** A bare instruction to run the check,
 stripped of its elaboration, appears to license *"I ran it, it's green, done."*

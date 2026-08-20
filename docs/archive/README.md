@@ -1,6 +1,6 @@
 # Archive — closed documents
 
-Nothing in here is appended to any more. **Two different kinds of thing live here, and they do not
+Nothing in here is appended to any more. **Three different kinds of thing live here, and they do not
 have the same trust level** — worth knowing before citing anything.
 
 ## 1. The build log — authoritative for history, not for state
@@ -21,9 +21,9 @@ unexercised" notes, pending lists. Its own header enumerates the specific ones. 
 
 Closed rather than continued because moves 6 and 7 were never written into it — their account went
 into the session `notes.md`, and nothing missed it. It had stopped being written two moves before
-anyone noticed. Per-run provenance now lives machine-readably in `.driver-state/runs.jsonl`, a move's
-narrative in its session `notes.md`, decisions in the issue body on the board, and durable rules in
-`findings.md`.
+anyone noticed. Per-run provenance now lives machine-readably in the per-repo `runs.jsonl` the driver
+logs at startup — `.driver-state/` was superseded by #27 and is a cold archive — a move's narrative in
+its session `notes.md`, decisions in the issue body on the board, and durable rules in `findings.md`.
 
 ## 2. The handoff briefs — not authoritative at all
 
@@ -52,6 +52,24 @@ of, and it links to them by name — keeping both preserves that pairing. And th
 evidence for a claim this project makes repeatedly: **fresh context is load-bearing, not hygiene.**
 Each brief opens with "corrections to inherit" — things the previous session asserted and later found
 false — and reading them in sequence shows how often confident reasoning had to be walked back.
+
+## 3. Retired dev-sessions — frozen provenance, authoritative about their own run
+
+**[dev-sessions/](dev-sessions/)** holds the session directories for work whose epoch has closed. A
+session lives at `docs/dev-sessions/<timestamp>-<slug>/` while it is current and retires to here; the
+live directory still receives new sessions and is where you look for recent work.
+
+The boundary is the **2026-08-09 Bash-to-Python driver rewrite**. Sessions dated before it describe a
+driver that no longer exists, so their specs, plans and frozen checks are pure history — accurate
+about what that session decided and did, and not to be read as describing today's harness.
+
+Their trust level sits between the two kinds above. A session's `spec.md` and `checks.md` were frozen
+before its implementation and were the oracle it was graded against, so they are **authoritative about
+that run** in a way the handoff briefs never were. But every path, module name and command in them
+predates the rewrite. Cite them for *what was decided and why*, never for *where the code is*.
+
+Retire a session with `scripts/archive-dev-session.py`, which moves it and repairs the links in both
+directions; `make docs-check` verifies the result.
 
 ---
 
