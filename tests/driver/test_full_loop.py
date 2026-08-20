@@ -1852,20 +1852,17 @@ def test_classify_only_with_no_pr_parks_the_issue(loop):
     assert agent_session_driver.PARK_LABEL in gh.labels_of(101)
 
 
-def test_classify_only_says_it_recorded_to_runs_jsonl_and_records_nothing(loop):
-    """Observed, not endorsed -- and the reason X4 mattered.
+def test_classify_only_records_the_row_it_says_it_recorded(loop):
+    """The recovery path completes the ledger, which is the whole reason it exists.
 
-    `run_classify_only` ends by printing "recorded to runs.jsonl. Nothing was merged."
-    Only `classify_and_record` ever opens `ctx.runs_log`; the recovery path does not.
-    So the operator completing a dead run's bookkeeping is told the ledger was written
-    and it was not, while park state *is* applied -- the issue is parked, and
-    `runs.jsonl`, which this project treats as its per-run provenance, has no row for
-    the run that parked it.
+    This check used to assert the *discrepancy*: `run_classify_only` ended by printing
+    "recorded to runs.jsonl. Nothing was merged." and only `classify_and_record` ever
+    opened `ctx.runs_log`. Park state was applied, so an operator recovering a dead run
+    got the issue parked, a line saying the ledger was written, and no row for the run
+    that parked it -- a hole in the per-run provenance exactly where a run died, which
+    is the case you most want recorded. Les settled it in favour of recording.
 
-    This check asserts the discrepancy rather than either half of it, because which
-    side is wrong is a decision about the ledger's contract, not a defect with an
-    obvious repair. Whichever way it is settled, this is the test that has to change,
-    and the diff will say which was chosen.
+    Zero coverage of `--classify-only` is why it survived; that gap was X4.
     """
     gh = FakeGitHub(
         issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
@@ -1877,8 +1874,112 @@ def test_classify_only_says_it_recorded_to_runs_jsonl_and_records_nothing(loop):
 
     assert code == 0
     assert "recorded to runs.jsonl" in out
-    assert loop.rows("runs.jsonl") == [], (
-        "if this now holds a row, the recovery path learned to record and the claim in "
-        "its last line became true -- delete this check and assert the row instead"
+
+    rows = loop.rows("runs.jsonl")
+    assert len(rows) == 1, f"the recovery path recorded {len(rows)} row(s)"
+    assert rows[0]["issue"] == 101
+    assert rows[0]["repo"] == REPO
+    assert rows[0]["outcome"] == "parked"
+    assert rows[0]["reason"] == "no open PR found for #101"
+    assert loop.rows("parked.jsonl") != [], "park state is applied, and now the two agree"
+
+
+def test_the_recovered_row_carries_the_dead_runs_phase(loop):
+    """`phase` is `evidence.py`'s primary grouping key, so a blank one is a lost run.
+
+    The inflight marker is written at the start of every run and describes the run in
+    flight, so the phase belongs in it -- and recovery can then report what actually
+    ran rather than a blank. Without this the recovered row groups under `unknown`,
+    which is the state the pre-#27 archive was in and the reason `make evidence` used
+    to render every PHASE cell as `unknown`.
+    """
+    head = "abc1234def5678000000000000000000000000ff"
+    loop.state_dir.mkdir(parents=True, exist_ok=True)
+    (loop.state_dir / "inflight.json").write_text(
+        json.dumps({
+            "issue": 101,
+            "started": FROZEN_TS,
+            "run_dir": str(loop.run_dir(101)),
+            "url": f"https://github.com/{REPO}/issues/101",
+            "phase": "grade_gate",
+        }),
+        encoding="utf-8",
     )
-    assert loop.rows("parked.jsonl") != [], "park state is applied, so the two disagree"
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[
+            pr(
+                201,
+                body=gate_body(101, verdict="eligible-for-auto-merge", ci_row="2/2 pass @ abc1234"),
+                closes=[101],
+                head_oid=head,
+                checks=[("lint", "pass"), ("test", "pass")],
+                threads=[True],
+                review_requests=1,
+                reviews=1,
+            )
+        ],
+        board_items=[board_item(101)],
+    )
+
+    code, _ = loop.run(gh, agent=StubAgent(), argv=["--classify-only", "101"])
+
+    assert code == 0
+    rows = loop.rows("runs.jsonl")
+    assert len(rows) == 1
+    assert rows[0]["phase"] == "grade_gate"
+    assert rows[0]["outcome"] == "gate-eligible"
+
+
+def test_an_inflight_marker_without_a_phase_still_recovers(loop):
+    """Control. Markers written before the phase was added must not break recovery.
+
+    A `KeyError` here would turn the recovery path -- the thing you reach for when a run
+    has already died -- into a second failure, at the worst possible moment.
+    """
+    loop.state_dir.mkdir(parents=True, exist_ok=True)
+    (loop.state_dir / "inflight.json").write_text(
+        json.dumps({"issue": 101, "started": FROZEN_TS, "run_dir": "", "url": ""}),
+        encoding="utf-8",
+    )
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[],
+        board_items=[board_item(101)],
+    )
+
+    code, _ = loop.run(gh, agent=StubAgent(), argv=["--classify-only", "101"])
+
+    assert code == 0
+    rows = loop.rows("runs.jsonl")
+    assert len(rows) == 1
+    assert rows[0]["phase"] == "", "an unknown phase is blank, not a crash and not a guess"
+
+
+def test_the_inflight_marker_names_the_phase_it_is_marking(loop):
+    """The producer side of the pair above, asserted on a normal pass.
+
+    Recovery can only report the phase if the marker carries it, and the marker is
+    written by `invoke_agent` -- a different function, in a different pass, which is
+    exactly the coupling that goes stale unnoticed.
+    """
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[],
+        board_items=[board_item(101)],
+    )
+    captured = {}
+
+    real_unlink = Path.unlink
+
+    def capture_then_unlink(self, *a, **kw):
+        if self.name == "inflight.json" and self.is_file():
+            captured["marker"] = json.loads(self.read_text(encoding="utf-8"))
+        return real_unlink(self, *a, **kw)
+
+    loop.monkeypatch.setattr(Path, "unlink", capture_then_unlink)
+    loop.run(gh, agent=StubAgent(stream=agent_stream()))
+
+    assert captured, "no inflight marker was written during the pass"
+    assert captured["marker"]["phase"], "the marker carries no phase for recovery to read"
+    assert captured["marker"]["issue"] == 101

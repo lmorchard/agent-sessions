@@ -454,6 +454,57 @@ def preflight(argv: list[str] | None = None) -> RunContext:
     )
 
 
+def append_run_row(
+    ctx: RunContext,
+    *,
+    issue_num: str,
+    phase: str,
+    ts: str,
+    exit_code: int,
+    cost: float,
+    session_id: str,
+    outcome: str,
+    reason: str,
+    prurl: str,
+    changed_files: int | None,
+    base_ref: str,
+    head_sha: str,
+    rundir: Path | None,
+    writes: dict,
+) -> None:
+    """Append one row to `runs.jsonl`, the project's per-run provenance ledger.
+
+    One builder, two callers, because they had drifted to the point of disagreeing
+    about whether a run was recorded at all. `classify_and_record` wrote the row;
+    `run_classify_only` -- the recovery path an operator reaches for after a run dies --
+    printed "recorded to runs.jsonl" and appended nothing. Park state *was* applied, so
+    the outcome was that a dead run left the issue parked and the ledger with no row for
+    the run that parked it. Precisely the run you most want a record of.
+
+    Keeping the shape in one place is also what stops the two paths reporting the same
+    run differently, which #261's T3 names as a live risk on the pair.
+    """
+    row = {
+        "issue": int(issue_num),
+        "repo": ctx.repo,
+        "phase": phase,
+        "started": ts,
+        "exit": exit_code,
+        "cost_usd": cost,
+        "session_id": session_id,
+        "outcome": outcome,
+        "reason": reason,
+        "pr": prurl,
+        "changed_files": changed_files if changed_files is not None else 0,
+        "base_diff_sha": f"{base_ref}..{head_sha[:8]}" if (base_ref and head_sha) else head_sha[:8],
+        "run_dir": str(rundir) if rundir else "",
+        "writes": writes,
+        "provenance": {},
+    }
+    with open(ctx.runs_log, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row) + "\n")
+
+
 def run_classify_only(ctx: RunContext) -> int:
     from agent_sessions.driver import agent_session_driver
 
@@ -476,6 +527,18 @@ def run_classify_only(ctx: RunContext) -> int:
     cost = 0.0
     session = ""
     ts = output.now().strftime("%Y%m%dT%H%M%SZ")
+
+    # The dead run's phase, if its marker survived. `evidence.py` groups by `phase`, so
+    # a recovered row without one is a run that happened and cannot be counted. Markers
+    # written before the field existed simply have none; that is a blank, not a guess.
+    phase = ""
+    if ctx.inflight_file.is_file():
+        try:
+            inflight = json.loads(ctx.inflight_file.read_text(encoding="utf-8"))
+            if str(inflight.get("issue", "")) == str(issue_num):
+                phase = str(inflight.get("phase", "") or "")
+        except Exception:
+            phase = ""
 
     if rundir and (rundir / "stream.jsonl").is_file():
         say(f"  run dir  {rundir}")
@@ -536,6 +599,28 @@ def run_classify_only(ctx: RunContext) -> int:
     say(f"  reason   {reason}")
     if prurl:
         say(f"  pr       {prurl}")
+
+    # Record the run. This is what the closing line has always claimed and, until
+    # #261, never did -- see `append_run_row`. `exit` is -1 because the run's own
+    # process never reported one: that is the situation this path exists for, and a
+    # recovered row saying `exit: 0` would be a fabrication.
+    append_run_row(
+        ctx,
+        issue_num=issue_num,
+        phase=phase,
+        ts=ts,
+        exit_code=-1,
+        cost=cost,
+        session_id=session,
+        outcome=outcome,
+        reason=reason,
+        prurl=prurl,
+        changed_files=None,
+        base_ref="",
+        head_sha="",
+        rundir=rundir,
+        writes={"recorded": 0, "applied": 0, "ok": True},
+    )
 
     agent_session_driver.apply_park_state(issue_num, outcome, ts, reason, ctx.repo, ctx.state_dir, ctx.parked_log)
     if ctx.inflight_file.is_file():
@@ -904,8 +989,18 @@ def invoke_agent(
             say(f"  NOTE: moved issue #{issue_num} to 'In progress' on board {ctx.board}")
 
     # Write inflight marker
+    # `phase` is here so `--classify-only` can put it in the recovered ledger row.
+    # It is `evidence.py`'s primary grouping key, and a recovered run without one
+    # groups under "unknown" -- the state the pre-#27 archive was in.
     ctx.inflight_file.write_text(
-        json.dumps({"issue": int(issue_num), "started": ts, "run_dir": str(rundir), "url": url}), encoding="utf-8"
+        json.dumps({
+            "issue": int(issue_num),
+            "started": ts,
+            "run_dir": str(rundir),
+            "url": url,
+            "phase": phase,
+        }),
+        encoding="utf-8",
     )
 
     if phase not in PHASE_TIERS:
@@ -1156,29 +1251,27 @@ def classify_and_record(
         say(f"  pr       {prurl}")
 
     # Record run
-    row = {
-        "issue": int(inv.issue_num),
-        "repo": ctx.repo,
-        "phase": inv.phase,
-        "started": inv.ts,
-        "exit": inv.exit_code,
-        "cost_usd": inv.cost,
-        "session_id": inv.session_id,
-        "outcome": outcome,
-        "reason": reason,
-        "pr": prurl,
-        "changed_files": changed_files if changed_files is not None else 0,
-        "base_diff_sha": f"{base_ref}..{head_sha[:8]}" if (base_ref and head_sha) else head_sha[:8],
-        "run_dir": str(inv.rundir),
-        "writes": {
+    append_run_row(
+        ctx,
+        issue_num=inv.issue_num,
+        phase=inv.phase,
+        ts=inv.ts,
+        exit_code=inv.exit_code,
+        cost=inv.cost,
+        session_id=inv.session_id,
+        outcome=outcome,
+        reason=reason,
+        prurl=prurl,
+        changed_files=changed_files,
+        base_ref=base_ref,
+        head_sha=head_sha,
+        rundir=inv.rundir,
+        writes={
             "recorded": len(inv.writes_result["entries"]),
             "applied": inv.writes_result["applied"],
             "ok": inv.writes_result["ok"],
         },
-        "provenance": {},
-    }
-    with open(ctx.runs_log, "a", encoding="utf-8") as f:
-        f.write(json.dumps(row) + "\n")
+    )
 
     agent_session_driver.apply_park_state(inv.issue_num, outcome, inv.ts, reason, ctx.repo, ctx.state_dir, ctx.parked_log)
 
