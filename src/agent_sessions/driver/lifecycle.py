@@ -517,8 +517,13 @@ def run_classify_only(ctx: RunContext) -> int:
 
         failed_ci, _ = agent_session_driver.check_pr_ci_status(ctx.repo, pr_num)
         ci_checks = "failed" if failed_ci > 0 else "pass"
+        # The block, not the body. `gate_fields` harvests every `^key: value` line it
+        # is handed and the first occurrence wins, so an ordinary PR summary above the
+        # `## Merge gate` heading could supply a row -- including `verdict`, turning an
+        # honest `human-merge-required` into `gate-eligible`. `extract_gate` is what
+        # every test in test_gate.py calls first; production did not.
         outcome_res = gate.classify(
-            pr_body,
+            gate.extract_gate(pr_body),
             head_sha=head_sha,
             ci_checks=ci_checks,
             changed_files=changed_files,
@@ -1121,8 +1126,9 @@ def classify_and_record(
             else:
                 failed_ci, _ = agent_session_driver.check_pr_ci_status(ctx.repo, prnum)
             ci_checks = "failed" if failed_ci > 0 else "pass"
+            # See run_classify_only: the block, not the body.
             outcome_res = gate.classify(
-                pr_body,
+                gate.extract_gate(pr_body),
                 head_sha=head_sha,
                 ci_checks=ci_checks,
                 changed_files=changed_files,
@@ -1136,7 +1142,11 @@ def classify_and_record(
     if write_note:
         reason = f"{reason} [{write_note}]"
 
-    if outcome in ("incomplete", "parked", "no-gate") and inv.cost >= (ctx.max_budget_usd * 0.95):
+    # `gate.budget_reclass` owns this rule, records why the threshold is 95%, and is
+    # what test_gate.py exercises. The inline copy here was the live one, and it
+    # differed: no `budget > 0` guard, so with a zero ceiling every verdict-less
+    # outcome reclassified as budget-exhausted on a run that had spent nothing.
+    if gate.budget_reclass(outcome, inv.cost, ctx.max_budget_usd) == "budget-exhausted":
         outcome = "budget-exhausted"
         reason = f"spent ${inv.cost} of ${ctx.max_budget_usd} (>=95%) and never reached the gate"
 
