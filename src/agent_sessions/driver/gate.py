@@ -249,158 +249,142 @@ def evaluate_ci_checks(ci_checks: list[dict] | str) -> tuple[str, str, dict]:
     return "pass", status, {"total": total, "pass": pass_count, "pending": 0, "fail": 0}
 
 
+#: The rows `verify_gate_rows` grades. `ci` is absent deliberately: `classify` grades CI
+#: from the live check results rather than from what the gate block claims about it.
+_VERIFIED_ROWS = ("tier", "checks", "guards", "tamper", "project-gates", "threads", "risk-paths")
+
+#: Rows whose provenance can be `substituted`. `tier` cannot: it is a classification the
+#: skill makes, not evidence it gathers, so there is nothing for a substitute to stand in for.
+_SUBSTITUTABLE_ROWS = ("checks", "guards", "tamper", "project-gates", "ci", "threads", "risk-paths")
+
+
+def _row_failure(field: str, value: str) -> str | None:
+    """Why `field` fails, or `None` if it does not. **The single definition of each row rule.**
+
+    This exists because `verify_gate_rows` and `infer_provenance` encoded the same seven
+    predicates twice, line for line, differing only in what they emitted -- a verdict on
+    one side and a provenance record on the other. Changing a rule in one and not the
+    other makes the gate's verdict disagree with its own account of how it was reached,
+    **on the oracle**, and nothing would have caught it: both were tested, separately,
+    against their own expectations.
+
+    The reason strings are the ones `verify_gate_rows` has always produced, so a run's
+    recorded reason is unchanged.
+    """
+    if field == "tier":
+        if not value:
+            return "missing tier field"
+        if "needs-review" in value or "unparsed" in value or "conflict" in value:
+            return f"tier: {value}"
+        return None
+
+    if field == "checks":
+        if not value:
+            return "missing checks field"
+        if "fail" in value or "pending" in value:
+            return f"checks row: {value}"
+        return None
+
+    if field == "guards":
+        # No missing-field case: guards defaults to "none", which is a real answer.
+        if "REGRESSED" in value:
+            return f"guards row: {value}"
+        return None
+
+    if field == "tamper":
+        if not value:
+            return "missing tamper field"
+        if "DIRTY" in value:
+            return f"tamper row: {value}"
+        if not (value.startswith("clean") or value.startswith("amended")):
+            return f"tamper row: {value}"
+        return None
+
+    if field == "project-gates":
+        if not value:
+            return "missing project-gates field"
+        if value.startswith("red") or "red:" in value or "fail" in value:
+            return f"project-gates row: {value}"
+        if "green" not in value and "pass" not in value:
+            return f"project-gates row: {value}"
+        return None
+
+    if field == "ci":
+        # An absent `ci` row is not-applicable rather than failing -- a PR on a repo with
+        # no checks has nothing to report. `classify` grades live CI separately.
+        if not value:
+            return None
+        low = value.lower()
+        if "fail" in low or "pending" in low:
+            return f"ci row: {value}"
+        return None
+
+    if field == "threads":
+        if not value:
+            return "missing threads field"
+        if not value.startswith("0 unresolved"):
+            return f"threads row: {value}"
+        return None
+
+    if field == "risk-paths":
+        if not value:
+            return "missing risk-paths field"
+        if value != "none":
+            return f"risk-paths row: {value}"
+        return None
+
+    return None
+
+
+def _row_not_applicable(field: str, value: str) -> bool:
+    """True when a row has nothing to report, as distinct from reporting a pass.
+
+    Only two rows have this state: `guards: none` (there were no guards) and a `ci` row
+    on a repo with no checks configured. Everything else either passes or fails.
+    """
+    if field == "guards":
+        return value == "none"
+    if field == "ci":
+        return not value or "no checks" in value.lower()
+    return False
+
+
+def _row_state(field: str, value: str) -> str:
+    """One row's provenance: `failed`, `not-applicable`, `substituted` or `real`.
+
+    Order matters and is the original's: a failing row is failed even if its text also
+    carries a substitute marker, because how a wrong answer was arrived at is not the
+    interesting thing about it.
+    """
+    if _row_failure(field, value) is not None:
+        return "failed"
+    if _row_not_applicable(field, value):
+        return "not-applicable"
+    if field in _SUBSTITUTABLE_ROWS and _is_substituted(value):
+        return "substituted"
+    return "real"
+
+
 def verify_gate_rows(fields: dict[str, str]) -> tuple[bool, list[str]]:
     """Verify non-CI gate block rows according to pr-body-template.md.
 
     Returns (all_ok, list_of_failed_reasons).
     """
-    failed: list[str] = []
-
-    tier = fields.get("tier", "")
-    if not tier:
-        failed.append("missing tier field")
-    elif "needs-review" in tier or "unparsed" in tier or "conflict" in tier:
-        failed.append(f"tier: {tier}")
-
-    checks = fields.get("checks", "")
-    if not checks:
-        failed.append("missing checks field")
-    elif "fail" in checks or "pending" in checks:
-        failed.append(f"checks row: {checks}")
-
-    guards = fields.get("guards", "none")
-    if "REGRESSED" in guards:
-        failed.append(f"guards row: {guards}")
-
-    tamper = fields.get("tamper", "")
-    if not tamper:
-        failed.append("missing tamper field")
-    elif tamper.startswith("DIRTY") or "DIRTY" in tamper:
-        failed.append(f"tamper row: {tamper}")
-    elif not (tamper.startswith("clean") or tamper.startswith("amended")):
-        failed.append(f"tamper row: {tamper}")
-
-    project_gates = fields.get("project-gates", "")
-    if not project_gates:
-        failed.append("missing project-gates field")
-    elif project_gates.startswith("red") or "red:" in project_gates or "fail" in project_gates:
-        failed.append(f"project-gates row: {project_gates}")
-    elif "green" not in project_gates and "pass" not in project_gates:
-        failed.append(f"project-gates row: {project_gates}")
-
-    threads = fields.get("threads", "")
-    if not threads:
-        failed.append("missing threads field")
-    elif not threads.startswith("0 unresolved"):
-        failed.append(f"threads row: {threads}")
-
-    risk_paths = fields.get("risk-paths", "")
-    if not risk_paths:
-        failed.append("missing risk-paths field")
-    elif risk_paths != "none":
-        failed.append(f"risk-paths row: {risk_paths}")
-
+    failed = [
+        reason
+        for field in _VERIFIED_ROWS
+        if (reason := _row_failure(field, fields.get(field, "none" if field == "guards" else ""))) is not None
+    ]
     return len(failed) == 0, failed
 
 
 def infer_provenance(fields: dict[str, str]) -> dict[str, str]:
-    prov = {}
+    """How each row was satisfied, recorded alongside the verdict it produced."""
+    return {
+        field: _row_state(field, fields.get(field, "none" if field == "guards" else ""))
+        for field in ("tier", "checks", "guards", "tamper", "project-gates", "ci", "threads", "risk-paths")
+    }
 
-    # 1. tier
-    tier = fields.get("tier", "")
-    if not tier:
-        prov["tier"] = "failed"
-    elif "needs-review" in tier or "unparsed" in tier or "conflict" in tier:
-        prov["tier"] = "failed"
-    else:
-        prov["tier"] = "real"
-
-    # 2. checks
-    checks = fields.get("checks", "")
-    if not checks:
-        prov["checks"] = "failed"
-    elif "fail" in checks or "pending" in checks:
-        prov["checks"] = "failed"
-    elif _is_substituted(checks):
-        prov["checks"] = "substituted"
-    else:
-        prov["checks"] = "real"
-
-    # 3. guards
-    guards = fields.get("guards", "none")
-    if "REGRESSED" in guards:
-        prov["guards"] = "failed"
-    elif guards == "none":
-        prov["guards"] = "not-applicable"
-    elif _is_substituted(guards):
-        prov["guards"] = "substituted"
-    else:
-        prov["guards"] = "real"
-
-    # 4. tamper
-    tamper = fields.get("tamper", "")
-    if not tamper:
-        prov["tamper"] = "failed"
-    elif tamper.startswith("DIRTY") or "DIRTY" in tamper:
-        prov["tamper"] = "failed"
-    elif not (tamper.startswith("clean") or tamper.startswith("amended")):
-        prov["tamper"] = "failed"
-    elif _is_substituted(tamper):
-        prov["tamper"] = "substituted"
-    else:
-        prov["tamper"] = "real"
-
-    # 5. project-gates
-    project_gates = fields.get("project-gates", "")
-    if not project_gates:
-        prov["project-gates"] = "failed"
-    elif project_gates.startswith("red") or "red:" in project_gates or "fail" in project_gates:
-        prov["project-gates"] = "failed"
-    elif "green" not in project_gates and "pass" not in project_gates:
-        prov["project-gates"] = "failed"
-    elif _is_substituted(project_gates):
-        prov["project-gates"] = "substituted"
-    else:
-        prov["project-gates"] = "real"
-
-    # 6. ci
-    ci = fields.get("ci", "")
-    if not ci:
-        prov["ci"] = "not-applicable"
-    elif "fail" in ci.lower() or "failing" in ci.upper():
-        prov["ci"] = "failed"
-    elif "pending" in ci.lower():
-        prov["ci"] = "failed"
-    elif ci == "no checks configured" or "no checks" in ci.lower():
-        prov["ci"] = "not-applicable"
-    elif _is_substituted(ci):
-        prov["ci"] = "substituted"
-    else:
-        prov["ci"] = "real"
-
-    # 7. threads
-    threads = fields.get("threads", "")
-    if not threads:
-        prov["threads"] = "failed"
-    elif not threads.startswith("0 unresolved"):
-        prov["threads"] = "failed"
-    elif _is_substituted(threads):
-        prov["threads"] = "substituted"
-    else:
-        prov["threads"] = "real"
-
-    # 8. risk-paths
-    risk_paths = fields.get("risk-paths", "")
-    if not risk_paths:
-        prov["risk-paths"] = "failed"
-    elif risk_paths != "none":
-        prov["risk-paths"] = "failed"
-    elif _is_substituted(risk_paths):
-        prov["risk-paths"] = "substituted"
-    else:
-        prov["risk-paths"] = "real"
-
-    return prov
 
 
 def classify(
