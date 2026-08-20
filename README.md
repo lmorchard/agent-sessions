@@ -46,7 +46,7 @@ Two things follow, and they're the parts most easily gotten wrong:
 
 A harness that drives an unattended loop, and a skill component that supplies the content for each phase:
 
-**The harness** (`driver/` + `Makefile`) — the system's autonomy infrastructure. It owns the phase state machine, priority ladder, outcome classification and merge gate (`gate.py`), distributed mutual exclusion, budget accounting, pluggable agent backends, and run provenance.
+**The harness** (`src/agent_sessions/` + `Makefile`) — the system's autonomy infrastructure. It owns the phase state machine, priority ladder, distributed mutual exclusion, budget accounting, pluggable agent backends, and run provenance. On the merge gate it owns the *routing*: the skill writes the verdict into the PR body and the harness reads it (`gate.py`) rather than re-deriving it. `driver/` holds only a compatibility launcher.
 
 **The `agent-session` skill component** (`skills/agent-session/`) — the instructions that govern what happens *inside* each phase.
 
@@ -54,7 +54,9 @@ Keeping them separate is deliberate: the skill component is graded by whether it
 
 ## How the skill works
 
-Six modes. You name the one you want; it reads only that mode's instructions.
+You name the mode you want; it reads only that mode's instructions, so adding a mode costs no
+context in the others. The dispatcher table in
+[skills/agent-session/SKILL.md](skills/agent-session/SKILL.md) is the list.
 
 **Getting an issue ready** — the human-in-the-loop half:
 
@@ -151,21 +153,24 @@ flowchart TD
 
 ## Using it
 
-Run a mode against an issue (from a Claude Code session):
-
-```
-/agent-session intake      # spec one issue
-/agent-session triage      # spec a backlog
-/agent-session express     # do a specified issue, end to end
-```
+Run a mode against an issue. **The skill is not installed as a registered skill**, in this or
+any harness — deliberately, so it is exercised as the files in this repo rather than as a
+copy. You point a session at a phase file and follow it. `docs/orientation.md` has the
+walkthrough.
 
 Run the driver over a board:
 
 ```bash
 make dry-run     # what would be picked, and why everything else was skipped
 make run         # one issue, unattended
-make loop        # up to two issues
-make check       # the driver's own tests
+make loop        # a deeper queue; ISSUES=n to set it
+```
+
+And the gate the project holds itself to:
+
+```bash
+make check       # every check, in one go: tests, lint, typecheck, doc rot, and the rest
+make help        # what else there is
 ```
 
 **Nothing merges by machine.** The strongest verdict the gate can reach is
@@ -187,10 +192,15 @@ files a run leaves behind, and how to recover an interrupted one.
 
 ## Status
 
-The skill is complete and has real-run evidence on all of its routing paths. Every PR it has
-produced has been merged — by a human, by hand. The driver runs, including over multiple
-issues, against more than one repository. This project now tracks its own backlog on [its own
+The skill is complete and has real-run evidence on its routing paths. Every PR it has produced
+has been merged by a human, by hand — nothing has ever merged by machine, which is a property of
+the design rather than a stage of it. The driver runs unattended over a queue, against more than
+one repository. This project tracks its own backlog on [its own
 board](https://github.com/users/lmorchard/projects/9), using its own tooling.
+
+For how much has actually run — how many runs, on which repositories, through which phases, and
+how they came out — run `make evidence`. It reads the per-run ledgers, and it is deliberately
+the only answer given here: a number written into this paragraph would be wrong within a week.
 
 Conditional auto-merge is not pursued. The objective is to maximize the attention ratio: preparing everything up to the merge gate perfectly, ensuring the human is only ever interrupted for judgment rather than mechanical failures.
 
@@ -209,7 +219,7 @@ Ordered by how likely you are to want it:
   look like.
 - **[docs/prior-art.md](docs/prior-art.md)** — survey of related work, with claims marked
   verified or not.
-- **[docs/build-log.md](docs/archive/build-log.md)** — the chronological account of the first
+- **[docs/archive/build-log.md](docs/archive/build-log.md)** — the chronological account of the first
   five moves, now closed. Useful for the *incidents behind the rules* in `findings.md`; its
   state claims have decayed and it says so.
 - **[CLAUDE.md](CLAUDE.md)** — conventions for working in this repo, and which paths are

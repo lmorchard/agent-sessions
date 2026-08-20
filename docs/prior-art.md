@@ -177,7 +177,11 @@ pull request before merging."*
 **Steal his failure modes, both of which we will hit:** stale PRs accumulating merge conflicts as
 features land (our re-verification tax, independently rediscovered), and difficulty applying human
 feedback. His fix is a `bin/pr_check` that **prioritises PRs needing revision before starting new
-work** — a queue policy our driver does not have and probably needs.
+work**. We have that: `router.py`'s Priority 1 "Unblock" rung selects an issue with an open PR
+ahead of anything else, and routes it to the phase its blockage calls for. This line used to
+read *"a queue policy our driver does not have and probably needs"* — a claim this project
+falsified itself and did not come back to correct, which is the self-invalidated shape
+`CLAUDE.md` warns about.
 
 ### What this does to the four stated differentiators
 
@@ -191,8 +195,10 @@ work** — a queue policy our driver does not have and probably needs.
 - **#4 the two halves as one closed system** — still the honest differentiator, now the main one.
 
 Also worth correcting an emerging worry: **nobody found auto-merges.** Galarza reviews every PR,
-Spec Kitty's merge is a deliberate step, Symphony ends in human review. Being eight PRs deep with
-nothing merged is **where the field is**, not where this project is behind.
+Spec Kitty's merge is a deliberate step, Symphony ends in human review. Having a queue of open,
+unmerged PRs is **where the field is**, not where this project is behind. *(Written 2026-07-30, when this project was eight PRs deep with none merged.
+That number has moved a long way since — `make evidence` prints the current one — but the
+survey finding is about the field, and it stands.)*
 
 ### Caution — the listicles were wrong at least once
 
