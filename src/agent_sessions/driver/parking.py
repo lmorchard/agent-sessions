@@ -19,6 +19,39 @@ from agent_sessions.driver.labels import (  # noqa: F401 - re-exported for exist
 from agent_sessions.driver.output import say
 
 
+def run_label_manager(repo: str, *args: str) -> bool:
+    """Invoke `label_manager` for one label operation. True if it succeeded.
+
+    This block was written out five times in this module, and **four of the five
+    discarded the failure entirely** with a bare `except Exception: pass`. That is why
+    two real defects in `label_manager` -- a remove-list that errors when the repo has no
+    such label, and a `get_current_labels` that returns `[]` on any exception -- were
+    invisible from here for as long as they were: the driver could not have noticed
+    either one.
+
+    Returning a bool does not by itself fix that, but it moves the decision to the call
+    site, where "ignore this failure" has to be written down rather than inherited from a
+    copied `try`. Each caller below now says what it does and why.
+
+    Still a subprocess rather than `label_manager.main(argv)`, which is importable.
+    In-process would be tidier and is deliberately not done here: the harness fakes
+    observe label operations at the `subprocess.run` boundary (`FakeGitHub.label_calls`),
+    so moving the boundary would rewrite how the full-loop suite sees every label write --
+    a change to the test architecture riding along inside a deduplication. Worth doing on
+    its own, not as a side effect.
+    """
+    label_mgr = Path(__file__).parent.parent / "scripts" / "label_manager.py"
+    cmd = [sys.executable, str(label_mgr)]
+    if repo:
+        cmd.extend(["--repo", repo])
+    cmd.extend(args)
+    try:
+        subprocess.run(cmd, capture_output=True, check=True)
+        return True
+    except Exception:
+        return False
+
+
 def get_attempts(issue_number: str | int, repo: str, issues_json: list[dict] | None = None) -> int:
     labels: list[dict] = []
     if issues_json:
@@ -51,56 +84,30 @@ def get_attempts(issue_number: str | int, repo: str, issues_json: list[dict] | N
 
 def increment_attempts(issue_number: str | int, repo: str) -> None:
     count = get_attempts(issue_number, repo) + 1
-    label_mgr = Path(__file__).parent.parent / "scripts" / "label_manager.py"
-    cmd = [sys.executable, str(label_mgr)]
-    if repo:
-        cmd.extend(["--repo", repo])
-    cmd.extend(["attempt", "--issue", str(issue_number), "--count", str(count)])
-    try:
-        subprocess.run(cmd, capture_output=True, check=True)
-    except Exception:
-        pass
+    # Failure ignored: the counter is a loop breaker, and a run that cannot increment it
+    # is still better off proceeding than aborting. The cost is a loop that runs one
+    # attempt longer than intended, which the operator sees in the ledger.
+    run_label_manager(repo, "attempt", "--issue", str(issue_number), "--count", str(count))
 
 
 def decrement_attempts(issue_number: str | int, repo: str) -> None:
     count = get_attempts(issue_number, repo) - 1
     if count < 0:
         count = 0
-    label_mgr = Path(__file__).parent.parent / "scripts" / "label_manager.py"
-    cmd = [sys.executable, str(label_mgr)]
-    if repo:
-        cmd.extend(["--repo", repo])
+    # Same reasoning as the increment: a stuck counter over-parks rather than under-parks.
     if count == 0:
-        cmd.extend(["clear-attempts", "--issue", str(issue_number)])
+        run_label_manager(repo, "clear-attempts", "--issue", str(issue_number))
     else:
-        cmd.extend(["attempt", "--issue", str(issue_number), "--count", str(count)])
-    try:
-        subprocess.run(cmd, capture_output=True, check=True)
-    except Exception:
-        pass
+        run_label_manager(repo, "attempt", "--issue", str(issue_number), "--count", str(count))
 
 
 def park_label_add(issue_number: str | int, repo: str) -> None:
-    label_mgr = Path(__file__).parent.parent / "scripts" / "label_manager.py"
-    cmd = [sys.executable, str(label_mgr)]
-    if repo:
-        cmd.extend(["--repo", repo])
-    cmd.extend(["park", "--issue", str(issue_number)])
-    try:
-        subprocess.run(cmd, capture_output=True, check=True)
-    except Exception:
+    if not run_label_manager(repo, "park", "--issue", str(issue_number)):
         say(f"  WARNING: could not add the {PARK_LABEL} label to #{issue_number} -- it stays selectable")
 
 
 def park_label_remove(issue_number: str | int, repo: str) -> None:
-    label_mgr = Path(__file__).parent.parent / "scripts" / "label_manager.py"
-    cmd = [sys.executable, str(label_mgr)]
-    if repo:
-        cmd.extend(["--repo", repo])
-    cmd.extend(["unpark", "--issue", str(issue_number)])
-    try:
-        subprocess.run(cmd, capture_output=True, check=True)
-    except Exception:
+    if not run_label_manager(repo, "unpark", "--issue", str(issue_number)):
         say(f"  WARNING: could not remove the {PARK_LABEL} label from #{issue_number} -- it stays parked")
 
 
@@ -346,13 +353,7 @@ def apply_park_state(
         say("  incomplete -- leaving unparked so the loop can re-evaluate later")
         agent_session_driver.park_label_remove(iss_num, repo)
     elif outcome == "gate-eligible":
-        label_mgr = Path(__file__).parent.parent / "scripts" / "label_manager.py"
-        cmd = [sys.executable, str(label_mgr)]
-        if repo:
-            cmd.extend(["--repo", repo])
-        cmd.extend(["merge-ready", "--issue", iss_num])
-        try:
-            subprocess.run(cmd, capture_output=True, check=True)
-        except Exception:
-            pass
+        if not run_label_manager(repo, "merge-ready", "--issue", iss_num):
+            say(f"  WARNING: could not add the {MERGE_READY_LABEL} label to #{iss_num} -- "
+                f"the verdict is in the PR body and the ledger regardless")
         notify_human(iss_num, f"gate-eligible: {reason}", state_dir)
