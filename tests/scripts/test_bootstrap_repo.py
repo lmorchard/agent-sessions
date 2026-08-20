@@ -95,10 +95,27 @@ def test_the_colours_are_the_ones_label_manager_uses():
     assert emitted[labels.SPEC_LABEL] == "0E8A16"
 
 
-def test_it_names_no_path_that_does_not_exist():
-    """The dead-path class, checked for the one file the script reaches for."""
-    src = SCRIPT.read_text(encoding="utf-8")
-    assert "driver/discussion_manager.py" not in src, (
-        "bootstrap-repo.sh names a pre-conversion path; the module is reached with -m"
+def test_it_reaches_discussion_manager_as_a_module_not_a_path():
+    """The dead-path class, checked on the command rather than on the file's text.
+
+    This read `assert "agent_sessions.driver.discussion_manager" in src` against the
+    whole script, which a *comment* naming the module satisfies -- and the comment three
+    lines above it does exactly that. A presence-grep, written into the suite by the
+    session auditing for presence-greps. It is what
+    `assertion_lint.scan_source_assertions` was added to catch.
+
+    Graded on the executable line instead: the invocation must pass `-m` and the dotted
+    module, and must not carry a path to a `.py` file.
+    """
+    invocations = [
+        line.strip()
+        for line in SCRIPT.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#") and "discussion_manager" in line
+    ]
+    assert len(invocations) == 1, f"expected one invocation, got {invocations}"
+    tokens = invocations[0].split()
+    assert "-m" in tokens, invocations[0]
+    assert tokens[tokens.index("-m") + 1] == "agent_sessions.driver.discussion_manager"
+    assert not any(t.endswith(".py") for t in tokens), (
+        f"reaches discussion_manager by path, which the conversion made stale: {invocations[0]}"
     )
-    assert "agent_sessions.driver.discussion_manager" in src

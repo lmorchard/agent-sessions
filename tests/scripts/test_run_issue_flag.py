@@ -103,9 +103,15 @@ def test_discovery_is_not_vacuous():
 @pytest.mark.parametrize("target", _driver_targets())
 def test_c1_issue_is_passed_through(target):
     """C1 — `make <target> ISSUE=n` passes `--issue n` to the driver."""
-    assert "--issue 704" in _emitted(target, "ISSUE=704"), (
-        f"`make {target} ISSUE=704` does not pass `--issue 704` to the driver. "
-        "The variable reads as honored and is not; see issue #71."
+    # Read as a flag and its value. `"--issue 704" in <text>` was the earlier form, and
+    # it is satisfied by `--issue 7040` -- a substring match cannot see a token boundary,
+    # which is the whole reason this check exists.
+    tokens = _emitted(target, "ISSUE=704").split()
+    values = [tokens[i + 1] for i, t in enumerate(tokens) if t == "--issue" and i + 1 < len(tokens)]
+    assert values == ["704"], (
+        f"`make {target} ISSUE=704` does not pass `--issue 704` to the driver "
+        f"(got {values or 'no --issue flag'}). The variable reads as honored and is "
+        "not; see issue #71."
     )
 
 

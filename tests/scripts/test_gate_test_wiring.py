@@ -340,7 +340,13 @@ def test_the_xdist_group_marker_is_actually_honoured():
     joined = " ".join(recipe)
     if "-n " not in joined and "--numprocesses" not in joined:
         pytest.skip("gate-test no longer runs xdist, so the marker is moot")
-    assert "--dist loadgroup" in joined, (
+    # Read as a flag and its value, not as a substring. `assert "--dist loadgroup" in
+    # joined` was the first form, and a `# needs --dist loadgroup` comment inside the
+    # recipe satisfies it exactly as well as the flag does -- the presence-grep defect,
+    # in the suite of the check that grades wiring. `assertion_lint` catches it now.
+    tokens = joined.split()
+    dist = [tokens[i + 1] for i, t in enumerate(tokens) if t == "--dist" and i + 1 < len(tokens)]
+    assert dist == ["loadgroup"], (
         "gate-test runs xdist without `--dist loadgroup`, so this file's xdist_group "
         f"marker does nothing and C1/C2 can land on different workers. Recipe: {joined}"
     )
