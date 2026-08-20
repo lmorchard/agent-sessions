@@ -6,12 +6,12 @@ The interactive front end is `intake`, not this mode. Express assumes the spec a
 and trusts it — so its first job is to confirm that assumption instead of papering over it.
 
 **The tier sets the autonomy.** Reads `references/session-setup.md`,
-`references/frozen-checks.md`, and the `plan` / `execute` / `pr` phase files in sequence.
+`references/frozen-checks.md`, and the `plan` / `execute` / `open_pr` phase files in sequence.
 
 ## Inputs
 
 - GitHub issue URL (argument)
-- Project context: `CLAUDE.md`, board config if any
+- Project context: the project's instruction file (`CLAUDE.md` / `AGENTS.md`), board config if any
 
 ## Outputs
 
@@ -72,7 +72,7 @@ line at each transition:
 Everything above runs either way — a PR is reversible, so producing one unattended is safe even
 for `needs-review`. What the tier changes is where the run **surfaces to a human**:
 
-- **`auto-ok`** — run straight through 2a–2i without stopping. Report the gate verdict.
+- **`auto-ok`** — run straight through 2a–2g without stopping. Report the gate verdict.
 - **`needs-review`** — same run, plus a stop at each point the tier's reason implies:
   - *A human-judgment criterion.* Stop and post a structured comment (or Draft PR section) containing the exact **human-run check procedure** and the **pass/fail question** for the human to answer. Don't grade it yourself and don't record it as pending-and-fine; an ungraded judgment criterion means the gate can't close.
   - *A risk-gated path* (auth, secrets, data migration/deletion, deploy/infra/CI, dependency

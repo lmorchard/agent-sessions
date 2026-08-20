@@ -122,7 +122,8 @@ human, and it can drop to `auto-ok`.
 **Trigger 2 — the issue touches a risk-gated path**, regardless of how well it verifies
 (project-configurable; sensible defaults): authentication/authorization, secrets/credentials,
 data migration or deletion, deploy/infra/CI config, dependency additions/upgrades, anything the
-project's CLAUDE.md marks off-limits. A perfectly-tested auth change still deserves human eyes.
+project's instruction file (`CLAUDE.md` / `AGENTS.md`) marks off-limits. A perfectly-tested auth
+change still deserves human eyes.
 
 Write the resulting tier into the issue body with its reason. A tier label is a convenience index
 for querying; the body is authoritative.
@@ -164,7 +165,7 @@ better."*
 - CRITERION: the export button's spinner should "feel responsive."
   CHECK: none — subjective.
 ```
-**Tier:** `needs-review` (trigger 2 — the third criterion won't reduce). Drop it to "What we're
+**Tier:** `needs-review` (trigger 1 — the third criterion rests on human judgment and won't reduce). Drop it to "What we're
 NOT doing" or prototype it interactively, and the issue becomes `auto-ok`.
 
 **Property rung** — no single input captures "done", so check an invariant:

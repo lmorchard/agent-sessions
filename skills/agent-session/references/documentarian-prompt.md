@@ -33,7 +33,7 @@ review time):
   the measurement/test/harness that would verify it **exists today** — the metric, the
   fixture, the way to reproduce the scenario. This feeds the criteria step directly: a
   criterion whose oracle doesn't exist yet is `needs-review`, not `auto-ok` (see
-  `acceptance-criteria.md` → "Three tests every check must pass").
+  `acceptance-criteria.md` → "Two tests every check must pass").
 - **Class-of-bug analogues / generic consumers.** When the task is "fix X for Y" or "add a
   new kind of Z", ask what *else* flows through the same code path (other call sites, a
   catch-all/`default:` branch, a registry that auto-picks up new entries). Surfacing these

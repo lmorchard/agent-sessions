@@ -76,7 +76,7 @@ that as `clean` hands a reader a null dressed as a positive. Name what stood in 
 integrity, byte-equality against the issue, no collateral edits) per
 `frozen-checks.md`'s "When the criteria are commands, not test files".
 
-`pending` is what the block says from PR-open until step 14 derives the verdict. Unresolved
+`pending` is what the block says from PR-open until `grade_gate` derives the verdict. Unresolved
 threads and the post-review verifier report don't exist before then, so an earlier verdict is a
 guess — and this block is machine-readable, so a guess is one a driver can act on.
 
