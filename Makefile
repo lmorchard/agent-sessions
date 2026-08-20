@@ -4,12 +4,13 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help doctor doctor-self check evidence board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly backend-permission-probe opencode-policy-contract lint typecheck
+.PHONY: help doctor doctor-self check venv evidence board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly backend-permission-probe opencode-policy-contract lint typecheck
 
 help:
 	@echo "check            run every check -- the targets listed below, in one go"
 	@echo "doctor           check the driver's GitHub credentials against a live repo"
 	@echo "doctor-self      the same, against this repo and its own board"
+	@echo "venv             populate .venv once -- check does this before it fans out"
 	@echo "lint             run ruff linter"
 	@echo "typecheck        run mypy type checker"
 	@echo "board-audit      audit this repo's live GitHub project (read-only)"
@@ -39,10 +40,22 @@ help:
 	@echo "  REPO=$(REPO)  REPO_PATH=$(REPO_PATH)  BOARD=$(BOARD)"
 
 check: driver-check
+	@$(MAKE) venv
 	@$(MAKE) -j check-parallel
 	@echo "all checks passed"
 
-.PHONY: check-parallel
+# Every job under `check-parallel` enters through `uv run`, which populates .venv on
+# demand -- so on a cold checkout seven of them race for it and one dies with
+# "Failed to install: ruff-<version>.whl". That message names a wheel, so it reads as a
+# network fault; nothing in it points at make parallelism, and rerunning "fixes" it
+# because the venv is warm by then. A gate you have learned to rerun is not a gate.
+# Populate it once, serially, first. tests/scripts/test_check_venv_warmup.py freezes the
+# ordering, and `check` reaches this through a recipe line rather than a prerequisite so
+# that `make -j check` cannot reorder it.
+venv:
+	@uv sync --quiet
+
+.PHONY: venv check-parallel
 
 check-parallel: gate-test skill-readonly docs-check assertion-lint commit-lint lint typecheck
 
