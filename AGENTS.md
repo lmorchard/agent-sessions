@@ -73,22 +73,38 @@ For this repo, the gated paths worth calling out by name, because the *reason* i
   not cover it, and this line was added because the move-7 partition missed it: `driver/` was
   wholly drivable before the classifier moved there.
 
-- **`src/agent_sessions/driver/agent_session_driver.py` — the current home of the outcome
-  *routing*.** Les gated that responsibility on 2026-08-03 while it still lived in the Bash driver;
-  the 2026-08-09 conversion moved it into the coordinator without changing the decision. The
-  coordinator holds the parking case lists and the budget-reclassification thresholds, so a run
-  could in principle edit them to flatter its own record. This was previously named as an accepted
-  residual risk with the note *"revisit if a run ever touches that routing."* **That clause has now fired
-  three times** — on #39, on #58, and it would fire again on [#82](https://github.com/lmorchard/agent-sessions/issues/82)
-  — and PR #78's gate block escalated it in writing rather than resolving it. A revisit trigger that
-  keeps firing and never converts is not a trigger; it is a deferral. So it converted.
+- **`src/agent_sessions/driver/lifecycle.py` — the home of the outcome *routing*.** Les gated that
+  responsibility on 2026-08-03 while it still lived in the Bash driver; the 2026-08-09 conversion
+  moved it into the coordinator, and #256 moved it again, into `classify_and_record` here. No move
+  changed the decision. This module holds the parking case lists and the budget-reclassification
+  thresholds, so a run could in principle edit them to flatter its own record. That was previously
+  named as an accepted residual risk with the note *"revisit if a run ever touches that routing."*
+  **That clause has now fired three times** — on #39, on #58, and it would fire again on
+  [#82](https://github.com/lmorchard/agent-sessions/issues/82) — and PR #78's gate block escalated
+  it in writing rather than resolving it. A revisit trigger that keeps firing and never converts is
+  not a trigger; it is a deferral. So it converted.
+
+  **Named explicitly rather than left to the default, because the reason is what generalizes.**
+  Until 2026-08-19 this bullet named `agent_session_driver.py` — true when written and false from
+  #256 onward, once that file became a facade that defines nothing. The allowlist held the whole
+  time, since unlisted `lifecycle.py` was `needs-review` by default and nothing was ever exposed.
+  What was wrong was the *reason*, still attached to the file that no longer held the thing. Naming
+  a facade in place of its implementation is precisely what `docs_check`'s `is_shim` guard exists to
+  catch, and it missed this instance: the predicate was a marker string plus a 30-line ceiling, and
+  the facade carries neither. Both were fixed together.
 
   **The cost is stated, because it is real and it is the reason this was a human's call.** Path
   granularity cannot express *"this file except its classification path,"* so gating the routing
-  gates the whole coordinator — the largest single piece of orchestration in the repo, and the
+  gates the whole lifecycle module — the largest single piece of orchestration in the repo, and the
   thing most likely to need work. Driver changes now route to a human. If that proves too coarse,
   the fix is to extract the outcome routing into its own module the way `gate.py` was extracted,
   and gate *that*; **it is not to quietly widen the allowlist back.**
+
+- **`src/agent_sessions/driver/agent_session_driver.py` — the packaged entry point.** Since #256 a
+  facade that defines nothing: `pyproject.toml`'s `[project.scripts]` and the compatibility launcher
+  both name it, and much of the test suite still imports its symbols. Gated for the launcher's
+  reason below — becoming thin does not silently widen the partition — and **not** because the
+  routing lives here. It does not.
 
 - **`driver/agent-session-driver.sh` — the compatibility launcher.** Since the 2026-08-09 Python
   conversion it only enters the packaged coordinator. It remains gated because the allowlist has
@@ -104,18 +120,19 @@ Decided 2026-07-29, because the question kept recurring one detector at a time a
 being re-derived by analogy. **Gated means the code decides whether *this run's own work* is
 acceptable to merge.** That is the outcome classifier, and — since 2026-08-03 — the routing that
 consumes its verdict. A test suite, a lint recipe or a doc-rot detector grades the *work*; only
-`src/agent_sessions/driver/gate.py` and the coordinator's outcome routing decide how the driver
+`src/agent_sessions/driver/gate.py` and `lifecycle.py`'s outcome routing decide how the driver
 classifies and records the result.
 
 `src/agent_sessions/scripts/docs_check.py` grades documentation rather than the run's verdict, but
-it remains `needs-review` because it is an unlisted shipping `src/**` path. Its root-level test,
-`scripts/test_docs_check.py`, is drivable. The same distinction applies to other shipping detectors
-under `src/agent_sessions/scripts/` and their root-level tests under `scripts/`.
+it remains `needs-review` because it is an unlisted shipping `src/**` path. Its test suite,
+`tests/scripts/test_docs_check.py`, is drivable. The same distinction applies to other shipping
+detectors under `src/agent_sessions/scripts/` and their suites under `tests/scripts/`.
 
 **The residual risk, named rather than gated away.** Drivable harness tests can weaken the
 assertions that protect gated shipping code. The broad reading would close that, but it would also
-sweep in `tests/driver/test_driver.py`, `tests/driver/test_gate.py`, `tests/driver/test_park_state.py`, root-level
-detector tests, and the `Makefile` recipes — all needed for this repo to dogfood itself. The
+sweep in `tests/driver/test_driver.py`, `tests/driver/test_gate.py`,
+`tests/driver/test_park_state.py`, the detector suites under `tests/scripts/`, and the `Makefile`
+recipes — all needed for this repo to dogfood itself. The
 mitigations are tests that import what ships, `make check` in every PR, and a human at the merge
 gate. Revisit if an unattended run ever weakens a test to admit its own change.
 
