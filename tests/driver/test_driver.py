@@ -578,14 +578,12 @@ def test_lifecycle_classify_and_record(tmp_path: Path, monkeypatch):
         rundir=rundir,
         raw_output=raw_output,
         stderr_output=stderr_output,
-        writes_file=writes_file,
         exit_code=0,
         cost=0.5,
         session_id="sess-123",
         cost_known=True,
         final_text="Agent completed work.",
         writes_result={"ok": True, "entries": [], "applied": 0, "messages": []},
-        run_repo_path=repo_dir,
     )
 
     outcome = agent_session_driver.classify_and_record(ctx, inv, open_prs=[])

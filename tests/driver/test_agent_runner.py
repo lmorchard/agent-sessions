@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -665,3 +666,19 @@ def test_run_agent_progress_polling(tmp_path: Path, monkeypatch, capsys):
     # Check that progress output was printed to sys.stderr during the timeout
     assert "run" in captured.err
     assert "$0.10" in captured.err
+
+
+def test_main_reads_the_argv_it_was_given(monkeypatch, capsys):
+    """`_main(argv)` declared a parameter and then read `sys.argv` throughout.
+
+    A caller passing a list was silently ignored and got the process's real arguments
+    graded instead — the worst shape for a parameter to have, because it looks honoured.
+    Asserted by giving `_main` an argv that disagrees with `sys.argv`: the usage message
+    can only appear if the empty list won.
+    """
+    monkeypatch.setattr(sys, "argv", ["agent_runner.py", "run", "--backend", "claude"])
+
+    rc = agent_runner._main([])
+
+    assert rc == 2
+    assert "usage:" in capsys.readouterr().err

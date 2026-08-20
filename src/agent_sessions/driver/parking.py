@@ -54,18 +54,6 @@ def get_attempts(issue_number: str | int, repo: str, issues_json: list[dict] | N
     return 0
 
 
-def clear_attempt_labels(issue_number: str | int, repo: str) -> None:
-    label_mgr = Path(__file__).parent.parent / "scripts" / "label_manager.py"
-    cmd = [sys.executable, str(label_mgr)]
-    if repo:
-        cmd.extend(["--repo", repo])
-    cmd.extend(["clear-attempts", "--issue", str(issue_number)])
-    try:
-        subprocess.run(cmd, capture_output=True, check=True)
-    except Exception:
-        pass
-
-
 def increment_attempts(issue_number: str | int, repo: str) -> None:
     count = get_attempts(issue_number, repo) + 1
     label_mgr = Path(__file__).parent.parent / "scripts" / "label_manager.py"

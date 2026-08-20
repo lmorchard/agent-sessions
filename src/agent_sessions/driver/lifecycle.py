@@ -78,8 +78,10 @@ class RunContext:
 
 @dataclass(frozen=True)
 class SelectionResult:
-    board_items: list[dict]
-    open_issues: list[dict]
+    # `board_items` and `open_issues` used to be carried here too. Both were populated
+    # and neither was ever read off the result -- selection uses the locals and returns
+    # what the caller needs. A field nobody reads still has to be kept correct by anyone
+    # editing selection, and pays nothing back.
     open_prs: list[dict]
     candidates: list[tuple[str, str]]
     board_item_ids: dict[str, str]
@@ -93,14 +95,12 @@ class InvocationResult:
     rundir: Path
     raw_output: Path
     stderr_output: Path
-    writes_file: Path
     exit_code: int
     cost: float
     session_id: str
     cost_known: bool
     final_text: str
     writes_result: dict
-    run_repo_path: Path
 
 
 @dataclass(frozen=True)
@@ -788,8 +788,6 @@ def select_queue(ctx: RunContext) -> SelectionResult:
         say(f"cleaned {len(removed)} stale workspace(s)")
 
     return SelectionResult(
-        board_items=board_items,
-        open_issues=open_issues,
         open_prs=open_prs,
         candidates=locked_candidates,
         board_item_ids=board_item_ids,
@@ -1106,14 +1104,12 @@ def invoke_agent(
         rundir=rundir,
         raw_output=raw_output,
         stderr_output=stderr_output,
-        writes_file=writes_file,
         exit_code=ret,
         cost=cost,
         session_id=session_id,
         cost_known=cost_known,
         final_text=final_text,
         writes_result=writes_result,
-        run_repo_path=run_repo_path,
     )
 
 

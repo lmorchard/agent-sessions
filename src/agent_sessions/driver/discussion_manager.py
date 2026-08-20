@@ -73,8 +73,18 @@ def check_category(repo: str, category_name: str = "Lab Notebook") -> bool:
     return False
 
 
-def ensure_category(repo: str, category_name: str = "Lab Notebook", emoji: str = "📓") -> bool:
-    """Check if discussion category exists. Deprecated alias for check_category."""
+def ensure_category(repo: str, category_name: str = "Lab Notebook") -> bool:
+    """Report whether the discussion category exists. It cannot create one.
+
+    Named `ensure_` from when it tried to, via `createDiscussionCategory` -- which is not
+    a mutation in GitHub's GraphQL schema, so it failed on every call until #211. Categories
+    are created by hand in repository settings and have no API representation at all.
+
+    The name is kept because the CLI subcommand and `scripts/bootstrap-repo.sh` both use it;
+    the docstring calling it a "deprecated alias" was wrong in the other direction, since
+    this is the supported entry point. It also took an `emoji` argument that no caller
+    passed and nothing read -- a leftover from the creating version.
+    """
     return check_category(repo, category_name)
 
 

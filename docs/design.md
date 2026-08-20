@@ -264,7 +264,12 @@ provenance and recovery context; it is not the authoritative park bit:
    - **P1: Unblock**: Issues referencing open PRs needing comment resolution, CI fixes, or gate grading.
    - **P2: Execute**: Issues carrying `agent-session:spec` AND `auto-ok` tier AND no open PR AND no `needs-human`.
    - **P3: Groom**: Open issues lacking `agent-session:spec` AND lacking `needs-human`.
-   - **P4: Escalate**: Issues reaching `agent-session:attempt-3`.
+
+   There are three rungs, not four. This list used to carry a **P4: Escalate** for issues reaching
+   `agent-session:attempt-3`, and `router.py` carried a matching `p4_escalate` list that nothing
+   ever appended to. Attempt-exhausted issues are **parked** by the `MAX_PHASE_ATTEMPTS` branch in
+   each rung rather than escalated onto a fourth one. Both the doc and the empty list are gone;
+   an operator will see `MAX_PHASE_ATTEMPTS (n) reached for phase <phase>` as the park reason.
 
 2. **Async Q&A via Issue Comments**:
    - When an agent needs input or spec ratification, it appends a top-level comment detailing its proposal or question.
