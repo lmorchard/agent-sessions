@@ -81,7 +81,7 @@ one place they're all defined.
 | **gate** | The list of conditions the `pr` mode evaluates at the end of a run, and the machine-readable block it writes into the PR body reporting the result. |
 | **verdict** | The gate's output: `eligible-for-auto-merge`, `human-merge-required`, or `pending`. The first one is **a finding the system reports, not an action it takes.** |
 | **mode** | One of the skill's six entry points (`intake`, `triage`, `plan`, `execute`, `pr`, `express`). You name the one you want; the skill reads only that mode's file. |
-| **driver** | `src/agent_sessions/driver/agent_session_driver.py` — the coordinator above the skill that picks eligible work, invokes the skill headlessly, and records the outcome. `driver/agent-session-driver.sh` is its compatibility launcher. |
+| **driver** | The coordinator above the skill that picks eligible work, invokes the skill headlessly, and records the outcome. The run lifecycle and `main()` are `src/agent_sessions/driver/lifecycle.py`; `agent_session_driver.py` is a facade kept for the packaged entry point, and `driver/agent-session-driver.sh` is a compatibility launcher. |
 | **park** | What the driver does to an issue whose run didn't reach a verdict: adds an `agent-session:needs-human` label so future selection skips it until someone or something clears it. |
 | **move** | A unit of build history in the older docs ("move 7 did X"). Roughly a work session. Numbering stopped being maintained; treat it as a chronological label, not a scheme. |
 
@@ -97,7 +97,7 @@ what makes "so is this a skill-authoring project?" a confusing question — it's
 | What it is | the reusable artifact: a Claude Code skill running the per-issue loop | this repo's own automation, the unattended burndown loop |
 | Made of | markdown | Python, with a thin Bash compatibility launcher |
 | How you tell it works | micro-tests against a no-guidance control, plus dogfooding | fixture tests and mutation testing |
-| Who it's for | any project that installs the skill | only this repo |
+| Who it's for | any project that installs the skill | any target repository; it is pointed at one with `REPO`/`REPO_PATH`/`BOARD`, and the `Makefile` defaults to a different repo than this one |
 
 Older design history describes this as a Bash orchestrator plus a Python parser. That language
 split is historical: the 2026-08-09 conversion moved orchestration into the Python package and left
@@ -135,12 +135,21 @@ are where the governing principle actually bites.
 | `phases/triage.md` | Batch version: a subagent per issue proposes criteria **and runs them**, you ratify in one pass, issues are augmented in place | Let a scanning subagent run the full suite (N of them in parallel thrash the machine), or let an unrun check read as verified |
 | `phases/plan.md` | Freezes the checks as Phase 0, then plans vertical slices against current code, each phase naming the criteria it advances | Plan against a spec whose criteria are bare prose; write the rest of the plan before the freeze |
 | `phases/execute.md` | Implements phase by phase, one commit per phase, ticking a checkbox only from observed output; ends by dispatching the independent verifier | Edit a frozen check to make it pass; skip the independent verification because the diff was small |
-| `phases/pr.md` | Rebase, re-verify, self-review, push, open the PR, run the review cycle, derive the verdict row by row | Merge; squash away the freeze commit; resolve a review thread it merely disagreed with |
-| `phases/express.md` | Chains plan → execute → pr unattended; its Phase 0 checks marker, readiness and size before starting | Invent criteria for an unmarked issue; take on an XL issue just because `express` was the mode asked for |
+| `phases/open_pr.md` | Rebase, re-verify, self-review, push, open the PR with a **pending** verdict | Merge; squash away the freeze commit; push without re-checking `origin/main` |
+| `phases/grade_gate.md` | Derive the verdict row by row once CI and review have landed, and update the gate block | Resolve a review thread it merely disagreed with; grade against a stale head sha |
+| `phases/express.md` | Chains plan → execute → open_pr unattended; its Phase 0 checks marker, readiness and size before starting | Invent criteria for an unmarked issue; take on an XL issue just because `express` was the mode asked for |
 
-`pr.md` carries by far the most scar tissue, and that's instructive rather than incidental:
-nearly every paragraph past its gate table is there because some real run reached a wrong verdict
-that specific way.
+This table describes the modes a newcomer meets first and does not try to be complete. Neither, at
+the time of writing, does `SKILL.md`'s dispatcher table: `phases/` holds twelve files and the
+dispatcher lists ten, missing `refine` and `fix_conflict` — both of which the driver actively
+requests (`router.py`, `reconciler.py`). Recorded on
+[#261](https://github.com/lmorchard/agent-sessions/issues/261) as K1; until it is fixed, the
+`phases/` directory listing is the only complete list.
+
+These two files carry by far the most scar tissue, and that's instructive rather than incidental:
+nearly every paragraph past the gate table is there because some real run reached a wrong verdict
+that specific way. They were one file, `pr.md`, until it was split — which is why older documents
+cite `phases/pr.md`, sometimes with a step number that no longer resolves.
 
 ### `references/` — the shared engine
 
@@ -156,7 +165,7 @@ drifted rule is a correctness bug.
 | `criteria-grammar.md` | Syntax reference only: the EARS patterns plus Given-When-Then, and how to pick between them. Both forms exist to force a condition → observable-response shape that maps onto an assertion |
 | `spec-template.md` | The spec skeleton, plus the **readiness checklist** that gates on verifiability rather than on placeholders — with a separate variant for an issue augmented in place, since those never had the template's sections to begin with |
 
-**Back half — keeping the checks trustworthy** (read by `plan`, `execute`, `pr`):
+**Back half — keeping the checks trustworthy** (read by `plan`, `execute`, `open_pr`, `grade_gate`):
 
 | File | What it holds |
 |---|---|
@@ -179,7 +188,8 @@ If you only read two files in this directory, read `acceptance-criteria.md` and
 
 | File | What it is |
 |---|---|
-| `src/agent_sessions/driver/agent_session_driver.py` | Coordinates configuration, credentials, GitHub reads, workspaces, agent invocation, outcome routing, persistence, and reporting |
+| `src/agent_sessions/driver/lifecycle.py` | The run lifecycle and `main()`: preflight, selection, agent invocation, outcome routing, persistence, and reporting. The largest module here, and the one you probably want |
+| `src/agent_sessions/driver/agent_session_driver.py` | A facade that defines nothing. Kept because `pyproject.toml`'s `[project.scripts]` and the compatibility launcher name it, and much of the test suite imports through it |
 | `src/agent_sessions/driver/router.py` | Selects issues and routes phases as a pure function over fetched GitHub state |
 | `src/agent_sessions/driver/gate.py` | Parses the gate block and classifies the outcome. Importable **so its tests exercise the shipping code** — extraction was the fix for a hand-copied classifier in the test suite that had silently diverged from the driver it was supposed to be testing |
 | `src/agent_sessions/driver/writes.py` | Validates the write manifest against a closed kind allowlist, then constructs and executes the permitted write commands |
@@ -296,13 +306,19 @@ is a mechanism, not an intention.
 
 Four steps, and two of them carry the interesting properties:
 
-1. **Select.** Open, carries the marker, its anchored `## Tier:` line says `auto-ok`, no open PR
-   references it, no `agent-session:needs-human` label. Every eligibility field in that list comes
-   from GitHub. A dry run prints one line per *excluded* issue with its reason, because a queue read
-   that yields nothing has to distinguish "no work available" from "my query is broken."
-2. **Invoke** `express` headlessly, writing `inflight.json` *before* the call so an interrupted run
-   leaves evidence, and streaming the transcript to disk so `run_progress.py` can report on a live
-   run from outside it.
+1. **Select.** Open, carries the marker, no `agent-session:needs-human` label, and on the board or
+   carrying a priority label. Every eligibility field in that list comes from GitHub. A dry run
+   prints one line per *excluded* issue with its reason, because a queue read that yields nothing
+   has to distinguish "no work available" from "my query is broken."
+
+   Selection is **a priority ladder, not a filter** (`router.py`). An issue with an open PR is the
+   *highest* priority rather than an exclusion — it is blocking, so unblocking it comes first, and
+   the phase is chosen to match what is blocking it. A specced `needs-review` issue is selectable
+   too, routed to `refine`. Only the phase differs.
+2. **Invoke** the selected phase headlessly — one phase per selection, not one `express` pass
+   per run — writing `inflight.json` *before* the call so an interrupted run leaves evidence, and
+   streaming the transcript to disk so `run_progress.py` can report on a live run from outside it.
+   Not every phase invokes an agent: `request_review` runs deterministically, with no model call.
 3. **Classify** by *reading* the gate block the run wrote, never by re-deriving the verdict. The
    driver is a recorder here, not a second opinion — which is also why
    `src/agent_sessions/driver/gate.py` is treated as the oracle and kept off-limits to unattended
