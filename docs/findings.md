@@ -18,7 +18,9 @@ of the build log — it carries only what still governs.
 
 ## Recurring defect classes
 
-Seven patterns this project has hit more than once. Each has cost real money to rediscover.
+Patterns this project has hit more than once, numbered below. Each has cost real money to
+rediscover. *(No count here on purpose: the sections are numbered, so the number is countable in
+place, and a total in this sentence is a second thing to keep in sync — which it was not.)*
 
 ### 1. A row satisfied by evidence *adjacent* to what it names — OPEN GAP
 
@@ -26,15 +28,26 @@ The dominant defect class, and the one the merge gate exists to prevent. A gate 
 check cites a specific mechanism; something *near* that mechanism supplies the answer; the row
 reports true. Nothing lies, and the row means nothing.
 
-**Nine of the eleven below are fixed; two are open. The gap is not the instances — it is that
-nobody has ever looked.** Eight of the eleven were found by an unattended run stumbling into them;
-**three were found by looking**, and all three came from *verifying a change rather than auditing the
-code*. So the number remaining is **unknown**, and phase 3 converts each remaining one into an
+**Every instance in the table below has been fixed. That is not the class being closed, and the
+difference is this entry's whole point.** Most were found by an unattended run stumbling into them.
+The ones found deliberately came from *verifying a change*, never from auditing the code for this
+shape. So the number remaining is **unknown**, and phase 3 would convert each remaining one into an
 automatic merge.
 
-**The sweep that has never been done:** enumerate every gate row, guard and manifest check, and ask
-of each *"what could satisfy this that is not the thing it names?"* Tracked as
-[board #2](https://github.com/lmorchard/agent-sessions/issues/2).
+Per-instance status is in the table's own column and nowhere else. A sentence above the table
+carrying a tally is exactly what went stale here — it read *"nine of the eleven are fixed; two are
+open"* over a twelve-row table whose two "open" items were both closed. § 2 below records the same
+lesson from the other direction.
+
+**Why this is still an OPEN GAP with its tracking issue closed.** The sweep
+[#2](https://github.com/lmorchard/agent-sessions/issues/2) asked for — enumerate every gate row,
+guard and manifest check and ask of each *"what could satisfy this that is not the thing it
+names?"* — was run. [Its output](archive/sweep-adjacent-evidence.md) answers `adjacent-risk: none`
+for every row it enumerates, including `threads`, which instance 11 below documents at length as
+the canonical case, and `project-gates`, which [prior-art.md](prior-art.md) independently nominates
+as another. **A sweep that finds nothing in a corpus containing two known instances did not look.**
+That is defect class 6, in the artifact produced for the issue that defines defect class 6. The
+issue is closed; the question it was opened for is not answered.
 
 Two things about the *rate* that the fixes-so-far do not settle. Move 5 alone produced two. And move
 5's exit-code defect was **the same bug move 4c had fixed one field over, hours earlier** — the fix
@@ -53,8 +66,7 @@ to the rate at which they arrive.
 | 8 | `amendments: none` was true only under one of two readings of the amendment policy. The policy now names both trees, and under it #668 was an amendment. | move 5 (#668) | closed 2026-07-27 |
 | 9 | **The driver's test suite tests a replica of the classifier, not the classifier.** `test-driver.sh` hand-copies driver logic — one helper is annotated *"Mirrors the driver's extraction + comparison exactly"* with nothing enforcing that — and it has **already diverged**: `classify_outcome` is 53 lines in the driver and 15 in the copy, with **zero `ci-stale` awareness** in the copy. | verified 2026-07-27 | closed by [#9](https://github.com/lmorchard/agent-sessions/issues/9) |
 | 10 | **`pr_for_issue` matches a bare `#N` anywhere in an open PR's body, title or branch name**, so a PR that merely *mentions* an issue removes it from selection. The function's own comment says *"an express PR carries `Closes #N`"* and the code never requires the keyword. A docs PR listing six issue numbers hid six issues; `closingIssuesReferences` was empty on it. | verified 2026-07-29 | closed by [#23](https://github.com/lmorchard/agent-sessions/issues/23) |
-| 11 | **The `threads` row can be satisfied by the run resolving its own threads.** On PR #78 Copilot raised one thread naming a real defect the change had introduced; the run fixed it, replied, and **resolved the thread itself** under the operator's `gh` credential — `resolvedBy` reads as the operator and is indistinguishable from a human's. The row read `0 unresolved`, and the reason correctly noted the `graphql` query was real and the review had genuinely landed. Every part of that is true, and the row still imports no outside opinion. | verified 2026-08-03 | open — [#79](https://github.com/lmorchard/agent-sessions/issues/79) |
-| 12 | docs/archive/sweep-adjacent-evidence.md | The full enumeration of every gate block field, condition, and Makefile check. **Archived**: it reports `adjacent-risk: none` for every row, including two the docs document as real adjacency instances. Provenance that the sweep ran, not a finding. | Closed by #2 |
+| 11 | **The `threads` row can be satisfied by the run resolving its own threads.** On PR #78 Copilot raised one thread naming a real defect the change had introduced; the run fixed it, replied, and **resolved the thread itself** under the operator's `gh` credential — `resolvedBy` reads as the operator and is indistinguishable from a human's. The row read `0 unresolved`, and the reason correctly noted the `graphql` query was real and the review had genuinely landed. Every part of that is true, and the row still imports no outside opinion. | verified 2026-08-03 | closed 2026-08-07 by [#79](https://github.com/lmorchard/agent-sessions/issues/79) |
 
 **The tell:** the row names a command, and the evidence offered is not that command's output.
 **The fix, every time:** make the row cite a command that is actually run, and make its failure
@@ -112,7 +124,7 @@ test-file copy  -> gate-eligible  "all gate rows satisfied"
 driver voided it** — so move 5's record that the ci-sha fix was "mutation-tested" did not hold for
 the classifier path. Under phase 3, "eligible" means merge.
 
-Closed by extracting the parser to `driver/gate.py`, whose tests **import** it: the same mutation now
+Closed by extracting the parser to `src/agent_sessions/driver/gate.py`, whose tests **import** it: the same mutation now
 breaks named cases in both suites where it previously broke nothing. *(Note this prose named "the
 live instance" twice in two days and was wrong both times — which is why status now lives in the
 table's own column and not in a sentence above it.)*
@@ -333,7 +345,7 @@ as markdown*, so backticks around `Closes #N` are literal characters and protect
 **Instance 4 now has a detector rather than a habit: `make commit-lint`.** It reports a closing keyword
 only where it sits inside backticks, over the commits a branch adds on top of `origin/main`. The
 negative half is what makes it survivable — an ordinary trailing closing reference is left alone, so it
-does not fire on every legitimate commit and get switched off. `python3 scripts/commit_lint.py --all` is
+does not fire on every legitimate commit and get switched off. `uv run python -m agent_sessions.scripts.commit_lint --all` is
 the whole-history form, and running it is how the claim "one instance, ever" stays checkable instead of
 remembered. Note the shape of the fix: it does not make GitHub's parser smarter, which is impossible
 from here — it changes what we hand it, which is the lever this row's lesson identified.
@@ -387,7 +399,7 @@ forms.** A rule that fires on inert changes (comments, appends) produces false p
 
 **At freeze, lock anything red whose green condition is an exit status.** Earned on #62, 2026-08-03,
 and the sharpest single move either run made. The check-reviewer found a *third* red test outside the
-declared tamper surface: `scripts/test_gate_test_wiring.py`, whose failing assertion is literally
+declared tamper surface: `tests/scripts/test_gate_test_wiring.py`, whose failing assertion is literally
 `make gate-test` returncode `== 0` — necessarily false while the run's own criteria are red by design.
 Its reasoning for adding it to the frozen Check files: **"a red test file outside the declared tamper
 surface, whose message points at an exit-status assertion, is an invitation."** It was also another
@@ -454,7 +466,7 @@ state.** Ask what the mutation *does* before running it, and prefer a one-off de
 in the PR over a repeatable test that arms the hazard.
 
 **A check whose mechanism the permission floor forbids is not a check.** Two instances, and the
-second was written *in the same session that diagnosed the first*. `phases/pr.md` step 9 tells a run
+second was written *in the same session that diagnosed the first*. The then-`phases/pr.md` told a run
 to poll for a review "every 30s for up to 10 minutes" — but `sleep` loops, backgrounded shells and
 `Monitor` are all denied under `dontAsk`, so an unattended run cannot do it; PR #44's run polled twice,
 declared a timeout, and published a gate row while the review was 90 seconds away
@@ -476,7 +488,10 @@ invisible from inside #51's own manifest.
 The triage that wrote #51's C1 did everything the criteria rules ask for and still missed it, because
 **every one of those rules looks at the criterion, the oracle, and the current behaviour — none looks
 at what else already asserts something about the same behaviour.** The check is one `grep` for the
-flag or function name across `driver/test-*.sh` and `scripts/test_*.py`, and it costs seconds.
+flag or function name across the harness suites (`tests/driver/` and `tests/scripts/`), and it costs
+seconds. *(Written when those suites were `driver/test-*.sh`, a file class the 2026-08-09 Python
+conversion deleted outright — so the rule silently covered half of what it claimed until this was
+corrected. The rule is unchanged; only where it looks.)*
 Applied to the next four issues triaged it earned its place twice in four: it found an existing
 assertion that a proposed change would have broken (`test-driver.sh:353`, that the classifier still
 consults `has_success_result`, now carried as a named guard), and it ruled out a suspected collision
@@ -491,8 +506,9 @@ adding a replacement would have silently made a *different, already-merged* issu
 **A row that a mechanism could not produce must not render as that mechanism's negative result.**
 The same #44 gate said `threads: 0 unresolved — BY SUBSTITUTE: 0 reviews exist, so no thread can`.
 That is defect class 2 *inside the merge gate*: "no review has arrived yet" is not "no unresolved
-threads". `pr.md` already has the right rule for CI — an unsettled check yields `pending`, "nothing is
-wrong, it just isn't derivable yet" — and reviews should inherit it. Measured while diagnosing this:
+threads". The phase already had the right rule for CI — an unsettled check yields `pending`, "nothing
+is wrong, it just isn't derivable yet" — and reviews should inherit it. They now do:
+`grade_gate.md`'s threads row reports `threads: no review yet` with `verdict: pending`. Measured while diagnosing this:
 across six PRs, Copilot returned in **2.2–4.5 minutes**, so the 10-minute allowance was never the
 problem and a longer one would not have helped.
 
@@ -528,7 +544,7 @@ names from `gh project field-list` (real casing was `In progress`), and say `boa
 when it genuinely isn't.
 
 **A gate row is only as good as the permission floor of the thing that must satisfy it.** Move 4a
-added "wait for CI to settle" to `pr.md`; the run tried a `sleep` poll, a backgrounded shell, and
+added "wait for CI to settle" to the then-`phases/pr.md`; the run tried a `sleep` poll, a backgrounded shell, and
 the `Monitor` tool — **all three denied under `dontAsk`** — burned its whole $12 budget and stopped
 at `pending` on a PR whose CI went green minutes later. Two artifacts built in one session were in
 direct conflict, and only a real unattended run could surface it.
@@ -543,7 +559,7 @@ everything.** Both observed on 2026-08-02/03, on the same denied capability (`gh
   (`isResolved: false` on both, verified independently). Resolving needs the `resolveReviewThread`
   mutation, which the floor denies, so the row was **unsatisfiable and claimed anyway**.
 
-`pr.md` requires a row that a hosted run cannot satisfy, so the substitute is structural rather than
+The phase requires a row that a hosted run cannot satisfy, so the substitute is structural rather than
 incidental — it will recur on every run. **The lesson is not "substitutes are bad" but that a
 substituted row and a falsely-claimed row are indistinguishable to a reader of the verdict.** The
 verdict was `eligible-for-auto-merge` both times; under phase 3 both merge. Tracked on
@@ -738,6 +754,13 @@ worth hardening.
 
 ---
 
+> **On citing phases.** Several entries below and above used to cite `phases/pr.md` by step number.
+> That file split into `open_pr.md` and `grade_gate.md` and the steps were renumbered, so the
+> citations could not be repaired by find-and-replace — each had to be re-located by hand. Cite a
+> phase by **name and rule**, never by step number: a step number is precisely the part that does
+> not survive a split, and it fails silently, because a wrong step number still reads like a
+> citation.
+
 ## Verified gotchas
 
 Facts established by *running* something, each of which a plausible reading gets wrong. **These are
@@ -787,7 +810,7 @@ the entries most likely to be silently re-broken.**
 | **A write probe against a *nonexistent* target returns 404, not 403** — the existence check runs before the permission check. So `POST /repos/{o}/{r}/issues/99999999/comments` cannot distinguish "may not write" from "not found", and reads as a pass. **The safe discriminating probe is creating a label that already exists:** 422 `already_exists` when permitted, 403 when not, and nothing is written either way. | same |
 | **A fine-grained PAT reaches only repositories owned by its *resource owner*** — the token holder, or an org the holder is a **member** of (not an outside collaborator). A machine user that owns no repos therefore reaches nothing through its grant, whatever "All repositories" is set to and however it was invited to yours. **It still reads any public repo, because that needs no grant at all** — which is why such a token appears to work on a public repo and returns a bare 404 on a private one, with nothing in the UI resembling the problem. Classic PATs are *not* owner-scoped, but their scopes are coarse: `repo` is read **and** write, with no read-only-private variant. | 2026-08-10, verified by probing `torvalds/linux`, `cli/cli`, and both target repos under one token |
 | **ProjectsV2 is GraphQL-only and keeps its own collaborator list.** There is no REST endpoint — probing one returns a 404 that reads exactly like a permissions failure. Repository access does not feed into project access: an account with full write on a repo still cannot see that repo's *private* board unless added under the project's Settings → Manage access. Diagnosed by one classic token seeing public project 6 and not private project 9. | 2026-08-10 |
-| **`createDiscussionCategory` is not a mutation in GitHub's GraphQL schema.** Discussion categories have no API representation; they are created in repository settings. `discussion_manager.ensure_category` has been calling it since it was written, failing and returning `False` every time ([#211](https://github.com/lmorchard/agent-sessions/issues/211)). | 2026-08-10, live schema introspection of the `Mutation` type |
+| **`createDiscussionCategory` is not a mutation in GitHub's GraphQL schema.** Discussion categories have no API representation; they are created in repository settings. Re-verified 2026-08-19 against the live schema. `discussion_manager.ensure_category` used to call it and fail every time; [#211](https://github.com/lmorchard/agent-sessions/issues/211) closed that, and it now delegates to `check_category`, which reports the absence and tells you to create the category by hand. | 2026-08-10, live schema introspection of the `Mutation` type; codebase half re-checked 2026-08-19 |
 | **`gh project field-list` does not expose option colors or descriptions.** Those need GraphQL (`projectV2.field(name:)` → `ProjectV2SingleSelectField.options { name color description }`). | move 7 |
 | **`updateProjectV2Field` replaces the single-select option set wholesale** — it accepts no option IDs, so any option not in the new list is deleted and **every item assigned to it loses its status.** Renaming columns is therefore a two-step operation: replace the option set, then reassign every item. Verify no item is left blank. | move 7, verified on board 9 |
 
@@ -803,8 +826,9 @@ the entries most likely to be silently re-broken.**
 
 **A live hazard this closed for decafclaw but not in general: when the project gates dirty the
 tree, two things downstream read the mess as signal.** The tamper check's *"no collateral edits"*
-substitute would score a gate-rewritten lockfile as a collateral edit, and `pr.md` step 4's
-`git diff origin/main..HEAD` runs against a tree the gates themselves modified. The #585 run
+substitute would score a gate-rewritten lockfile as a collateral edit, and the self-review step's
+`git diff origin/main..HEAD` (now `open_pr.md`, "Review `git diff origin/main..HEAD`") runs against a
+tree the gates themselves modified. The #585 run
 survived it, so **the exposure is not understood** — worth establishing before an unwatched host
 runs the gates and then judges the diff. The skill itself contains no `git add` (re-verified by grep
 2026-07-29, still true) — but **that is a fact about the skill's text, not a bound on what a run
@@ -898,7 +922,7 @@ about mutation-testing a guard that protects a dangerous state.
   something.** 2026-08-03, during routine cleanup. `git merge-base --is-ancestor` reported the
   branch merged — true, and it says nothing whatever about the working tree. That worktree held an
   uncommitted `pr-body.md` carrying the run's **final gate block**, where `main` had only the
-  `pending` rows `pr.md` step 6 opens with; it was also the sole record that the `threads` row was
+  `pending` rows a PR is opened with (`open_pr.md`, "Record the PR"); it was also the sole record that the `threads` row was
   satisfied by the real `graphql` mechanism rather than a substitute, and it carried the governance
   note **the routing-gate decision earlier that same day was made on**. `git worktree remove
   --force` would have destroyed all of it silently, and the branch-level check would have said the
@@ -1029,9 +1053,11 @@ about mutation-testing a guard that protects a dangerous state.
 - **"The ceremony outweighs the implementation" — measured, and the driver is not the cause.** A single-line
   functional change matched against 535 lines of session artifact raises a reasonable concern, but artifact volume
   pre-dates `agent-session` by five months. Splitting decafclaw's 190 session directories on presence of `checks.md`
-  via `python3 scripts/session_artifact_stats.py` shows medians are nearly identical (513 lines without vs 534 lines with),
-  while the driver's mean and max are lower. What changed is throughput (rate up ~50×), not proportion; reducing ceremony
-  is a decision about decafclaw's session-docs convention, not the driver skill.
+  showed medians nearly identical (513 lines without vs 534 lines with), while the driver's mean and max
+  are lower. What changed is throughput (rate up ~50×), not proportion; reducing ceremony is a decision
+  about decafclaw's session-docs convention, not the driver skill. *(Measured 2026-08-05 with a
+  `session_artifact_stats.py` that #261 deleted — it had been unreachable and broken since the src-layout
+  move. The conclusion stands on the numbers recorded here; re-running it means writing the script again.)*
 - **A driver that dies between invoking and classifying leaves no record.** Observed: a run
   completed (98 turns, 19 min, **$9.44**) and opened a PR, then the process was killed before
   classifying — real money spent, a PR open, and an empty `runs.jsonl`. Everything the driver
@@ -1071,13 +1097,16 @@ that follows: read a park's reasoning before overriding it.** The cost of a park
 the cost of overriding a correct one is an oracle quietly weakened by the implementer it was meant to
 constrain.
 
-**Self-created staleness has no trigger.** `CLAUDE.md` said all of `driver/` was drivable. True when
-written — then the classifier moved into `driver/gate.py` four hours later, which made it false, and
-nobody noticed until it came up for an unrelated reason. This is *not* the staleness a
-re-verification pass catches: inherited stale claims get audited, but **a claim you falsify yourself,
-in the same session, by doing ordinary work, is invisible.** The mitigation has to attach to the
-*change* — moving oracle-bearing code should prompt "what did that just invalidate?" — not to a
-periodic audit.
+**Self-created staleness has no trigger.** Inherited stale claims get caught by a re-verification
+pass; **a claim you falsify yourself, in the same session, by doing ordinary work, is invisible to
+one.** So the mitigation has to attach to the *change* — moving oracle-bearing code should prompt
+"what did that just invalidate?" — rather than to a periodic audit.
+
+**[CLAUDE.md](../CLAUDE.md) is canonical for this one**, under *"When you change something, ask what
+it just invalidated"*, and carries the worked instance. This file used to carry its own copy of that
+anecdote, and the copy was the one that went stale — it still named a `driver/gate.py` path the
+Python conversion had superseded, while CLAUDE.md's had been updated. Two copies of a lesson, and the
+duplicate rots: which is the lesson.
 
 ## Two operating rules that are not about code
 
