@@ -20,6 +20,25 @@ def dummy_git_repo(tmp_path: Path) -> Path:
     return repo
 
 
+@pytest.fixture(autouse=True)
+def no_repo_env(tmp_path: Path, monkeypatch):
+    """Run from a directory with no `.env`, so this repo's own settings cannot leak in.
+
+    `load_env_file(".env")` reads the **current directory**. These tests never left the
+    repository root, so on a machine with a real `.env` the driver picked up its `BOARD`
+    and issued `gh project item-list 6 --owner lmorchard` — a query against a live board,
+    from a unit test.
+
+    It passed anyway until now, because the fake these tests used answered every
+    unmodelled call with success. Replacing that fake made the leak visible on the first
+    run in a checkout that has a `.env`, and invisible in one that does not.
+
+    `test_full_loop.py`'s harness has done this since it was written, with the same
+    reason in a comment. This suite never did.
+    """
+    monkeypatch.chdir(tmp_path)
+
+
 def model_github(gh):
     """Model the GitHub reads a driver pass makes, and nothing else.
 
