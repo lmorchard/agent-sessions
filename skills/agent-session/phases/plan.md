@@ -23,11 +23,11 @@ model is good at.
 
 ## Process
 
-0. **Check Ceremony Threshold:** If this is a small, tactical task (bug fix, < 3 steps), **skip `plan.md` and `checks.md` entirely**. Proceed directly to implementing the fix in-context (or use the `todowrite` tool) and move to the `pr` phase once tests pass. Only proceed with the steps below for large, architectural, or multi-session tasks.
+0. **Check Ceremony Threshold:** If this is a small, tactical task (bug fix, < 3 steps), **skip `plan.md` and the freeze**, but still write a one-line `checks.md` naming a runnable check and see it fail first — `SKILL.md`'s Ceremony Threshold has the reasoning, and the short version is that the check is the verifier's only input. Proceed directly to implementing the fix in-context (or use the `todowrite` tool) and move to the `open_pr` phase once tests pass. Only proceed with the steps below for large, architectural, or multi-session tasks.
 
 1. **Session setup if not already done.** If there's no worktree and session directory for
    this issue, run `references/session-setup.md` first. It also reads the tier, which the plan
-   records and `execute`/`pr` route on.
+   records and `execute`/`open_pr` route on.
 
 2. **Gate on the spec.** Verify `spec.md` against the **Readiness checklist** in
    `references/spec-template.md`. The load-bearing item: *every criterion names a check.* If

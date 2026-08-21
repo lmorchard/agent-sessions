@@ -32,6 +32,10 @@ This phase is triggered by the orchestrator when a PR has open review comments.
    a clean gate — and the condition stops meaning anything. Disputing is fine and often right;
    disputing *and* clearing your own gate is not. Reply with the evidence, leave it open.
 
+   For threads you *did* fix, whether you may resolve them depends on the tier —
+   `grade_gate.md`'s **Rules on resolving review threads** has the split. This rule is the limit on
+   that permission, not an exception to it.
+
 2. **Fix worthwhile comments**, then re-run the criteria's checks (a fix can break a
    criterion), lint, and commit.
 

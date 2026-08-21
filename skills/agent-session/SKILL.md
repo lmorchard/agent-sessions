@@ -31,6 +31,8 @@ which mode, or assess the current session state and suggest one.
 | `address_comments` | `phases/address_comments.md` | Address review comments on open PR |
 | `fix_ci` | `phases/fix_ci.md` | Fix failing CI checks |
 | `grade_gate` | `phases/grade_gate.md` | Derive merge gate verdict and update PR block |
+| `fix_conflict` | `phases/fix_conflict.md` | Rebase a PR whose branch has diverged from its base and resolve the conflicts |
+| `refine` | `phases/refine.md` | Rewrite a `needs-review` issue's criteria into automatable checks and upgrade it to `auto-ok`; leave it alone if it cannot |
 
 The **producer/consumer seam** is the `agent-session:spec` label: `intake` and
 `triage` produce issues carrying it; `plan`/`execute`/`express` refuse to run without it.
@@ -49,7 +51,7 @@ them only on reaching the relevant step:
 | `references/criteria-grammar.md` | EARS + Given-When-Then syntax reference (patterns, templates, how to pick) |
 | `references/spec-template.md` | Spec skeleton + readiness checklist, gating on verifiability |
 
-**Back half — keeping the checks trustworthy** (read by `plan`, `execute`, `pr`):
+**Back half — keeping the checks trustworthy** (read by `plan`, `execute`, `open_pr`, `grade_gate`):
 
 | File | What it holds |
 |---|---|
@@ -81,9 +83,20 @@ fresh context. It lives above the skill as a script / GitHub Action. Nothing her
 
 ## The Ceremony Threshold (When NOT to use full modes)
 
-Not every task needs the full `plan` → `execute` → `pr` ceremony with frozen checks and discrete phases.
+Not every task needs the full `plan` → `execute` → `open_pr` ceremony with frozen checks and discrete phases.
 
-**Small/Tactical (< 3 steps, bug fixes, single-file refactors):** Skip the heavy artifacts (`checks.md`, `plan.md`). Keep state in-context and use the `todowrite` tool to track steps silently. Jump straight to fixing the issue and opening a PR.
+**Small/Tactical (< 3 steps, bug fixes, single-file refactors):** Skip the heavy artifacts
+(`plan.md`, the freeze commit, the tamper diff, the per-phase machinery). Keep state in-context
+with the `todowrite` tool.
+
+**What you do not skip is the oracle.** Before you change anything, write a `checks.md` naming at
+least one runnable check — the exact command, and what its output has to say. One line is enough.
+Then run it and watch it fail.
+
+`checks.md` is the independent verifier's *entire input*, so leaving it out does not make the
+verification lighter — it makes it impossible, and the gate then rests on CI, threads and tier
+alone. **The frozen-check machinery is optional at this size; the check itself is not.** No freeze
+commit, no tamper diff — just a named command, chosen before the work, that could have failed.
 
 **Large/Architectural (new features, multi-session work, high ambiguity):** Use the full structured flow below, freezing checks and building vertical slices to ensure verifiable outcomes.
 

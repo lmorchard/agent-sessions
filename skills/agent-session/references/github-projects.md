@@ -1,15 +1,17 @@
 # GitHub Projects integration
 
 Optional. The skill moves issues across a GitHub Projects v2 board at mode boundaries
-(`intake`/`triage` → Ready, session setup → In Progress, `pr` → In Review). It only runs when
-the project's `CLAUDE.md` declares the board — otherwise every mode skips this silently.
+(`intake`/`triage` → Ready, session setup → In Progress, `open_pr` → In Review). It only runs when
+the project's instruction file (`CLAUDE.md`, or `AGENTS.md` where that is what the project keeps) declares the board — otherwise every mode skips this silently.
 
 Moving an issue across the board is *not* the board-driver. The driver (pick the next Ready
 issue, run the loop unattended, act on the merge gate) lives above this skill.
 
-## CLAUDE.md schema
+## Instruction-file schema
 
-Add a section like this to the project's `CLAUDE.md`:
+Add a section like this to the project's instruction file — `CLAUDE.md`, or `AGENTS.md` where
+that is what the project keeps. **Read whichever one the project actually has**; naming only one
+of them is how a Codex-hosted run ends up unable to see its own board configuration:
 
 ```markdown
 ## GitHub Project
@@ -24,12 +26,11 @@ Add a section like this to the project's `CLAUDE.md`:
   - `done: Done`
 ```
 
-*(The example uses the casing GitHub's own templates ship — lowercase `progress`/`review`. An
-earlier version of this file wrote `In Progress` / `In Review` three lines above a warning that real
-boards don't use that casing.)*
+*(The example uses the casing GitHub's own templates ship — lowercase `progress`/`review`. Read the
+board's real option names before relying on either casing; they differ per board.)*
 
 The skill reads these as declarative names and resolves the underlying GraphQL IDs at runtime
-— don't hand-write IDs into `CLAUDE.md`, they're noisy and tied to the field schema.
+— don't hand-write IDs into the instruction file, they're noisy and tied to the field schema.
 
 **Locate the declaration by content, not by heading.** Projects document their board under
 whatever heading they already use (`## Project board`, `## Workflow`, a line in `## Conventions`).
@@ -90,23 +91,30 @@ gh project item-list <number> --owner <owner> --format json \
   | jq '.items[] | select(.content.url == "<issue-url>")'
 ```
 
-If the issue isn't on the board yet (common right after `intake` creates it), add it first:
+**The lookups above are reads, and you can run them. The two operations below are writes, and
+you cannot.** Under the board-driver your credential is read-scoped: board mutations go through
+the write manifest and the driver performs them after your run. See
+`references/write-manifest.md` for the entry format.
 
-```bash
-gh project item-add <number> --owner <owner> --url <issue-url>
+If the issue isn't on the board yet (common right after `intake` creates it), record a
+`project_item_add` entry:
+
+```json
+{"kind": "project_item_add", "url": "<issue-url>"}
 ```
 
-## Transition command
+## Transition
 
-Single edit, one option at a time:
+Record a `project_item_edit` entry. Single edit, one option at a time:
 
-```bash
-gh project item-edit \
-  --project-id <project-id> \
-  --id <item-id> \
-  --field-id <status-field-id> \
-  --single-select-option-id <target-option-id>
+```json
+{"kind": "project_item_edit", "project_id": "<project-id>", "item_id": "<item-id>",
+ "field_id": "<status-field-id>", "option_id": "<target-option-id>"}
 ```
+
+Both kinds need a board configured on the driver; on a driver started without one they are
+rejected rather than silently skipped, so resolve the IDs with the read queries above and record
+the entry only when the instruction file declares a board.
 
 ## When each mode transitions
 
@@ -114,12 +122,12 @@ gh project item-edit \
 |---|---|---|
 | `intake` / `triage` | → `ready` | After the issue is created or augmented with criteria + tier. Add to the project first if missing. |
 | session setup (`plan` / `express`) | → `in_progress` | After worktree setup, before planning. See `references/session-setup.md`. |
-| `pr` | → `in_review` | After the PR is opened. The linked issue is the one referenced via `Closes #N`. |
+| `open_pr` | → `in_review` | After the PR is opened. The linked issue is the one referenced via `Closes #N`. |
 | (merge) | → `done` | Out of scope — `Closes #N` auto-closes the issue and most boards auto-move to Done on close. |
 
 ## When to skip
 
-- No board declaration findable in `CLAUDE.md` — skip, and report `board: not configured` once.
+- No board declaration findable in the instruction file — skip, and report `board: not configured` once.
   Not a *silent* skip: see "Locate the declaration by content" above.
 - `gh` CLI lacks the `project` scope — surface once with the fix (`gh auth refresh -s
   project`), then skip subsequent transitions this session rather than re-prompting.
@@ -134,10 +142,10 @@ verification loop, not board hygiene.
 
 ## Notes on use
 
-- **Declarative names, not IDs.** The CLAUDE.md schema uses human names so it survives schema
+- **Declarative names, not IDs.** The schema above uses human names so it survives schema
   changes; the agent re-resolves IDs each session.
 - **Resolve once, reuse.** ID resolution is the slow part of Projects API work. Cache in
   memory for the session; don't hit the API per transition.
-- **One-time setup helper.** First-time CLAUDE.md authoring: run `gh project list --owner
+- **One-time setup helper.** First-time authoring: run `gh project list --owner
   <owner>` for the number and `gh project field-list` to confirm column names, then paste the
   resolved names in.

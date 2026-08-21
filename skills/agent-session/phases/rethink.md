@@ -23,7 +23,15 @@ This is a human-in-the-loop phase, typically triggered interactively when an ope
 
 3. **Tombstone the Old Spec.** 
    - Wrap the entire active spec inside a Markdown details block: `<details><summary>Superseded Spec (Attempt N: [Brief description])</summary> ... </details>`. 
-   - **CRITICAL:** Inside the tombstone block, replace the `<!-- agent-session:spec -->` marker with `<!-- agent-session:spec-RETIRED -->`. If the active marker remains, the driver's routing query will still see the issue as "specced" and incorrectly route it back to `execute` with the old tier.
+   - **CRITICAL, and it is two things, not one.** The driver's `is_specced` returns true on the
+     **label** *or* the body marker, so retiring one of them changes nothing on its own — and the
+     label is the normal carrier, since `intake` and `triage` both apply it. Do both:
+     - Inside the tombstone block, replace the `<!-- agent-session:spec -->` marker with
+       `<!-- agent-session:spec-RETIRED -->`.
+     - Record a `label` entry **removing** `agent-session:spec`.
+
+     With only the marker retired, the routing query still sees the issue as specced and routes it
+     straight back to `execute` with the old tier, which is what this step exists to prevent.
 
 4. **Clean up Local State.** 
    - If there is a known local worktree or session directory for the failed attempt, explicitly advise the user to delete it or abandon the branch. The new attempt must start from a clean slate so that old frozen checks (`checks.md`) do not pollute the new path.

@@ -56,7 +56,7 @@ criteria), and you do the part that does (ratify). See
    scanner has no business editing the repo it's scoring.
 
 3. **Headless proposal (Async ratify pass).** Because you are running autonomously, there is no user to pick from a table interactively. Instead, for the issue you scanned:
-   - **If flagged as `insufficient_detail`:** Record a comment asking the human for the missing context, and record a `label` entry adding BOTH `agent-session:needs-human` and `agent-session:needs-details`. Stop execution.
+   - **If flagged as `insufficient_detail`:** Record a comment asking the human for the missing context — say in it that the issue lacks baseline detail, since that is the signal — and record a `label` entry adding `agent-session:needs-human`. Stop execution.
    - **Otherwise (Criteria drafted):** Record your proposed EARS criteria, checks, and tier as a new top-level comment on the GitHub issue — an `issue_comment` entry in the write manifest (`references/write-manifest.md`). Never edit past comments in place.
    - Record a `label` entry adding `agent-session:needs-human` so the human knows they need to review it.
    - Do NOT apply the `agent-session:spec` label yet, because the human hasn't ratified the criteria.
@@ -92,7 +92,15 @@ criteria), and you do the part that does (ratify). See
 Every escalation below is two manifest entries — an `issue_comment` and a `label` — never a
 `gh` command. See `references/write-manifest.md`.
 
-- An issue's intent is genuinely unclear or lacking baseline detail (not just under-specified) → record a new top-level comment explaining the ambiguity, record the `agent-session:needs-human` and `agent-session:needs-details` labels, and stop.
+**Emit a `label_create` entry for any label before the `label` entry that applies it**, exactly as
+`intake.md` does. `writes.py` applies every label on one entry in a **single** GitHub edit with no
+ensure-exists step, and that edit errors outright when the repository has no such label — so on a
+target repo seeing its first run, the whole entry fails, `write-manifest.md`'s all-or-nothing rule
+stops the rest of the manifest, and **the issue is never parked**. It then
+stays selectable and the loop picks it again. `label_manager` is the source of the colours; a
+`label_create` entry that disagrees with it just makes the label look wrong.
+
+- An issue's intent is genuinely unclear or lacking baseline detail (not just under-specified) → record a new top-level comment explaining the ambiguity, record the `agent-session:needs-human` label, and stop.
 - The scan surfaces duplicate/obsolete issues → record a new top-level comment suggesting closure (never edit past comments in place), record the `agent-session:needs-human` label, and stop.
-- An issue requires subjective visual/aesthetic iteration (like layout density, game feel, or UI design) → record the `agent-session:interactive` label instead. These cannot be handled asynchronously; they require an interactive prototype session in the CLI.
+- An issue requires subjective visual/aesthetic iteration (like layout density, game feel, or UI design) → record the `agent-session:needs-human-interactive` label in place of `agent-session:needs-human`. Both park the issue; this one also says a person at a keyboard is required, because the work cannot be done asynchronously.
 - A subagent can't tell what "done" would mean → record a new top-level comment asking the human for direction (never edit past comments in place), record the `agent-session:needs-human` label, and stop.

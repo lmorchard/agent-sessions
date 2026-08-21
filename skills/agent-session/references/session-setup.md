@@ -16,7 +16,8 @@ and a drifted worktree path means a run that tests the wrong branch.
 
 ## Process
 
-1. **Determine the session base directory.** Check the project's `CLAUDE.md` for a "Dev
+1. **Determine the session base directory.** Check the project's instruction file (`CLAUDE.md`,
+   or `AGENTS.md` where that is what the project keeps) for a "Dev
    Sessions" section or a non-default session directory and respect it. Otherwise default to
    `docs/dev-sessions/` — one place to look for session artifacts regardless of which skill
    drove the session.

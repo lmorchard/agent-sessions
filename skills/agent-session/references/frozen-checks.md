@@ -1,6 +1,13 @@
 # Frozen checks — the verification contract
 
-Read by `plan`, `execute`, and `pr`. This is the back half's core, the counterpart to
+Read by `plan`, `execute`, `open_pr` and `grade_gate`.
+
+**The freeze machinery below is for large work. `checks.md` itself is not optional at any size** —
+see `SKILL.md`'s Ceremony Threshold. A small task's `checks.md` may be one line with no freeze
+commit and no tamper diff; what it may not be is absent, because it is the independent verifier's
+only input.
+
+This is the back half's core, the counterpart to
 `acceptance-criteria.md`: that file makes criteria *checkable*, this one makes the checks
 *trustworthy* while an agent implements against them.
 
@@ -126,7 +133,7 @@ Phase 0 of every plan, no implementation in it:
    adjudication record is inside the freeze commit, so it is part of the tamper baseline too.
 
    Re-anchor the sha if the branch is ever rebased. **The freeze commit must remain an ancestor of
-   the pushed head** — nothing in `pr` may collapse it away, because a baseline absent from `origin`
+   the pushed head** — nothing in `open_pr` may collapse it away, because a baseline absent from `origin`
    turns the tamper diff into a self-report. See `phases/grade_gate.md`.
 
 A **criterion's** check that *passes* at freeze means the behavior already exists — surface it,
@@ -158,7 +165,7 @@ or a CHECK command in it is editing the oracle, whatever the diff's size.
 
 ## Independent verification
 
-At the end of `execute` (and again in `pr`), dispatch a **verifier subagent** with a fresh
+At the end of `execute` (and again in `open_pr`), dispatch a **verifier subagent** with a fresh
 context. Give it only `checks.md` and the repo. Do **not** give it the plan, the
 implementation notes, or any explanation of why a failure might be acceptable — that context
 is exactly what produces a rationalized pass.
@@ -185,9 +192,9 @@ green checks are not evidence until that diff is explained by a logged amendment
 **An empty `Check files` list makes this command meaningless rather than satisfied.** If that's
 the case, run the substitutes in "When the criteria are commands, not test files" below.
 
-Run this at the end of `execute`, and again in `pr` before pushing, so the verdict the gate cites was
+Run this at the end of `execute`, and again in `open_pr` before pushing, so the verdict the gate cites was
 taken against the tree that ships. It's two seconds and it's the difference between a claim and a
-check — and because `pr` no longer rewrites history, the freeze commit ships with the branch and a
+check — and because `open_pr` does not rewrite history, the freeze commit ships with the branch and a
 reviewer can re-run the diff themselves rather than taking the recorded verdict on trust.
 
 ### When the criteria are commands, not test files

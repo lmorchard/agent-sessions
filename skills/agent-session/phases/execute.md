@@ -34,25 +34,23 @@ fix-up.
 
 ## Process
 
-0. **Check Ceremony Threshold:** If this is a small, tactical task (bug fix, < 3 steps), **skip `execute`'s heavy phased structure entirely**. Just implement the fix and jump to `pr`. Only proceed with the steps below for large, architectural, or multi-session tasks that have a `plan.md`.
+0. **Check Ceremony Threshold:** If this is a small, tactical task (bug fix, < 3 steps), **skip `execute`'s heavy phased structure** — the per-phase commits, the slice unit tests, a subagent per phase. Implement the fix, run the check `checks.md` names, and jump to `open_pr`. A minimal `checks.md` is required even here (`SKILL.md`'s Ceremony Threshold); step 4's independent verification has no input without it. Only proceed with the steps below for large, architectural, or multi-session tasks that have a `plan.md`.
 
 **TDD Inner Loop (Fail-Implement-Pass):** For each micro-task, enforce strict fail-implement-pass TDD inner loop discipline. Before writing implementation code, run the failing check and observe failure. Then implement, run the check again to confirm pass, and tick the micro-task checkbox.
 
-**Parallel Swarm & Tiered Model Routing:** For independent micro-tasks defined in parallel groups:
-1. **Prepare Prompt Files:** Prior to dispatch, write a dedicated prompt file for each subagent (e.g. `runs/task_1_prompt.txt`, `runs/task_2_prompt.txt`). Each prompt specifies:
-   - Target file(s) and micro-task description.
-   - The exact check/test command to run first to observe failure (TDD inner loop).
-   - Frozen check file rules (read-only).
+**Parallel work.** Independent micro-tasks can be dispatched to `implementer` subagents in
+parallel, one per group. Give each one its target files, its micro-task, the exact check command
+to run first to observe failure, and the frozen check files by path with the read-only rule.
+Groups must touch strictly independent files or functions, or they produce merge conflicts
+instead of throughput.
 
-2. **Execute Deterministic Swarm Orchestration:** Invoke `scripts/run_swarm.py` with the task prompt files:
-```bash
-python3 scripts/run_swarm.py runs/task_1_prompt.txt runs/task_2_prompt.txt
-```
-Or specify a JSON tasks manifest file (`runs/swarm_tasks.json`) if custom task checks or stream outputs are configured:
-```bash
-python3 scripts/run_swarm.py --tasks-file runs/swarm_tasks.json
-```
-The deterministic runner (`scripts/run_swarm.py`) concurrently dispatches parallel `implementer` subagents via `agent_runner.py --tier low` (enforcing low-tier model execution like Claude 3.5 Haiku while reserving the high-tier model for intake, planning, and verification), monitors process PIDs, checks exit codes, validates TDD stream compliance (`scripts/validate_tdd.py`), and reports aggregated pass/fail results without an LLM Commander. Ensure parallel groups contain strictly independent files or functions to avoid git merge conflicts.
+Dispatch them with the harness's own subagent mechanism. Which model each one gets is the
+driver's choice, from `--low-tier-model` / `LOW_TIER_MODEL`; do not name a model yourself.
+
+**On the OpenCode backend, subagents cannot be dispatched at all** — the runner denies delegation
+there, because OpenCode does not propagate the mandatory permission policy to a delegated agent, so
+a subagent would run without the merge prohibition. On that backend everything below that dispatches
+one, **including the independent verification**, has to happen in the main context.
 
 1. **Load and review.** Read `plan.md`, `checks.md`, and `spec.md`. Confirm the freeze commit
    exists (`checks.md`'s `Frozen at` sha resolves) — if it doesn't, Phase 0 never happened;
@@ -102,7 +100,7 @@ The deterministic runner (`scripts/run_swarm.py`) concurrently dispatches parall
 5. **Scope discipline.** Only what the plan describes. Don't refactor adjacent code, however
    messy. Note anything worth fixing in `notes.md` for a future session.
 
-6. **Do not push.** `pr` handles remote.
+6. **Do not push.** `open_pr` handles remote.
 
 ## When to skip
 

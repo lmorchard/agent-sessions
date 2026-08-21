@@ -9,7 +9,7 @@ push and open a PR without write access).
 **You cannot push or open a PR yourself.** Under the board-driver your GitHub credential is
 read-scoped: you commit locally as normal, then *record* the push and the PR as write-manifest
 entries and the driver performs them after your run. Read `references/write-manifest.md` before
-step 5.
+the **Push and open** section.
 
 The gate is where this mode ends: it reports whether the gate is satisfied and stops.
 
@@ -27,7 +27,7 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
 
 ## Process
 
-0. **Ceremony Threshold:** If this is a small/tactical task, there won't be a `checks.md` or a freeze commit. Skip steps related to the tamper diff and frozen manifest. Do the self-review, run tests (`make check`), push, and open the PR. Write a gate block exactly as shown in the template, making sure to place it directly after the `## Merge gate` heading following `references/pr-body-template.md` with all required fields (`tier`, `checks`, `guards`, `tamper`, `freeze`, `project-gates`, `ci`, `threads`, `risk-paths`, `verdict`, `reason`). Use `freeze: <commit-sha>` (or `freeze: none` if no freeze commit exists) and `tamper: clean`. Only proceed with the full tamper-diff and frozen-check rules if those artifacts exist.
+0. **Ceremony Threshold:** If this is a small/tactical task there will be no freeze commit, so skip the tamper diff and the frozen manifest. There will still be a `checks.md` — a minimal one is required for every task size (`SKILL.md`'s Ceremony Threshold) — so run the checks it names and report them in the gate block as usual. Do the self-review, run tests (`make check`), push, and open the PR. Write a gate block exactly as shown in the template, making sure to place it directly after the `## Merge gate` heading following `references/pr-body-template.md` with all required fields (`tier`, `checks`, `guards`, `tamper`, `freeze`, `project-gates`, `ci`, `threads`, `risk-paths`, `verdict`, `reason`). Use `freeze: <commit-sha>` (or `freeze: none` if no freeze commit exists) and `tamper: clean`. Only proceed with the full tamper-diff and frozen-check rules if those artifacts exist.
 
 1. **Rebase onto `origin/main` first.** `git fetch origin && git rebase origin/main`. Sessions
    run long and main advances; pre-rebase, `git diff origin/main..HEAD` can show dozens of
@@ -53,11 +53,20 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
    - **Edge cases:** hidden files not filtered, path traversal, off-by-one, empty inputs
    - **Test gaps:** new behavior without tests; changed behavior existing tests don't cover
    - **Convention violations:** bare error strings, imports inside functions, undeclared attributes
-   - **Doc gaps:** new config options undocumented, CLAUDE.md key-files list stale
+   - **Doc gaps:** new config options undocumented, the instruction file's key-files list stale
    - **Frozen-check edits:** any diff touching a path in `checks.md`'s `Check files`. If one
      appears here and isn't a logged amendment, stop — the green checks aren't evidence yet.
 
    Fix what you find. This catches what a bot reviewer misses, and vice versa.
+
+   **Then append what you learned to `docs/agent-ledger.md`, if the file exists** — architectural
+   rules, stylistic choices, test patterns a future run would want to know. `intake` reads it for
+   architectural continuity, and this is the phase positioned to write it: the append rides along on
+   a commit that gets pushed, a few steps below.
+
+   Append **whatever the run's eventual verdict turns out to be** — a pattern found on work that
+   ends up needing human review is institutional memory too. Keep entries short and general; this
+   is not a run log.
 
 ## Push and open
 
@@ -93,14 +102,14 @@ The gate is where this mode ends: it reports whether the gate is satisfied and s
    verifier's post-review report — do not exist yet at this point, so any verdict written here is
    a guess. For human-run checks that were confirmed, mark them as `human-verified` in the checks list. The block is machine-readable and a board-driver may read it at any moment; a
    provisional `eligible-for-auto-merge` sitting in the body through the whole review cycle is a
-   window where an automated reader can act on a verdict nobody derived. Step 14 writes the real
-   one.
+   window where an automated reader can act on a verdict nobody derived. `grade_gate` writes the
+   real one, later, once CI and review have landed.
 
 7. **Board hook.** If a board is configured, record a `project_item_edit` entry moving each
    `Closes #N` issue to `in_review`. Otherwise report `board: not configured` with the verdict —
    not a silent skip.
 
-8. **Review request.** Already covered: it rode along on the `pr_create` entry in step 6, because
+8. **Review request.** Already covered: it rode along on the `pr_create` entry in **Record the PR**, because
    the PR number does not exist until the driver has made it.
 
 9. **Stop.** State that the push and the PR are *recorded*, that the review was requested on the
