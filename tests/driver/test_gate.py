@@ -16,8 +16,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from agent_sessions.driver import gate  # noqa: E402
+from agent_sessions.driver import gate
 
 
 def body_with(
@@ -579,3 +578,95 @@ def test_classify_disjoint_criteria_paths_warns():
 
 
 
+
+
+# --- the verdict and its provenance record must agree, row by row -------------
+#
+# `verify_gate_rows` and `infer_provenance` used to encode the same seven predicates
+# twice, line for line, differing only in what they emitted. Change a rule in one and
+# the gate's verdict disagrees with its own account of how it was reached -- on the
+# oracle -- and nothing would catch it, because both were tested separately against
+# their own expectations. They now share `_row_failure`; these checks are what stops
+# them drifting apart again if someone re-inlines either one.
+
+
+FAILING_VALUES = {
+    "tier": "needs-review",
+    "checks": "2/3 fail",
+    "guards": "REGRESSED",
+    "tamper": "DIRTY -- collateral edits",
+    "project-gates": "red: make check",
+    "threads": "1 unresolved",
+    "risk-paths": "src/agent_sessions/driver/gate.py",
+}
+
+CLEAN_FIELDS = {
+    "tier": "auto-ok",
+    "checks": "3/3 pass",
+    "guards": "none",
+    "tamper": "clean",
+    "project-gates": "green: make check",
+    "ci": "2/2 pass @ abc1234",
+    "threads": "0 unresolved",
+    "risk-paths": "none",
+}
+
+
+@pytest.mark.parametrize("row", sorted(FAILING_VALUES))
+def test_a_failing_row_fails_the_verdict_and_reads_failed_in_provenance(row):
+    """C1. One rule, two consumers, and they must say the same thing about it."""
+    fields = dict(CLEAN_FIELDS)
+    fields[row] = FAILING_VALUES[row]
+
+    ok, reasons = gate.verify_gate_rows(fields)
+    provenance = gate.infer_provenance(fields)
+
+    assert not ok, f"{row}={fields[row]!r} did not fail the verdict"
+    assert any(row in r for r in reasons), f"no reason names {row}: {reasons}"
+    assert provenance[row] == "failed", (
+        f"the verdict rejected {row} and its provenance says {provenance[row]!r} -- "
+        f"the gate would record a clean provenance for a row it just failed on"
+    )
+
+
+def test_a_clean_block_passes_and_records_no_failed_row():
+    """C2, the control. C1 is satisfiable by a predicate that fails everything."""
+    ok, reasons = gate.verify_gate_rows(CLEAN_FIELDS)
+    provenance = gate.infer_provenance(CLEAN_FIELDS)
+
+    assert ok, reasons
+    assert reasons == []
+    assert "failed" not in provenance.values(), provenance
+
+
+@pytest.mark.parametrize("row", sorted(FAILING_VALUES))
+def test_every_verified_row_is_also_reported_in_provenance(row):
+    """C3. A row graded by the verdict but absent from provenance is unaccountable."""
+    assert row in gate.infer_provenance(CLEAN_FIELDS)
+
+
+def test_substitution_never_masks_a_failure():
+    """A failing row stays failed even when its text also carries a substitute marker.
+
+    The interesting thing about a wrong answer is not how it was arrived at, and the
+    reverse order would let `threads: 1 unresolved -- via substitute` record as
+    `substituted` rather than `failed`.
+    """
+    fields = dict(CLEAN_FIELDS)
+    fields["threads"] = "1 unresolved -- via substitute"
+
+    ok, _ = gate.verify_gate_rows(fields)
+    assert not ok
+    assert gate.infer_provenance(fields)["threads"] == "failed"
+
+
+def test_tier_is_never_recorded_as_substituted():
+    """`tier` is a classification the skill makes, not evidence it gathers.
+
+    Nothing can stand in for it, so `substituted` is not one of its states -- and the
+    shared `_row_state` has to keep that distinction, since every other row has it.
+    """
+    fields = dict(CLEAN_FIELDS)
+    fields["tier"] = "auto-ok -- via substitute"
+
+    assert gate.infer_provenance(fields)["tier"] == "real"

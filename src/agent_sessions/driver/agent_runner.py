@@ -18,14 +18,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-try:
-    from agent_sessions.scripts import run_progress  # type: ignore[no-redef]
+from agent_sessions.scripts import run_progress
 
-    from . import credentials
-except ImportError:  # invoked as a script rather than imported as a package
-    import credentials  # type: ignore[no-redef]
-
-    from agent_sessions.scripts import run_progress  # type: ignore[no-redef]
+from . import credentials
 
 #: Where the agent records the GitHub writes it wants the driver to perform.
 WRITES_FILE_VAR = "AGENT_SESSION_WRITES"
@@ -586,26 +581,33 @@ def has_success_result(backend: str, raw_path: Path) -> bool:
 
 
 def _main(argv: list[str] | None = None) -> int:
-    if len(sys.argv) < 2:
+    """Entry point. Reads `argv` when given, so it can be driven from a test.
+
+    It previously declared `argv` and then read `sys.argv` throughout, which made the
+    parameter a promise the function did not keep -- a caller passing a list would have
+    been silently ignored and graded the process's real arguments instead.
+    """
+    tokens = list(sys.argv[1:] if argv is None else argv)
+    if not tokens:
         print("usage: agent_runner.py <run|parse|has-events|has-success> ...", file=sys.stderr)
         return 2
 
-    cmd = sys.argv[1]
+    cmd = tokens[0]
     if cmd == "run":
-        return run_agent(sys.argv[2:])
+        return run_agent(tokens[1:])
     elif cmd == "parse":
         p = argparse.ArgumentParser()
         p.add_argument("--backend", choices=["claude", "opencode"], default="claude")
         p.add_argument("--raw-output", required=True)
         p.add_argument("--output-json", required=True)
-        args = p.parse_args(sys.argv[2:])
+        args = p.parse_args(tokens[1:])
         res = parse_result_stream(args.backend, Path(args.raw_output))
         Path(args.output_json).write_text(json.dumps(res, indent=2))
         return 0
     elif cmd == "has-events":
         p = argparse.ArgumentParser()
         p.add_argument("--raw-output", required=True)
-        args = p.parse_args(sys.argv[2:])
+        args = p.parse_args(tokens[1:])
         if stream_has_events(Path(args.raw_output)):
             return 0
         return 1
@@ -613,7 +615,7 @@ def _main(argv: list[str] | None = None) -> int:
         p = argparse.ArgumentParser()
         p.add_argument("--backend", choices=["claude", "opencode"], default="claude")
         p.add_argument("--raw-output", required=True)
-        args = p.parse_args(sys.argv[2:])
+        args = p.parse_args(tokens[1:])
         if has_success_result(args.backend, Path(args.raw_output)):
             return 0
         return 1

@@ -20,7 +20,45 @@ def dummy_git_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def test_driver_workspace_isolation_enabled(dummy_git_repo: Path, tmp_path: Path, monkeypatch):
+def model_github(gh):
+    """Model the GitHub reads a driver pass makes, and nothing else.
+
+    Everything unmatched lands in `gh.unhandled` and fails the test on teardown. That is
+    the whole point of the change: these three tests used to answer every unmodelled call
+    with `stdout="{}"`, `returncode=0`, so they would have passed if the driver started
+    issuing an entirely different set of commands.
+    """
+    # Modelled call by call, on purpose. A `gh.on(a[:1] == ["gh"], "{}")` line would be
+    # the same catch-all in a new coat -- I wrote one, and a mutation test proved it: a
+    # freshly-added `gh api rate_limit` sailed straight through it. The point of the
+    # change is that a call the driver did not previously make has to be noticed.
+    gh.on(lambda a: a[:1] == ["gh"] and "issue" in a and "view" in a,
+          json.dumps({"comments": []}))
+    gh.on(lambda a: a[:3] == ["gh", "api", "user"], "dummy_bot\n")
+    gh.on(lambda a: a[:3] == ["gh", "api", "rate_limit"],
+          json.dumps({"resources": {"core": {"remaining": 5000, "limit": 5000}},
+                      "rate": {"remaining": 5000, "limit": 5000}}))
+    gh.on(lambda a: a[:3] == ["gh", "api", "graphql"],
+          json.dumps({"data": {"repository": {"pullRequests": {"nodes": []}}}}))
+    gh.on(lambda a: a[:2] == ["gh", "issue"] and "list" in a, "[]")
+    gh.on(lambda a: a[:2] == ["gh", "discussion"] and "list" in a, "[]")
+    gh.on(lambda a: a[:2] == ["gh", "discussion"] and "create" in a,
+          "https://github.com/owner/repo/discussions/1\n")
+    gh.on(lambda a: a[:2] == ["gh", "discussion"] and "comment" in a, "commented")
+
+    # The driver shells out to `label_manager.py` to park and unpark. The old catch-all
+    # answered these with success too, so all three tests were exercising a park none of
+    # them asserted on. Recorded here so a test can, and so an unexpected label operation
+    # is visible rather than free.
+    gh.label_ops = []
+    gh.on(
+        lambda a: any(str(tok).endswith("label_manager.py") for tok in a),
+        lambda argv: (gh.label_ops.append(argv[argv.index("--repo") + 2:]) or ""),
+    )
+    return gh
+
+
+def test_driver_workspace_isolation_enabled(dummy_git_repo: Path, tmp_path: Path, monkeypatch, recording_gh):
     state_dir = tmp_path / "state"
     ws_dir = tmp_path / "workspaces"
 
@@ -46,24 +84,7 @@ def test_driver_workspace_isolation_enabled(dummy_git_repo: Path, tmp_path: Path
     monkeypatch.setattr("agent_sessions.driver.agent_session_driver.release_lock", lambda repo: None)
     monkeypatch.setattr("agent_sessions.driver.agent_session_driver.increment_attempts", lambda num, repo: None)
 
-    real_sub_run = subprocess.run
-
-    class MockResult:
-        stdout = "{}"
-        returncode = 0
-
-    def mock_run(cmd, *args, **kwargs):
-        # Allow git commands to run real subprocess against dummy_git_repo
-        if isinstance(cmd, list) and len(cmd) > 0 and cmd[0] == "git":
-            return real_sub_run(cmd, *args, **kwargs)
-        if isinstance(cmd, list) and "view" in cmd and "issue" in cmd:
-            class IssueView:
-                stdout = json.dumps({"comments": []})
-                returncode = 0
-            return IssueView()
-        return MockResult()
-
-    monkeypatch.setattr("subprocess.run", mock_run)
+    model_github(recording_gh)
 
     captured_runner_args = []
 
@@ -96,8 +117,11 @@ def test_driver_workspace_isolation_enabled(dummy_git_repo: Path, tmp_path: Path
     assert run_args[repo_idx + 1] == expected_ws_path
     assert (ws_dir / "issue-42").exists()
 
+    # Surfaced by the strict fake: the pass parks #42, and nothing asserted it before,
+    # because the catch-all answered the `label_manager` invocation with success.
+    assert recording_gh.label_ops == [["park", "--issue", "42"]], recording_gh.label_ops
 
-def test_driver_no_workspace_isolation_flag(dummy_git_repo: Path, tmp_path: Path, monkeypatch):
+def test_driver_no_workspace_isolation_flag(dummy_git_repo: Path, tmp_path: Path, monkeypatch, recording_gh):
     state_dir = tmp_path / "state"
 
     monkeypatch.setenv("DRIVER_GH_LOGIN", "dummy_bot")
@@ -120,11 +144,8 @@ def test_driver_no_workspace_isolation_flag(dummy_git_repo: Path, tmp_path: Path
     monkeypatch.setattr("agent_sessions.driver.agent_session_driver.release_lock", lambda repo: None)
     monkeypatch.setattr("agent_sessions.driver.agent_session_driver.increment_attempts", lambda num, repo: None)
 
-    class MockResult:
-        stdout = "{}"
-        returncode = 0
 
-    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: MockResult())
+    model_github(recording_gh)
 
     captured_runner_args = []
 
@@ -155,7 +176,7 @@ def test_driver_no_workspace_isolation_flag(dummy_git_repo: Path, tmp_path: Path
     assert run_args[repo_idx + 1] == str(dummy_git_repo.resolve())
 
 
-def test_driver_clean_workspaces_flag(dummy_git_repo: Path, tmp_path: Path, monkeypatch):
+def test_driver_clean_workspaces_flag(dummy_git_repo: Path, tmp_path: Path, monkeypatch, recording_gh):
     state_dir = tmp_path / "state"
     ws_dir = tmp_path / "workspaces"
 
@@ -182,17 +203,7 @@ def test_driver_clean_workspaces_flag(dummy_git_repo: Path, tmp_path: Path, monk
     monkeypatch.setattr("agent_sessions.driver.agent_session_driver.release_lock", lambda repo: None)
     monkeypatch.setattr("agent_sessions.driver.agent_session_driver.increment_attempts", lambda num, repo: None)
 
-    real_sub_run = subprocess.run
-
-    def mock_run(cmd, *args, **kwargs):
-        if isinstance(cmd, list) and len(cmd) > 0 and cmd[0] == "git":
-            return real_sub_run(cmd, *args, **kwargs)
-        class MockResult:
-            stdout = "{}"
-            returncode = 0
-        return MockResult()
-
-    monkeypatch.setattr("subprocess.run", mock_run)
+    model_github(recording_gh)
     monkeypatch.setattr("agent_sessions.driver.agent_runner.run_agent", lambda runner_args: 0)
 
     argv = [

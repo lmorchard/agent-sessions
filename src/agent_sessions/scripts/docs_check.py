@@ -35,6 +35,7 @@ and a checker that quietly skips is the same defect one level up.
 
 from __future__ import annotations
 
+import ast
 import os
 import re
 import subprocess
@@ -221,17 +222,97 @@ def check_counts() -> None:
 
 # --- check 4: partition path integrity ---------------------------------------
 
+def _reexport_sources(tree: ast.Module) -> set[str]:
+    """Dotted module names a facade pulls its re-exported names from.
+
+    Relative imports are returned as the bare tail (`.lifecycle` -> `lifecycle`), so a
+    caller matching against a path suffix handles both spellings without resolving the
+    package root.
+    """
+    sources = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module in (None, "__future__"):
+                continue
+            sources.add(node.module)
+    return sources
+
+
 def is_shim(p: Path) -> bool:
-    """True if `p` is a re-export shim (e.g. < 30 lines re-exporting from src/)."""
+    """True if `p` is a re-export facade: it defines nothing and imports names from elsewhere.
+
+    The predicate this replaces was a marker string, or a 30-line ceiling on a file
+    mentioning `from agent_sessions`. It was sized for the top-level shims #205 deleted
+    and it was wrong in both directions. It missed the live instance the guard exists
+    for -- `src/agent_sessions/driver/agent_session_driver.py` carries no marker, runs
+    past 150 lines, and its own docstring opens *"Defines nothing itself"* -- while a
+    short ordinary module that imports one helper and defines one function matched.
+
+    Length was never the property that mattered. Originating nothing is. A module with
+    no function and no class of its own, that imports names from other modules, is a
+    facade however long its `__all__` runs. Both halves are load-bearing: dropping the
+    import requirement would flag a constants module, which the partition has every
+    right to gate.
+
+    Non-Python files fall back to the explicit marker -- `driver/agent-session-driver.sh`
+    is named in the partition and there is nothing to parse.
+    """
     if not p.is_file():
         return False
     try:
         content = p.read_text()
-        if "Shim re-exporting" in content or (len(content.splitlines()) < 30 and "from agent_sessions" in content):
-            return True
     except OSError:
-        pass
-    return False
+        return False
+    if "Shim re-exporting" in content:
+        return True
+    if p.suffix != ".py":
+        return False
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return False
+    defines_own_code = any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        for node in ast.walk(tree)
+    )
+    return not defines_own_code and bool(_reexport_sources(tree))
+
+
+def _facade_stands_alone(facade: Path, section_lines: list[str]) -> set[str]:
+    """Empty if the partition names any module behind `facade`; else the candidates it could name.
+
+    Gating a facade is not the defect. An entry point is worth gating even after it thins
+    out -- `driver/agent-session-driver.sh` is gated on exactly that reasoning. The defect
+    is a facade standing in *for* the implementation, so the partition reads as protecting
+    code it never names. The question is therefore not "is this a facade?" but "does the
+    partition show any awareness of what is behind it?"
+
+    Hence *any*, not *all*. A facade re-exporting five modules does not owe the partition
+    five bullets: unlisted paths are already `needs-review` by default, so nothing is
+    exposed by their absence, and demanding each one would fill the section with entries
+    carrying no reason -- which is the opposite of what it is for. One named source proves
+    the substitution is not happening; zero is the case that misleads a reader.
+
+    Only modules resolving to a real file count, so a facade re-exporting the standard
+    library cannot raise a demand the partition has no way to satisfy.
+    """
+    try:
+        tree = ast.parse(facade.read_text())
+    except (OSError, SyntaxError):
+        return set()
+
+    section = "\n".join(section_lines)
+    candidates = set()
+    for dotted in _reexport_sources(tree):
+        rel = Path(*dotted.split(".")).with_suffix(".py")
+        target = next((c for c in (ROOT / rel, ROOT / "src" / rel) if c.is_file()), None)
+        if target is None:
+            continue
+        named = str(target.relative_to(ROOT))
+        if named in section:
+            return set()
+        candidates.add(named)
+    return candidates
 
 
 def check_partition() -> None:
@@ -274,10 +355,14 @@ def check_partition() -> None:
                         failures.append(f"CLAUDE.md partition path does not exist -> {bt_clean}")
                         continue
                     if resolved.is_file() and is_shim(resolved):
-                        failures.append(
-                            f"CLAUDE.md risk partition names a re-export shim path ({bt_clean}). "
-                            f"Name the underlying implementation in src/agent_sessions/ instead."
-                        )
+                        alone = _facade_stands_alone(resolved, section_lines)
+                        if alone:
+                            failures.append(
+                                f"CLAUDE.md risk partition names a re-export facade ({bt_clean}) "
+                                f"and none of the code behind it, so it reads as gating an "
+                                f"implementation it never names. Name one of: "
+                                f"{', '.join(sorted(alone))}."
+                            )
 
 
 # --- check 5: instruction-file policy parity -------------------------------
@@ -299,9 +384,60 @@ def risk_policy_section(path: Path) -> str:
     return "\n".join(line.rstrip() for line in lines[starts[0] : ends[0]]).strip()
 
 
+#: A pointer file defers to another instruction file rather than restating it. The
+#: ceiling is generous on purpose: it exists to stop a full second instruction file
+#: qualifying as a pointer by mentioning the first, not to police a preamble.
+POINTER_MAX_LINES = 40
+
+
+def is_policy_pointer(path: Path, target: str = "CLAUDE.md") -> bool:
+    """True if `path` defers its risk-path policy to `target` instead of carrying one.
+
+    Three conditions, and the first is the one that matters: a file carrying its own
+    `## Risk-gated paths` section is **not** a pointer, however prominently it also
+    links the target. That half-migrated shape -- a link plus a surviving copy -- is
+    exactly what this whole change exists to prevent, because the copy is what drifts.
+    Linking must not buy an exemption from parity.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    lines = text.splitlines()
+    if any(line.startswith("## Risk-gated paths") for line in lines):
+        return False
+    if len([ln for ln in lines if ln.strip()]) > POINTER_MAX_LINES:
+        return False
+    return target in text
+
+
 def check_risk_policy_parity() -> None:
-    """AGENTS.md and CLAUDE.md must expose one identical risk-path policy."""
-    paths = (ROOT / "AGENTS.md", ROOT / "CLAUDE.md")
+    """One risk-path policy, whether AGENTS.md copies CLAUDE.md's or defers to it.
+
+    The two files were byte-identical and only this section was guarded. Everything
+    outside it drifted: a find-and-replace rewrote a filesystem path to one that exists
+    nowhere, a second invented a `Codex -p` flag, and one section quietly lost a rule
+    from AGENTS.md alone. The guarded part stayed in sync and the unguarded remainder
+    did not -- and there is no bound on how much unguarded remainder there will be. So
+    a pointer is an accepted shape, and the checks are about the ways a pointer can be
+    wrong rather than a relaxation of the rule.
+    """
+    agents, claude = ROOT / "AGENTS.md", ROOT / "CLAUDE.md"
+
+    if is_policy_pointer(agents):
+        # The pointer is only worth anything if the target has a policy to point at.
+        # Without this, deleting CLAUDE.md's section would leave *neither* file with
+        # one and the parity check with nothing to compare -- passing on an empty set,
+        # which is the null-as-positive shape this detector exists to catch.
+        try:
+            risk_policy_section(claude)
+        except (OSError, ValueError) as e:
+            failures.append(
+                f"AGENTS.md defers to CLAUDE.md, which carries no usable risk-path policy: {e}"
+            )
+        return
+
+    paths = (agents, claude)
     try:
         policies = [risk_policy_section(path) for path in paths]
     except (OSError, ValueError) as e:

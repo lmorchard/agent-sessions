@@ -311,3 +311,42 @@ def test_new_test_file_runs_under_gate_test_with_no_makefile_edit():
         "the Makefile changed during this test; C2 requires the new test file to be "
         "picked up with NO Makefile edit"
     )
+
+
+def test_the_xdist_group_marker_is_actually_honoured():
+    """C3. `pytest.mark.xdist_group` is inert without `--dist loadgroup`.
+
+    This file's two checks must not run concurrently: C2 writes a probe test file into
+    the working tree and spawns `make gate-test`, while C1 collects that same tree. The
+    module-level `xdist_group` marker at the top says so -- but xdist honours it only
+    under `--dist loadgroup`, and `make gate-test` ran `-n auto` with no `--dist` at
+    all, so the marker had no effect and the isolation was decorative. Masked today
+    only by the probe file's process-unique name.
+
+    A marker whose precondition is set in a different file is exactly the kind of
+    coupling that rots quietly, so this asserts the precondition rather than trusting
+    it. It derives the flags from the Makefile recipe, so it grades what runs.
+    """
+    recipe = []
+    current = None
+    for line in (REPO_ROOT / "Makefile").read_text().splitlines():
+        if line.startswith("\t"):
+            if current == "gate-test":
+                recipe.append(line)
+            continue
+        current = line.split(":")[0].strip() if ":" in line and not line.startswith("#") else None
+
+    assert recipe, "no `gate-test` recipe found; this check's premise is gone"
+    joined = " ".join(recipe)
+    if "-n " not in joined and "--numprocesses" not in joined:
+        pytest.skip("gate-test no longer runs xdist, so the marker is moot")
+    # Read as a flag and its value, not as a substring. `assert "--dist loadgroup" in
+    # joined` was the first form, and a `# needs --dist loadgroup` comment inside the
+    # recipe satisfies it exactly as well as the flag does -- the presence-grep defect,
+    # in the suite of the check that grades wiring. `assertion_lint` catches it now.
+    tokens = joined.split()
+    dist = [tokens[i + 1] for i, t in enumerate(tokens) if t == "--dist" and i + 1 < len(tokens)]
+    assert dist == ["loadgroup"], (
+        "gate-test runs xdist without `--dist loadgroup`, so this file's xdist_group "
+        f"marker does nothing and C1/C2 can land on different workers. Recipe: {joined}"
+    )

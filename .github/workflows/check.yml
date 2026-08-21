@@ -8,22 +8,52 @@ on:
     branches:
       - main
 
+# The workflow reads the repository and nothing else. Repository settings currently
+# default the token to read-only, but that is a setting and this is the repo -- a
+# setting can be changed without a diff, and CLAUDE.md gates this directory precisely
+# because it defines the environment the checks run in.
+permissions:
+  contents: read
+
+# One run per ref. Superseded PR pushes are cancelled; main is not, so every commit on
+# the default branch keeps its own result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    # The default is six hours. `make check` runs in well under a minute locally; the
+    # ceiling is here to bound a hang, not to be tight.
+    timeout-minutes: 15
     steps:
+      # Every action below is pinned by commit SHA, with the version it corresponded to
+      # in a trailing comment. A mutable major tag is a tag someone else can move, and
+      # this directory is gated on the reasoning that it defines the checks' environment
+      # -- so taking `@v4` on trust was the loudest internal inconsistency in the repo.
+      # tests/scripts/test_workflow_pinning.py enforces the shape; the comments are for
+      # a human reading the diff, and are not what the check grades.
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Load-bearing: `commit-lint` scopes to `origin/main..HEAD`, so a shallow
+          # clone leaves it grading nothing while still exiting 0.
           fetch-depth: 0
 
+      # Deliberate, not redundant. `uv` would otherwise provision whatever interpreter
+      # satisfies `requires-python = ">=3.11"`, which is a moving target; pinning the
+      # floor means CI grades the oldest version the project claims to support, while
+      # local development runs ahead of it.
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.11" # A reasonable default if none is strictly specified.
+          python-version: "3.11"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v2
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
+      # The whole gate, and nothing else. Zero drift between what CI grades and what a
+      # developer runs, by construction -- which is why this file stays this short.
       - name: Run checks
         run: make check

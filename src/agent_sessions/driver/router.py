@@ -13,8 +13,11 @@ from __future__ import annotations
 
 from typing import Any
 
-PARK_LABEL = "agent-session:needs-human"
-MERGE_READY_LABEL = "agent-session:merge-ready"
+from agent_sessions.driver.labels import (  # noqa: F401 - re-exported for existing importers
+    MERGE_READY_LABEL,
+    PARK_LABEL,
+    is_specced,
+)
 
 
 def select(
@@ -82,13 +85,6 @@ def select(
     else:
         filtered_issues = open_issues
 
-    def is_specced(iss: dict) -> bool:
-        labels = [l.get("name", "") for l in iss.get("labels", []) if isinstance(l, dict)]
-        if "agent-session:spec" in labels:
-            return True
-        body = iss.get("body", "") or ""
-        return "<!-- agent-session:spec -->" in body
-
     candidates_json = [
         iss
         for iss in filtered_issues
@@ -103,7 +99,12 @@ def select(
     p1_unblock: list[tuple[str, str]] = []
     p2_execute: list[tuple[str, str]] = []
     p3_groom: list[tuple[str, str]] = []
-    p4_escalate: list[tuple[str, str]] = []
+    # There is no P4. `design.md` documented one -- "P4: Escalate: issues reaching
+    # `agent-session:attempt-3`" -- and a `p4_escalate` list was declared here and
+    # concatenated below, but nothing ever appended to it. Attempt-exhausted issues are
+    # *parked* instead, by the `MAX_PHASE_ATTEMPTS` branches in each rung. An
+    # always-empty list in the concatenation read as a live priority to anyone checking
+    # whether the documented ladder was implemented; it wasn't, and now nothing says so.
 
     # Process markerless issues
     markerless_list = []
@@ -209,7 +210,7 @@ def select(
                     p2_execute.append((n, phase))
                     messages.append(f"  ELIGIBLE #{n}  tier: auto-ok (Priority 2: Execute - {phase})")
 
-    all_candidates: list[tuple[str, str]] = p1_unblock + p2_execute + p3_groom + p4_escalate
+    all_candidates: list[tuple[str, str]] = p1_unblock + p2_execute + p3_groom
 
     # Single issue override
     if issue_override:

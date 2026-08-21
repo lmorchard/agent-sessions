@@ -6,11 +6,9 @@ the agent must not be able to write to GitHub, whatever the agent decides to run
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from agent_sessions.driver import credentials  # noqa: E402
+from agent_sessions.driver import credentials
 
 READ = "ghp_read_only_token"
 WRITE = "ghp_write_capable_token"

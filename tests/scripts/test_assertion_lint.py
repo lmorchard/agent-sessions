@@ -31,12 +31,10 @@ repo path on purpose. It is unaffected by the autouse `isolate` fixture because
 `scan_file` takes an explicit path and does not consult `ROOT`.
 """
 
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from agent_sessions.scripts import assertion_lint
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -169,3 +167,115 @@ def test_files_outside_the_declared_scope_are_not_linted(isolate):
     write(isolate, "driver/agent-session-driver.sh", PRESENCE_GREP)
     assertion_lint.lint_files()
     assert assertion_lint.failures == []
+
+
+# --- the same defect, in the language this repo now writes tests in -----------
+#
+# The `grep -q` rule above guards an idiom that no longer occurs. The Bash fixture
+# suites it was written for were deleted by the 2026-08-09 conversion, and measured on
+# this branch there is **not one occurrence anywhere under `tests/`** outside this
+# file's own fixtures -- nor can there be, because Python tests do not shell out to
+# grep. A detector reporting a clean bill over a defect class that cannot reach it is
+# `findings.md` defect class 6, inside a detector.
+#
+# The class itself did not go away; it changed shape:
+#
+#     assert "some literal" in SOME_CHECKED_IN_FILE.read_text()
+#
+# which passes when the literal appears in a comment, exactly as the grep did. Two live
+# instances existed when this was written, both introduced during #261's own audit --
+# by the session auditing for them, hours apart.
+#
+# **Two stages, and the first is what makes it usable.** X1 proposed tracing the
+# assertion's right-hand side back to a `read_text()` call; measured, that flagged ten
+# assertions of which one was real, because assertions on *generated* output -- a prompt
+# a run wrote, a rendered diagram -- look identical. Filtering by whether the module
+# reads a **checked-in** artifact first drops every one of those in a single move.
+
+SOURCE_ASSERTION = '''
+from pathlib import Path
+
+
+def test_the_recipe_uses_the_flag():
+    text = (REPO_ROOT / "Makefile").read_text()
+    assert "--dist loadgroup" in text
+'''
+
+GENERATED_OUTPUT_ASSERTION = '''
+import subprocess
+
+
+def test_the_plan_carries_the_flag(tmp_path):
+    out = subprocess.run(["make", "-n", "check"], capture_output=True, text=True).stdout
+    assert "--dist loadgroup" in out
+'''
+
+FIXTURE_STRING = '''
+SAMPLE = """
+def test_something():
+    assert "--dist loadgroup" in text
+"""
+
+
+def test_the_detector_reports_it():
+    assert scan(SAMPLE) == [3]
+'''
+
+
+def test_a_literal_asserted_against_checked_in_text_is_reported(isolate):
+    """C1. The live shape, and the one that had two instances."""
+    f = write(isolate, "tests/scripts/test_example.py", SOURCE_ASSERTION)
+    found = assertion_lint.scan_source_assertions(f)
+
+    # Line derived from the fixture rather than counted by hand -- a hardcoded number
+    # here is the same staleness trap the rest of this audit has been removing.
+    expected = SOURCE_ASSERTION.split("\n").index('    assert "--dist loadgroup" in text') + 1
+    assert [n for n, _ in found] == [expected], found
+    assert found[0][1] == "'--dist loadgroup' in text"
+
+
+def test_the_same_assertion_against_generated_output_is_not_reported(isolate):
+    """C2. Stage one is the whole reason this is usable rather than noisy.
+
+    Asserting that a command's output contains a string is an ordinary behavioural
+    assertion. Without this filter the rule flags nine of those for every real
+    instance, which is the measurement that sent X1 back to Les.
+    """
+    f = write(isolate, "tests/scripts/test_example.py", GENERATED_OUTPUT_ASSERTION)
+    assert assertion_lint.scan_source_assertions(f) == []
+
+
+def test_an_assertion_inside_a_fixture_string_is_not_reported(isolate):
+    """C3. Why this rule needs no narrowed glob, where the `grep -q` rule did.
+
+    `commit_lint.py` records that `assertion_lint` "had to solve the same self-matching
+    problem by narrowing its glob" -- a detector whose fixtures contain the very idiom it
+    matches cannot scan its own suite. That is a property of *textual* matching. An AST
+    rule sees a fixture as a string constant and a real assertion as an `Assert` node, so
+    it can scan every test file in the repo, including this one.
+    """
+    f = write(isolate, "tests/scripts/test_example.py", FIXTURE_STRING)
+    assert assertion_lint.scan_source_assertions(f) == []
+
+
+def test_a_non_literal_membership_test_is_not_reported(isolate):
+    """C4. `assert name in text` is not a spelling check; the name could be anything."""
+    body = SOURCE_ASSERTION.replace(
+        'assert "--dist loadgroup" in text', "flag = compute()\n    assert flag in text"
+    )
+    f = write(isolate, "tests/scripts/test_example.py", body)
+    assert assertion_lint.scan_source_assertions(f) == []
+
+
+def test_the_live_suites_carry_no_source_text_assertion():
+    """C5. The negative fixture, against the real tree rather than a synthetic one.
+
+    A detector that flags everything passes a synthetic clean file; it cannot pass this.
+    Two instances existed when the rule was written and were fixed with it.
+    """
+    offenders = []
+    for pattern in assertion_lint.SOURCE_ASSERTION_SCOPE:
+        for path in sorted(REPO_ROOT.glob(pattern)):
+            for lineno, text in assertion_lint.scan_source_assertions(path):
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {text}")
+    assert not offenders, "\n".join(offenders)

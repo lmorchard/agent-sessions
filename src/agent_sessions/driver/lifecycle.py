@@ -78,8 +78,10 @@ class RunContext:
 
 @dataclass(frozen=True)
 class SelectionResult:
-    board_items: list[dict]
-    open_issues: list[dict]
+    # `board_items` and `open_issues` used to be carried here too. Both were populated
+    # and neither was ever read off the result -- selection uses the locals and returns
+    # what the caller needs. A field nobody reads still has to be kept correct by anyone
+    # editing selection, and pays nothing back.
     open_prs: list[dict]
     candidates: list[tuple[str, str]]
     board_item_ids: dict[str, str]
@@ -93,14 +95,12 @@ class InvocationResult:
     rundir: Path
     raw_output: Path
     stderr_output: Path
-    writes_file: Path
     exit_code: int
     cost: float
     session_id: str
     cost_known: bool
     final_text: str
     writes_result: dict
-    run_repo_path: Path
 
 
 @dataclass(frozen=True)
@@ -454,6 +454,57 @@ def preflight(argv: list[str] | None = None) -> RunContext:
     )
 
 
+def append_run_row(
+    ctx: RunContext,
+    *,
+    issue_num: str,
+    phase: str,
+    ts: str,
+    exit_code: int,
+    cost: float,
+    session_id: str,
+    outcome: str,
+    reason: str,
+    prurl: str,
+    changed_files: int | None,
+    base_ref: str,
+    head_sha: str,
+    rundir: Path | None,
+    writes: dict,
+) -> None:
+    """Append one row to `runs.jsonl`, the project's per-run provenance ledger.
+
+    One builder, two callers, because they had drifted to the point of disagreeing
+    about whether a run was recorded at all. `classify_and_record` wrote the row;
+    `run_classify_only` -- the recovery path an operator reaches for after a run dies --
+    printed "recorded to runs.jsonl" and appended nothing. Park state *was* applied, so
+    the outcome was that a dead run left the issue parked and the ledger with no row for
+    the run that parked it. Precisely the run you most want a record of.
+
+    Keeping the shape in one place is also what stops the two paths reporting the same
+    run differently, which #261's T3 names as a live risk on the pair.
+    """
+    row = {
+        "issue": int(issue_num),
+        "repo": ctx.repo,
+        "phase": phase,
+        "started": ts,
+        "exit": exit_code,
+        "cost_usd": cost,
+        "session_id": session_id,
+        "outcome": outcome,
+        "reason": reason,
+        "pr": prurl,
+        "changed_files": changed_files if changed_files is not None else 0,
+        "base_diff_sha": f"{base_ref}..{head_sha[:8]}" if (base_ref and head_sha) else head_sha[:8],
+        "run_dir": str(rundir) if rundir else "",
+        "writes": writes,
+        "provenance": {},
+    }
+    with open(ctx.runs_log, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row) + "\n")
+
+
 def run_classify_only(ctx: RunContext) -> int:
     from agent_sessions.driver import agent_session_driver
 
@@ -476,6 +527,18 @@ def run_classify_only(ctx: RunContext) -> int:
     cost = 0.0
     session = ""
     ts = output.now().strftime("%Y%m%dT%H%M%SZ")
+
+    # The dead run's phase, if its marker survived. `evidence.py` groups by `phase`, so
+    # a recovered row without one is a run that happened and cannot be counted. Markers
+    # written before the field existed simply have none; that is a blank, not a guess.
+    phase = ""
+    if ctx.inflight_file.is_file():
+        try:
+            inflight = json.loads(ctx.inflight_file.read_text(encoding="utf-8"))
+            if str(inflight.get("issue", "")) == str(issue_num):
+                phase = str(inflight.get("phase", "") or "")
+        except Exception:
+            phase = ""
 
     if rundir and (rundir / "stream.jsonl").is_file():
         say(f"  run dir  {rundir}")
@@ -517,8 +580,13 @@ def run_classify_only(ctx: RunContext) -> int:
 
         failed_ci, _ = agent_session_driver.check_pr_ci_status(ctx.repo, pr_num)
         ci_checks = "failed" if failed_ci > 0 else "pass"
+        # The block, not the body. `gate_fields` harvests every `^key: value` line it
+        # is handed and the first occurrence wins, so an ordinary PR summary above the
+        # `## Merge gate` heading could supply a row -- including `verdict`, turning an
+        # honest `human-merge-required` into `gate-eligible`. `extract_gate` is what
+        # every test in test_gate.py calls first; production did not.
         outcome_res = gate.classify(
-            pr_body,
+            gate.extract_gate(pr_body),
             head_sha=head_sha,
             ci_checks=ci_checks,
             changed_files=changed_files,
@@ -531,6 +599,28 @@ def run_classify_only(ctx: RunContext) -> int:
     say(f"  reason   {reason}")
     if prurl:
         say(f"  pr       {prurl}")
+
+    # Record the run. This is what the closing line has always claimed and, until
+    # #261, never did -- see `append_run_row`. `exit` is -1 because the run's own
+    # process never reported one: that is the situation this path exists for, and a
+    # recovered row saying `exit: 0` would be a fabrication.
+    append_run_row(
+        ctx,
+        issue_num=issue_num,
+        phase=phase,
+        ts=ts,
+        exit_code=-1,
+        cost=cost,
+        session_id=session,
+        outcome=outcome,
+        reason=reason,
+        prurl=prurl,
+        changed_files=None,
+        base_ref="",
+        head_sha="",
+        rundir=rundir,
+        writes={"recorded": 0, "applied": 0, "ok": True},
+    )
 
     agent_session_driver.apply_park_state(issue_num, outcome, ts, reason, ctx.repo, ctx.state_dir, ctx.parked_log)
     if ctx.inflight_file.is_file():
@@ -698,8 +788,6 @@ def select_queue(ctx: RunContext) -> SelectionResult:
         say(f"cleaned {len(removed)} stale workspace(s)")
 
     return SelectionResult(
-        board_items=board_items,
-        open_issues=open_issues,
         open_prs=open_prs,
         candidates=locked_candidates,
         board_item_ids=board_item_ids,
@@ -719,24 +807,26 @@ def prepare_workspace(ctx: RunContext, issue_num: str) -> Path:
     return ctx.repo_path
 
 
-def invoke_agent(
+def gather_extra_context(
     ctx: RunContext,
     issue_num: str,
     phase: str,
-    run_repo_path: Path,
     open_prs: list[dict],
-    board_item_ids: dict[str, str],
-) -> InvocationResult:
-    from agent_sessions.driver import agent_session_driver
+) -> str:
+    """Everything the prompt needs from GitHub beyond the issue URL.
 
-    agent_session_driver.increment_attempts(issue_num, ctx.repo)
-    url = f"https://github.com/{ctx.repo}/issues/{issue_num}"
-    ts = output.now().strftime("%Y%m%dT%H%M%SZ")
-    rundir = ctx.runs_dir / f"{issue_num}-{ts}"
-    rundir.mkdir(parents=True, exist_ok=True)
-    raw_output = rundir / "stream.jsonl"
-    stderr_output = rundir / "stderr.txt"
-    writes_file = rundir / "writes.jsonl"
+    Three independent reads appending to one string, extracted from `invoke_agent` --
+    the PR handoff state (draft body, comments, unresolved threads, failing checks), the
+    issue itself (title, labels, body, recent comments), and, for `triage` and `refine`,
+    the comment reactions those phases read approval from.
+
+    Each is wrapped in its own `except Exception: pass`, and that is deliberate rather
+    than inherited: extra context is an optimisation, and a run that cannot fetch it
+    should proceed with less rather than not run. The cost is that a persistently
+    failing read is invisible here -- it shows up as an agent that seems to have
+    forgotten something.
+    """
+    from agent_sessions.driver import agent_session_driver
 
     extra_context = ""
     prline = gh_query.pr_for_issue(issue_num, open_prs)
@@ -872,6 +962,100 @@ def invoke_agent(
             except Exception:
                 pass
 
+    return extra_context
+
+
+def run_request_review(
+    ctx: RunContext,
+    issue_num: str,
+    open_prs: list[dict],
+    raw_output: Path,
+    writes_file: Path,
+) -> tuple[int, float, str, bool, str, dict]:
+    """The `request_review` phase, which runs with no model call at all.
+
+    Extracted from `invoke_agent`, where it sat as a 50-line branch in front of the
+    backend dispatch it has nothing to do with. It is the one phase the driver executes
+    itself: requesting a review is a fixed GitHub operation with no judgment in it, so
+    paying for an agent to decide how to do it buys nothing.
+
+    Returns the same shape `invoke_agent` needs from a real run:
+    `(exit code, cost, session id, cost_known, final text, parsed result)`.
+    """
+    say("  (Executing request_review deterministically)")
+    ret = 0
+    cost = 0.0
+    cost_known = True
+    session_id = "deterministic"
+    final_text = ""
+
+    try:
+        prs_json = open_prs
+        prline = gh_query.pr_for_issue(issue_num, prs_json)
+        if prline:
+            pr_num = prline.split("\t")[0]
+
+            res_owner = subprocess.run(
+                ["gh", "repo", "view", ctx.repo, "--json", "owner"],
+                capture_output=True, text=True, check=True
+            )
+            try:
+                owner_data = json.loads(res_owner.stdout)
+                owner = owner_data.get("owner", {}).get("login", "lmorchard") if isinstance(owner_data, dict) else "lmorchard"
+            except Exception:
+                owner = "lmorchard"
+
+            manifest_entry = {
+                "kind": "pr_edit",
+                "pr": int(pr_num) if str(pr_num).isdigit() else pr_num,
+                "add_reviewer": [owner]
+            }
+            with open(writes_file, "a") as wf:
+                wf.write(json.dumps(manifest_entry) + "\n")
+
+            final_text = f"Requested review deterministically from {owner} on PR {pr_num}."
+            raw_output.write_text(final_text, encoding="utf-8")
+        else:
+            ret = 1
+            final_text = "No open PR found for this issue."
+            raw_output.write_text(final_text, encoding="utf-8")
+
+    except Exception as e:
+        ret = 1
+        final_text = f"Deterministic request_review failed: {e}"
+        raw_output.write_text(final_text, encoding="utf-8")
+
+    parsed = {
+        "final": final_text,
+        "total_cost_usd": cost,
+        "session_id": session_id,
+        "cost_known": cost_known
+    }
+
+    return ret, cost, session_id, cost_known, final_text, parsed
+
+
+def invoke_agent(
+    ctx: RunContext,
+    issue_num: str,
+    phase: str,
+    run_repo_path: Path,
+    open_prs: list[dict],
+    board_item_ids: dict[str, str],
+) -> InvocationResult:
+    from agent_sessions.driver import agent_session_driver
+
+    agent_session_driver.increment_attempts(issue_num, ctx.repo)
+    url = f"https://github.com/{ctx.repo}/issues/{issue_num}"
+    ts = output.now().strftime("%Y%m%dT%H%M%SZ")
+    rundir = ctx.runs_dir / f"{issue_num}-{ts}"
+    rundir.mkdir(parents=True, exist_ok=True)
+    raw_output = rundir / "stream.jsonl"
+    stderr_output = rundir / "stderr.txt"
+    writes_file = rundir / "writes.jsonl"
+
+    extra_context = gather_extra_context(ctx, issue_num, phase, open_prs)
+
     prompt = agent_session_driver.build_prompt(url, phase, ctx.skill_dir, writes_file, extra_context=extra_context)
     prompt_file = rundir / "prompt.txt"
     prompt_file.write_text(prompt, encoding="utf-8")
@@ -899,8 +1083,18 @@ def invoke_agent(
             say(f"  NOTE: moved issue #{issue_num} to 'In progress' on board {ctx.board}")
 
     # Write inflight marker
+    # `phase` is here so `--classify-only` can put it in the recovered ledger row.
+    # It is `evidence.py`'s primary grouping key, and a recovered run without one
+    # groups under "unknown" -- the state the pre-#27 archive was in.
     ctx.inflight_file.write_text(
-        json.dumps({"issue": int(issue_num), "started": ts, "run_dir": str(rundir), "url": url}), encoding="utf-8"
+        json.dumps({
+            "issue": int(issue_num),
+            "started": ts,
+            "run_dir": str(rundir),
+            "url": url,
+            "phase": phase,
+        }),
+        encoding="utf-8",
     )
 
     if phase not in PHASE_TIERS:
@@ -908,55 +1102,9 @@ def invoke_agent(
     tier = PHASE_TIERS[phase]
 
     if phase == "request_review":
-        say("  (Executing request_review deterministically)")
-        ret = 0
-        cost = 0.0
-        cost_known = True
-        session_id = "deterministic"
-        final_text = ""
-
-        try:
-            prs_json = open_prs
-            prline = gh_query.pr_for_issue(issue_num, prs_json)
-            if prline:
-                pr_num = prline.split("\t")[0]
-
-                res_owner = subprocess.run(
-                    ["gh", "repo", "view", ctx.repo, "--json", "owner"],
-                    capture_output=True, text=True, check=True
-                )
-                try:
-                    owner_data = json.loads(res_owner.stdout)
-                    owner = owner_data.get("owner", {}).get("login", "lmorchard") if isinstance(owner_data, dict) else "lmorchard"
-                except Exception:
-                    owner = "lmorchard"
-
-                manifest_entry = {
-                    "kind": "pr_edit",
-                    "pr": int(pr_num) if str(pr_num).isdigit() else pr_num,
-                    "add_reviewer": [owner]
-                }
-                with open(writes_file, "a") as wf:
-                    wf.write(json.dumps(manifest_entry) + "\n")
-
-                final_text = f"Requested review deterministically from {owner} on PR {pr_num}."
-                raw_output.write_text(final_text, encoding="utf-8")
-            else:
-                ret = 1
-                final_text = "No open PR found for this issue."
-                raw_output.write_text(final_text, encoding="utf-8")
-
-        except Exception as e:
-            ret = 1
-            final_text = f"Deterministic request_review failed: {e}"
-            raw_output.write_text(final_text, encoding="utf-8")
-
-        parsed = {
-            "final": final_text,
-            "total_cost_usd": cost,
-            "session_id": session_id,
-            "cost_known": cost_known
-        }
+        ret, cost, session_id, cost_known, final_text, parsed = run_request_review(
+            ctx, issue_num, open_prs, raw_output, writes_file
+        )
     else:
         runner_args = [
             "--backend", ctx.backend,
@@ -1006,14 +1154,12 @@ def invoke_agent(
         rundir=rundir,
         raw_output=raw_output,
         stderr_output=stderr_output,
-        writes_file=writes_file,
         exit_code=ret,
         cost=cost,
         session_id=session_id,
         cost_known=cost_known,
         final_text=final_text,
         writes_result=writes_result,
-        run_repo_path=run_repo_path,
     )
 
 
@@ -1121,8 +1267,9 @@ def classify_and_record(
             else:
                 failed_ci, _ = agent_session_driver.check_pr_ci_status(ctx.repo, prnum)
             ci_checks = "failed" if failed_ci > 0 else "pass"
+            # See run_classify_only: the block, not the body.
             outcome_res = gate.classify(
-                pr_body,
+                gate.extract_gate(pr_body),
                 head_sha=head_sha,
                 ci_checks=ci_checks,
                 changed_files=changed_files,
@@ -1136,7 +1283,11 @@ def classify_and_record(
     if write_note:
         reason = f"{reason} [{write_note}]"
 
-    if outcome in ("incomplete", "parked", "no-gate") and inv.cost >= (ctx.max_budget_usd * 0.95):
+    # `gate.budget_reclass` owns this rule, records why the threshold is 95%, and is
+    # what test_gate.py exercises. The inline copy here was the live one, and it
+    # differed: no `budget > 0` guard, so with a zero ceiling every verdict-less
+    # outcome reclassified as budget-exhausted on a run that had spent nothing.
+    if gate.budget_reclass(outcome, inv.cost, ctx.max_budget_usd) == "budget-exhausted":
         outcome = "budget-exhausted"
         reason = f"spent ${inv.cost} of ${ctx.max_budget_usd} (>=95%) and never reached the gate"
 
@@ -1146,29 +1297,27 @@ def classify_and_record(
         say(f"  pr       {prurl}")
 
     # Record run
-    row = {
-        "issue": int(inv.issue_num),
-        "repo": ctx.repo,
-        "phase": inv.phase,
-        "started": inv.ts,
-        "exit": inv.exit_code,
-        "cost_usd": inv.cost,
-        "session_id": inv.session_id,
-        "outcome": outcome,
-        "reason": reason,
-        "pr": prurl,
-        "changed_files": changed_files if changed_files is not None else 0,
-        "base_diff_sha": f"{base_ref}..{head_sha[:8]}" if (base_ref and head_sha) else head_sha[:8],
-        "run_dir": str(inv.rundir),
-        "writes": {
+    append_run_row(
+        ctx,
+        issue_num=inv.issue_num,
+        phase=inv.phase,
+        ts=inv.ts,
+        exit_code=inv.exit_code,
+        cost=inv.cost,
+        session_id=inv.session_id,
+        outcome=outcome,
+        reason=reason,
+        prurl=prurl,
+        changed_files=changed_files,
+        base_ref=base_ref,
+        head_sha=head_sha,
+        rundir=inv.rundir,
+        writes={
             "recorded": len(inv.writes_result["entries"]),
             "applied": inv.writes_result["applied"],
             "ok": inv.writes_result["ok"],
         },
-        "provenance": {},
-    }
-    with open(ctx.runs_log, "a", encoding="utf-8") as f:
-        f.write(json.dumps(row) + "\n")
+    )
 
     agent_session_driver.apply_park_state(inv.issue_num, outcome, inv.ts, reason, ctx.repo, ctx.state_dir, ctx.parked_log)
 

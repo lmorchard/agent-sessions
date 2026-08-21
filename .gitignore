@@ -12,3 +12,16 @@ node_modules/
 .worktrees/
 
 *.private-key.pem
+
+# The three tool caches were ignored only because pytest, ruff and mypy each write a
+# nested .gitignore containing `*`. Depending on that is fragile: a --no-cache flag, or
+# a tool that stops doing it, silently un-ignores tens of megabytes. Name them here.
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Spill from a misdirected HOME. Benign today -- `gh`'s device-id -- but the same
+# misdirection writes `gh`'s token-bearing hosts.yml, and an unignored directory is
+# exactly where you do not want that to land. tests/conftest.py pins XDG_STATE_HOME;
+# this is the belt to that suspenders.
+.local/

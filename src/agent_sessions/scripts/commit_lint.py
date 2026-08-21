@@ -102,7 +102,8 @@ and has not yet merged. History is immutable and already contains the one known
 instance; re-reporting it forever would train the operator to ignore the check.
 ``--all`` scans everything, which is how the regression guard is run by hand.
 
-``assertion_lint.py`` and stay portable to a GHA runner.
+Implementation is the standard library plus one ``git log`` call -- no third-party
+dependency, matching ``assertion_lint.py``, so both stay portable to a GHA runner.
 """
 
 from __future__ import annotations

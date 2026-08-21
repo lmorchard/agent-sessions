@@ -58,8 +58,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from agent_sessions.driver import agent_runner, agent_session_driver, credentials, locks, output
+from agent_sessions.driver import agent_runner, agent_session_driver, credentials, gate, locks, output
 
 REPO = "owner/repo"
 BOARD = "owner/9"
@@ -182,15 +181,23 @@ def spec_body(tier_line, extra=""):
     return f"<!-- agent-session:spec -->\n\n## Tier: {tier_line}\n{extra}"
 
 
-def gate_body(issue_number, *, verdict, ci_row, reason="all gate rows satisfied"):
+def gate_body(issue_number, *, verdict, ci_row, reason="all gate rows satisfied", prose=""):
     """A PR body carrying a merge-gate block.
 
-    Note the driver hands `gate.classify` the *whole PR body*, not the extracted
-    block, which is why the yaml lines must sit at column zero — `gate_field` anchors
-    on `^key:`. Pinned here as behaviour, not endorsed; #184 is where that boundary
-    gets a type.
+    The yaml lines sit at column zero because `gate_field` anchors on `^key:`.
+
+    This docstring used to add that the driver hands `gate.classify` the *whole* PR
+    body rather than the extracted block, "pinned here as behaviour, not endorsed;
+    #184 is where that boundary gets a type." #184 landed the schema half and closed
+    without touching the extraction, so the note outlived its pointer. The driver now
+    extracts the block first (#261, C5), and
+    `test_prose_above_the_gate_block_cannot_supply_a_gate_row` is what holds that.
+
+    `prose` puts text *above* the `## Merge gate` heading, which is where an ordinary
+    PR summary lives and where the old behaviour let a stray `key: value` line win.
     """
-    return f"""Fixes #{issue_number}
+    lead = f"{prose}\n\n" if prose else ""
+    return lead + f"""Fixes #{issue_number}
 
 ## Merge gate
 
@@ -324,6 +331,11 @@ class FakeGitHub:
                     if sub is None:
                         sub = tok
                     i += 1
+            # Widening the annotation to `str | None` would let a malformed call through
+            # as a silent `(None, ...)` row that no expected-list would ever match on
+            # purpose. Every `label_manager` invocation carries a subcommand; if one does
+            # not, that is the finding.
+            assert sub is not None, f"label_manager invoked with no subcommand: {rest}"
             ops.append((sub, issue_num, count))
         return ops
 
@@ -887,9 +899,12 @@ def test_pass_ending_gate_eligible(loop):
     }
     assert (rundir / "final.txt").read_text(encoding="utf-8") == "Graded the gate: eligible."
     assert (rundir / "stream.jsonl").is_file()
-    # `main()` passes the whole PR body to `gate.classify`, so `gate.yaml` is the
-    # whole body rather than just the block. Pinned as behaviour; #184 is the fix.
-    assert (rundir / "gate.yaml").read_text(encoding="utf-8") == gh.pr_by_number(201)["body"]
+    # `gate.yaml` is the extracted block. This used to assert the *whole PR body*,
+    # pinning the defect as behaviour and citing #184 as the fix -- #184 landed the
+    # schema validation and closed without touching the extraction. #261's C5 did.
+    assert (rundir / "gate.yaml").read_text(encoding="utf-8") == gate.extract_gate(
+        gh.pr_by_number(201)["body"]
+    )
 
 
 def test_pass_with_empty_diff_is_classified_as_gate_human(loop):
@@ -1604,3 +1619,408 @@ def test_pr_with_merge_conflict_is_eligible_for_fix_conflict(loop):
 
     assert code == 0
     assert "ELIGIBLE #101  tier: auto-ok (Priority 1: Unblock - fix_conflict)" in out
+
+
+# --- C5: the oracle must read the gate block, not the whole PR body -----------
+
+
+def test_prose_above_the_gate_block_cannot_supply_a_gate_row(loop):
+    """The gate block is the channel. Everything else in the body is prose.
+
+    `gate.extract_gate` exists to find the block, and `test_gate.py` exercises
+    `classify(extract_gate(body))` at every one of its call sites. Production called
+    `classify(body)` -- so the tested path and the run path differed **at the oracle**,
+    and `gate_fields` harvested every `^key: value` line anywhere in the body.
+
+    First occurrence wins, and an ordinary PR summary sits above the gate block. So a
+    run whose gate block honestly voted `human-merge-required` was classified
+    `gate-eligible` because the phrase `verdict: eligible-for-auto-merge` appeared in
+    its own summary -- and that difference decides whether the issue is parked for a
+    human or labelled merge-ready.
+
+    Nothing exotic is needed to reach it. A PR that quotes a previous run's verdict
+    while explaining what it fixed is a PR about this harness.
+    """
+    head = "abc1234def5678000000000000000000000000ff"
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[
+            pr(
+                201,
+                body=gate_body(
+                    101,
+                    verdict="human-merge-required",
+                    ci_row="2/2 pass @ abc1234",
+                    reason="one reviewer thread is still open",
+                    prose=(
+                        "## Summary\n\n"
+                        "The run before this one recorded\n\n"
+                        "verdict: eligible-for-auto-merge\n\n"
+                        "against a stale head, which is what this PR fixes."
+                    ),
+                ),
+                closes=[101],
+                head_oid=head,
+                checks=[("lint", "pass"), ("test", "pass")],
+                threads=[True],
+                review_requests=1,
+                reviews=1,
+            )
+        ],
+        board_items=[board_item(101)],
+    )
+
+    code, out = loop.run(gh, agent=StubAgent(stream=agent_stream()))
+
+    assert code == 0
+    assert "outcome  gate-human" in out, (
+        "the gate block voted human-merge-required; a verdict quoted in the summary "
+        f"must not override it. Got:\n{out}"
+    )
+    assert loop.rows("runs.jsonl")[0]["outcome"] == "gate-human"
+
+    # gate-eligible and gate-human route differently, which is the cost of getting it
+    # wrong: one labels the PR merge-ready, the other parks the issue for a human.
+    assert agent_session_driver.MERGE_READY_LABEL not in gh.labels_of(101)
+    assert agent_session_driver.PARK_LABEL in gh.labels_of(101)
+
+
+def test_the_recorded_gate_artifact_is_the_block_and_not_the_whole_body(loop):
+    """`gate.yaml` is the run's provenance, read by a human at the merge gate.
+
+    `classify` returns the text it was handed as `gate`, and the driver writes that to
+    the run directory. Handed the whole body, it recorded the entire PR description --
+    on a real PR, 2167 bytes of summary and design notes in place of a 305-byte block.
+    """
+    head = "abc1234def5678000000000000000000000000ff"
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[
+            pr(
+                201,
+                body=gate_body(
+                    101,
+                    verdict="eligible-for-auto-merge",
+                    ci_row="2/2 pass @ abc1234",
+                    prose="## Summary\n\nRewrites the widget layer.",
+                ),
+                closes=[101],
+                head_oid=head,
+                checks=[("lint", "pass"), ("test", "pass")],
+                threads=[True],
+                review_requests=1,
+                reviews=1,
+            )
+        ],
+        board_items=[board_item(101)],
+    )
+
+    loop.run(gh, agent=StubAgent(stream=agent_stream()))
+
+    recorded = (loop.run_dir(101) / "gate.yaml").read_text(encoding="utf-8")
+    assert recorded.startswith("verdict:"), f"gate.yaml is not the gate block:\n{recorded}"
+    assert "Rewrites the widget layer" not in recorded
+    assert "## Merge gate" not in recorded
+
+
+def test_a_zero_budget_does_not_reclassify_a_free_run_as_budget_exhausted(loop):
+    """`gate.budget_reclass` guards on `budget > 0`. The inline copy did not.
+
+    `--max-budget-usd 0` is accepted -- the flag is a bare `type=float` with no
+    lower bound, and `MAX_BUDGET_USD=0` in the environment reaches the same place.
+    With a zero ceiling the inline rule read `cost >= 0 * 0.95`, true for every run
+    including one that spent nothing, so any verdict-less outcome was relabelled
+    `budget-exhausted` and reported as having spent $0.0 of $0.0.
+
+    That is not cosmetic: `budget-exhausted` is one of the outcomes that stops the
+    loop, on the reasoning that the next issue inherits the same too-small ceiling.
+    A misfire here halts a burndown and blames the budget.
+
+    The tested function has said `budget > 0` since it was written; it was simply
+    never the one running.
+    """
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent(stream=agent_stream(final="Opened nothing.", cost=0.0, session="sess-z"))
+
+    code, out = loop.run(gh, agent=agent, argv=["--max-budget-usd", "0"])
+
+    assert code == 0
+    assert "budget-exhausted" not in out, (
+        "a run that spent nothing under a zero ceiling is not budget-exhausted; "
+        f"got:\n{out}"
+    )
+    assert loop.rows("runs.jsonl")[0]["outcome"] != "budget-exhausted"
+
+
+# --- X4: --classify-only, the recovery path with no coverage at all -----------
+#
+# `--classify-only` is what an operator reaches for *after* a run dies mid-flight;
+# `lifecycle.py` prints it as the recovery instruction three times. It had no test.
+# Everything below is observed behaviour, not intent -- including one line that is
+# not true, which is noted where it shows up rather than pinned as correct.
+
+
+def test_classify_only_grades_the_pr_and_parks_without_invoking_an_agent(loop):
+    """The recovery path reaches the same oracle, so it needs the same extraction.
+
+    Confirms it too reads the gate block rather than the whole body: the PR's summary
+    quotes `verdict: eligible-for-auto-merge` while the block votes
+    `human-merge-required`, and the recovery verdict follows the block.
+    """
+    head = "abc1234def5678000000000000000000000000ff"
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[
+            pr(
+                201,
+                body=gate_body(
+                    101,
+                    verdict="human-merge-required",
+                    ci_row="2/2 pass @ abc1234",
+                    reason="a reviewer thread is open",
+                    prose="## Summary\n\nAn earlier attempt claimed\n\nverdict: eligible-for-auto-merge",
+                ),
+                closes=[101],
+                head_oid=head,
+                checks=[("lint", "pass"), ("test", "pass")],
+                threads=[True],
+                review_requests=1,
+                reviews=1,
+            )
+        ],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent()
+
+    code, out = loop.run(gh, agent=agent, argv=["--classify-only", "101"])
+
+    assert code == 0
+    assert "== classify-only #101 ==" in out
+    assert agent.calls == [], "recovery classifies what already happened; it runs nothing"
+    assert "outcome  gate-human" in out, out
+    assert agent_session_driver.PARK_LABEL in gh.labels_of(101)
+
+
+def test_classify_only_recovers_cost_and_session_from_the_dead_runs_stream(loop):
+    """The reason the flag exists: a run whose stream survived its process."""
+    head = "abc1234def5678000000000000000000000000ff"
+    rundir = loop.state_dir / "runs" / f"101-{FROZEN_TS}"
+    rundir.mkdir(parents=True)
+    (rundir / "stream.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in agent_stream(cost=7.5, session="sess-dead")) + "\n",
+        encoding="utf-8",
+    )
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[
+            pr(
+                201,
+                body=gate_body(101, verdict="eligible-for-auto-merge", ci_row="2/2 pass @ abc1234"),
+                closes=[101],
+                head_oid=head,
+                checks=[("lint", "pass"), ("test", "pass")],
+                threads=[True],
+                review_requests=1,
+                reviews=1,
+            )
+        ],
+        board_items=[board_item(101)],
+    )
+
+    code, out = loop.run(gh, agent=StubAgent(), argv=["--classify-only", "101"])
+
+    assert code == 0
+    assert "recovered from stream: cost $7.5  session sess-dead" in out
+    assert "outcome  gate-eligible" in out
+
+
+def test_classify_only_with_no_pr_parks_the_issue(loop):
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[],
+        board_items=[board_item(101)],
+    )
+
+    code, out = loop.run(gh, agent=StubAgent(), argv=["--classify-only", "101"])
+
+    assert code == 0
+    assert "no open PR found for #101" in out
+    assert agent_session_driver.PARK_LABEL in gh.labels_of(101)
+
+
+def test_classify_only_records_the_row_it_says_it_recorded(loop):
+    """The recovery path completes the ledger, which is the whole reason it exists.
+
+    This check used to assert the *discrepancy*: `run_classify_only` ended by printing
+    "recorded to runs.jsonl. Nothing was merged." and only `classify_and_record` ever
+    opened `ctx.runs_log`. Park state was applied, so an operator recovering a dead run
+    got the issue parked, a line saying the ledger was written, and no row for the run
+    that parked it -- a hole in the per-run provenance exactly where a run died, which
+    is the case you most want recorded. Les settled it in favour of recording.
+
+    Zero coverage of `--classify-only` is why it survived; that gap was X4.
+    """
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[],
+        board_items=[board_item(101)],
+    )
+
+    code, out = loop.run(gh, agent=StubAgent(), argv=["--classify-only", "101"])
+
+    assert code == 0
+    assert "recorded to runs.jsonl" in out
+
+    rows = loop.rows("runs.jsonl")
+    assert len(rows) == 1, f"the recovery path recorded {len(rows)} row(s)"
+    assert rows[0]["issue"] == 101
+    assert rows[0]["repo"] == REPO
+    assert rows[0]["outcome"] == "parked"
+    assert rows[0]["reason"] == "no open PR found for #101"
+    assert loop.rows("parked.jsonl") != [], "park state is applied, and now the two agree"
+
+
+def test_the_recovered_row_carries_the_dead_runs_phase(loop):
+    """`phase` is `evidence.py`'s primary grouping key, so a blank one is a lost run.
+
+    The inflight marker is written at the start of every run and describes the run in
+    flight, so the phase belongs in it -- and recovery can then report what actually
+    ran rather than a blank. Without this the recovered row groups under `unknown`,
+    which is the state the pre-#27 archive was in and the reason `make evidence` used
+    to render every PHASE cell as `unknown`.
+    """
+    head = "abc1234def5678000000000000000000000000ff"
+    loop.state_dir.mkdir(parents=True, exist_ok=True)
+    (loop.state_dir / "inflight.json").write_text(
+        json.dumps({
+            "issue": 101,
+            "started": FROZEN_TS,
+            "run_dir": str(loop.run_dir(101)),
+            "url": f"https://github.com/{REPO}/issues/101",
+            "phase": "grade_gate",
+        }),
+        encoding="utf-8",
+    )
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[
+            pr(
+                201,
+                body=gate_body(101, verdict="eligible-for-auto-merge", ci_row="2/2 pass @ abc1234"),
+                closes=[101],
+                head_oid=head,
+                checks=[("lint", "pass"), ("test", "pass")],
+                threads=[True],
+                review_requests=1,
+                reviews=1,
+            )
+        ],
+        board_items=[board_item(101)],
+    )
+
+    code, _ = loop.run(gh, agent=StubAgent(), argv=["--classify-only", "101"])
+
+    assert code == 0
+    rows = loop.rows("runs.jsonl")
+    assert len(rows) == 1
+    assert rows[0]["phase"] == "grade_gate"
+    assert rows[0]["outcome"] == "gate-eligible"
+
+
+def test_an_inflight_marker_without_a_phase_still_recovers(loop):
+    """Control. Markers written before the phase was added must not break recovery.
+
+    A `KeyError` here would turn the recovery path -- the thing you reach for when a run
+    has already died -- into a second failure, at the worst possible moment.
+    """
+    loop.state_dir.mkdir(parents=True, exist_ok=True)
+    (loop.state_dir / "inflight.json").write_text(
+        json.dumps({"issue": 101, "started": FROZEN_TS, "run_dir": "", "url": ""}),
+        encoding="utf-8",
+    )
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[],
+        board_items=[board_item(101)],
+    )
+
+    code, _ = loop.run(gh, agent=StubAgent(), argv=["--classify-only", "101"])
+
+    assert code == 0
+    rows = loop.rows("runs.jsonl")
+    assert len(rows) == 1
+    assert rows[0]["phase"] == "", "an unknown phase is blank, not a crash and not a guess"
+
+
+def test_the_inflight_marker_names_the_phase_it_is_marking(loop):
+    """The producer side of the pair above, asserted on a normal pass.
+
+    Recovery can only report the phase if the marker carries it, and the marker is
+    written by `invoke_agent` -- a different function, in a different pass, which is
+    exactly the coupling that goes stale unnoticed.
+    """
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[],
+        board_items=[board_item(101)],
+    )
+    captured = {}
+
+    real_unlink = Path.unlink
+
+    def capture_then_unlink(self, *a, **kw):
+        if self.name == "inflight.json" and self.is_file():
+            captured["marker"] = json.loads(self.read_text(encoding="utf-8"))
+        return real_unlink(self, *a, **kw)
+
+    loop.monkeypatch.setattr(Path, "unlink", capture_then_unlink)
+    loop.run(gh, agent=StubAgent(stream=agent_stream()))
+
+    assert captured, "no inflight marker was written during the pass"
+    assert captured["marker"]["phase"], "the marker carries no phase for recovery to read"
+    assert captured["marker"]["issue"] == 101
+
+
+def test_request_review_records_a_reviewer_request_and_spends_nothing(loop):
+    """The one phase the driver executes itself, with no model call.
+
+    Written because extracting it out of `invoke_agent` (#261 T2) broke two things the
+    suite could not see: a function-local import, and the write-manifest path the branch
+    records its `pr_edit` entry to. `ruff` caught both; the tests did not, because nothing
+    exercised the branch at all. That is the gap, and this closes it.
+    """
+    head = "abc1234def5678000000000000000000000000ff"
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[
+            pr(
+                201,
+                body=gate_body(101, verdict="pending", ci_row="2/2 pass @ abc1234"),
+                closes=[101],
+                head_oid=head,
+                checks=[("lint", "pass"), ("test", "pass")],
+                threads=[],
+                review_requests=0,
+                reviews=0,
+            )
+        ],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent()
+
+    code, out = loop.run(gh, agent=agent, argv=["--issue", "101"])
+
+    assert code == 0
+    if "request_review" not in out:
+        pytest.skip("the ladder did not route this fixture to request_review")
+
+    assert agent.calls == [], "request_review must not invoke a model"
+    assert "Executing request_review deterministically" in out
+    row = loop.rows("runs.jsonl")[0]
+    assert row["phase"] == "request_review"
+    assert row["cost_usd"] == 0.0
+    assert row["session_id"] == "deterministic"

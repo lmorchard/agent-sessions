@@ -17,11 +17,9 @@ run on disk changed.
 """
 
 import json
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from agent_sessions.scripts import run_progress  # noqa: E402
+from agent_sessions.scripts import run_progress
 
 # --- fixture builders ------------------------------------------------------
 #

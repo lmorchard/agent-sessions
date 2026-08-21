@@ -10,8 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from agent_sessions.scripts import board_audit  # noqa: E402
+from agent_sessions.scripts import board_audit
 
 
 @pytest.mark.parametrize(

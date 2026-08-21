@@ -140,56 +140,6 @@ output is exactly what weak oracles produce.
 **Safety:** avoid `--dangerously-skip-permissions` / `bypassPermissions`. Scoped
 `--allowedTools` + `dontAsk` gets ~95% of the autonomy with a real floor under it.
 
-## The two-skill system (the original sketch — architecture superseded)
-
-**Read this for the reasoning, not the shape.** It shipped as **one skill with a multi-mode
-dispatcher**, not two skills — see [What is built](#what-is-built), which explains why. The grilling
-mapping below still describes how `intake` actually works, which is why the section is kept.
-
-
-### intake skill (grilling-derived, human-in-loop)
-
-Lives at the weak-oracle front end. Job: turn a wishlist stub into a spec whose criteria
-are runnable checks, plus an escalation tier — and emit a filable issue.
-
-Built on Matt Pocock's [grilling skill](https://github.com/mattpocock/skills/blob/main/skills/productivity/grilling/SKILL.md),
-which is a near-perfect engine. Its mechanics map directly:
-
-- **"Probe the environment for factual matters rather than asking"** = the
-  research-subagents-then-plan instinct. The skill dispatches Explore/research agents to
-  answer *factual* questions about the codebase (does this pattern exist? current shape?
-  is there a test harness?) and spends the human's attention only on *decisions*.
-- **"Provide your recommended answer alongside each question"** = kills the overhead risk.
-  Inverts authoring effort: instead of "what are the acceptance criteria?" (blank page),
-  the skill — having researched — *proposes* criteria as runnable checks and the human
-  ratifies/corrects. Fast triage, not a dreaded form.
-- **"One question at a time, walk the decision tree resolving dependencies"** = the spine:
-  definition → scope boundaries → each criterion → (derived) tier.
-- **"Don't act until shared understanding is confirmed"** = the human-in-loop gate.
-
-What intake *adds* on top of grilling (the thin, opinionated layer):
-
-1. **A fixed target schema** instead of open-ended "shared understanding" — driving toward
-   *definition + verifiable criteria + escalation tier*; done when those slots are filled.
-2. **Verifiability as the per-branch success test** — refuses to close a criterion while
-   it's still a wish; its recommended answer is *always* a runnable check, and "how would
-   you actually know?" is the standing follow-up.
-3. **An output artifact** — emits the filable issue body + labels, tier *inferred* from
-   whether every criterion resolved to a check (all checks → `auto-ok`; any "human decides"
-   → `needs-review`).
-
-Scope guardrail: intake is for **heavier issues only**. Small/mechanical ones skip it.
-
-### execution skill (self-driving, autonomous middle)
-
-Phase 1 above. Consumes a well-specified issue; runs the loop; stops at the merge gate.
-
-### shared contract
-
-The seam between intake's *output* and execution's *input*: the acceptance-criteria format
-+ escalation labels. Design once, both read from it. (In the spirit of decafclaw's
-"don't hand-maintain parallel field lists that rot in lockstep.")
-
 ## Finding (2026-07-23, later): dev-session already IS the producer/consumer core
 
 Studied the existing `~/.claude/skills/dev-session` skill (SKILL.md + phases + references).
@@ -262,54 +212,31 @@ adding modes doesn't confound the LLM mid-phase — the only confounding risk is
 boundary, mitigated by explicit mode arguments + an ask-don't-guess dispatcher. Heavy modes
 fan out to subagents; the board-driver stays *above* the skill as orchestration.
 
-Built (orchestration), primarily in `src/agent_sessions/driver/`:
+**The file-by-file inventory is in [orientation.md](orientation.md)**, which has a table per
+directory and a purpose per file. It used to be duplicated here, and the copy did what a
+duplicated inventory does: it named four of the driver's modules and described
+`agent_session_driver.py` as *"the coordinator: configuration, credentials, GitHub reads,
+workspaces, agent invocation, outcome routing, persistence, and reporting"* — a file that has since
+become a facade defining nothing, while `lifecycle.py`, the module that actually holds all of that,
+appeared in neither copy. Two inventories, and the one nobody was maintaining is the one a reader
+of this document met first.
 
-- `agent_session_driver.py` — the coordinator: configuration, credentials, GitHub reads,
-  workspaces, agent invocation, outcome routing, persistence, and reporting.
-- `router.py` — pure selection and phase routing over already-fetched GitHub state.
-- `gate.py` — merge-gate parsing and outcome classification.
-- `writes.py` — the validated manifest allowlist and the write-command executor.
-- `driver/agent-session-driver.sh` — a thin Bash compatibility launcher for the packaged
-  coordinator.
+What belongs here instead is the shape, which is what the rest of this document explains and what
+an inventory cannot convey:
 
-Built (front-of-funnel), in `skills/agent-session/`:
-- `SKILL.md` — dispatcher, context-management notes, conventions.
-- `references/acceptance-criteria.md` — **the novel core**: every criterion names a runnable
-  check; verifier-independence + freeze-before-implementation; concrete-test → property →
-  human-judgment escalation ladder; **oracle-must-already-exist** rule; tier derivation
-  (auto-ok/needs-review) + risk-gated-path override.
-- `references/criteria-grammar.md` — EARS (five patterns, verified against Mavin) +
-  Given-When-Then syntax reference.
-- `references/spec-template.md` — criteria replace prose "desired end state"; readiness
-  checklist gates on *verifiability*.
-- `references/documentarian-prompt.md` — neutral negation rules for the research subagent
-  (shared by intake + triage); includes the oracle-existence question.
-- `phases/intake.md` — new + existing-issue (augment) modes; reduce each requirement to
-  criterion+check; verify each check's oracle exists *now*; derive tier; file/update issue.
-- `phases/triage.md` — batch backlog-gardening; subagents fan out to assess + draft proposed
-  criteria, human ratifies in a fast pass, augment in place.
+- **The harness** owns selection, phase routing, invocation, classification and persistence. It
+  reads the gate verdict rather than deriving it.
+- **The skill** owns what happens inside a phase, and therefore owns the verdict.
+- **`references/`** holds the rules more than one mode reads, in-dir, because two copies of a rule
+  drift and a drifted rule is a correctness bug — the same reason this section no longer carries
+  its own copy of the inventory.
 
-Built (back half, move 1), in `skills/agent-session/`:
-- `references/frozen-checks.md` — **the back-half novel core**: the `checks.md` manifest
-  (criteria copied verbatim, stable `C1…Cn` ids), the freeze commit, the read-only rule, the
-  independent verifier subagent, the `git diff <freeze-sha>` tamper check, and the amendment
-  path (stop → human-confirm → log → **downgrade the run to `needs-review`**).
-- `phases/plan.md` — gates on verifiability, re-verifies oracles still exist, **Phase 0 is the
-  freeze** (written before the rest of the plan), bidirectional criteria coverage in self-review.
-- `phases/execute.md` — per-criterion checks by name as the gate; frozen files read-only to
-  implementers; independent verifier + tamper diff, not self-report; evidence produced for
-  human-judgment criteria.
-- `phases/open_pr.md` — Initial PR push and review request.
-- `phases/address_comments.md` — Agent specifically targeting unresolved review threads on an open PR.
-- `phases/fix_ci.md` — Agent specifically targeting failing CI checks on an open PR.
-- `phases/grade_gate.md` + `references/pr-body-template.md` — the **tiered merge gate**, derived by
-  reading rows (all checks pass per the verifier + human-graded judgment criteria + clean
-  tamper diff + green project gates + no unresolved threads + `auto-ok` + no risk-gated paths).
-  Emits a machine-readable `<!-- agent-session:gate -->` block. **Never merges.**
-- `phases/express.md` — Phase 0 checks *preconditions* (marker / readiness / size) instead of
-  judging complexity by feel; a missing marker routes to `intake`. Tier decides only *where the
-  run surfaces to a human*, not whether it runs.
-- `references/session-setup.md`, `references/plan-template.md`, `references/github-projects.md`.
+The two novel cores are worth naming, because they are the parts that are not obvious:
+`references/acceptance-criteria.md` (every criterion names a runnable check; verifier independence;
+freeze before implementation; the concrete-test → property → human-judgment ladder; the
+oracle-must-already-exist rule; and how the tier derives) and `references/frozen-checks.md` (the
+`checks.md` manifest, the freeze commit, the read-only rule, the independent verifier, the tamper
+diff, and the amendment path that downgrades a run to `needs-review`).
 
 ## Asynchronous GitHub-Native Interaction Model
 
@@ -337,7 +264,12 @@ provenance and recovery context; it is not the authoritative park bit:
    - **P1: Unblock**: Issues referencing open PRs needing comment resolution, CI fixes, or gate grading.
    - **P2: Execute**: Issues carrying `agent-session:spec` AND `auto-ok` tier AND no open PR AND no `needs-human`.
    - **P3: Groom**: Open issues lacking `agent-session:spec` AND lacking `needs-human`.
-   - **P4: Escalate**: Issues reaching `agent-session:attempt-3`.
+
+   There are three rungs, not four. This list used to carry a **P4: Escalate** for issues reaching
+   `agent-session:attempt-3`, and `router.py` carried a matching `p4_escalate` list that nothing
+   ever appended to. Attempt-exhausted issues are **parked** by the `MAX_PHASE_ATTEMPTS` branch in
+   each rung rather than escalated onto a fourth one. Both the doc and the empty list are gone;
+   an operator will see `MAX_PHASE_ATTEMPTS (n) reached for phase <phase>` as the park reason.
 
 2. **Async Q&A via Issue Comments**:
    - When an agent needs input or spec ratification, it appends a top-level comment detailing its proposal or question.
@@ -408,31 +340,6 @@ questions for a human — a loop would have to pick the design rather than imple
 What stays below is what a board cannot hold: an open *decision*, and two lists whose entire purpose
 is to stop things being reopened or re-added.
 
-### The open decision (Superseded)
-
-*Superseded 2026-08-10 by Decision 1 (see Resolved decisions) — phase 3 is not pursued, dissolving this question. The reasoning below is preserved as load-bearing context.*
-
-**Les's call: does the phase-3 gate list get a finite exit condition?** It has grown by roughly one gate per session —
-first the CI hole, then the merge-block hook, then the amendment policy (**now settled**, see
-Resolved decisions) and the sweep. Each addition has been a correct call individually. A finite
-exit condition would be better than a list that grows as fast as it is worked. *Not* an argument to
-rewrite the phased rollout, and note the premise is weaker than it looks: the PRs **do** land, by
-hand and quickly.
-
-Two inputs for that decision, both verified from primary sources in move 7
-([prior-art.md](prior-art.md#leads-1-3--surveyed-and-verified-move-7-2026-07-28)):
-
-- **ITIL supplies the finite exit condition this list lacks.** A "standard change" is pre-authorized
-  on three conditions together: documented procedure, risk formally accepted **in advance**, and
-  **prior runs have proven the outcome predictable.** The governance body pre-approves the
-  *template*, not the instance. Our `auto-ok` is stamped **per issue** on its own criteria, so we
-  have no notion of *"this class of change is safe because N instances landed cleanly"* — which is
-  precisely an evidence-based stopping rule rather than a growing list of gates.
-- **Renovate treats "up-to-date and green" as a *precondition* of automerging**, not as a validity
-  check applied after a verdict is published. Our gate derives a verdict and *then* asks whether the
-  commit still ships; theirs cannot reach the question. That ordering is cheap to adopt and would
-  make one whole class of `ci-stale` unreachable.
-
 ### Declined, with reasons — do not reopen without new evidence
 
 - **Driver resuming its own interrupted runs.** Needs a staleness policy for continuing against a
@@ -442,24 +349,6 @@ Two inputs for that decision, both verified from primary sources in move 7
   degrades a rule. Measure before touching.
 - **`plan.md`'s "every phase advances at least one `Cn`"** flags Phase 0, which by the template's
   own design advances none. Verified still present (`plan.md:84`). A wording nit, agreed left.
-
-### Dropped in this reconciliation — verified closed or unactionable
-
-- ~~The wrong correction still sits in decafclaw #710's body.~~ **Resolved** — the retraction is in
-  the body now, and names the fabrication as fabricated.
-- ~~Board transitions silently no-op on decafclaw.~~ **Resolved** in move 2b: `github-projects.md`
-  now locates the declaration by content and reports `board: not configured` when there is none.
-- ~~Running the project gates dirties decafclaw's tree.~~ **Resolved** by decafclaw #717 — verified
-  `npm ci` in decafclaw's `Makefile`. The generalisable hazard (a verification target running a
-  command whose job is to mutate) is kept in `findings.md`.
-- ~~A larger `intake` vehicle so multi-phase `execute` gets a real run.~~ **Duplicate** of item 7.
-- ~~The standing evidence gap.~~ **Not a task** — it is a standing limit, recorded as one in
-  [findings.md](findings.md#the-standing-limit-this-projects-own-oracle-is-too-expensive). At
-  ~$50 and half a session per rule, the unmeasured rules will not all get measured, and listing
-  them as work would imply otherwise.
-- ~~An interactive-intake check of the empty-state observation.~~ **Dropped: the referent is gone.**
-  The phrase survives nowhere else in the repo except an example branch name in
-  `session-setup.md`. Nobody can act on it. A clean example of why prose is a bad backlog.
 
 ## Resolved decisions
 

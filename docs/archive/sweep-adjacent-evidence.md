@@ -1,3 +1,20 @@
+> **Archived 2026-08-19. Kept as provenance, not as a finding.**
+>
+> This is #2's output. It reports `adjacent-risk: none` for every row it enumerates —
+> including `threads`, which `findings.md` documents at length as the canonical adjacency
+> instance, and `project-gates`, which `prior-art.md` independently nominates as another.
+> A sweep whose question was *"what could satisfy this row that is not the thing it names?"*
+> and that answered "nothing" against a corpus containing two known instances is a vacuous
+> check in a file — `findings.md` defect class 6, in the artifact produced for the issue
+> that defines it.
+>
+> It also reads its conditions out of a `phases/pr.md` that no longer exists, and lists a
+> Makefile check set predating `lint` and `typecheck`, so it could not be re-run as written.
+>
+> Archived rather than deleted: **that the sweep ran and produced nothing is itself the
+> useful finding**, and deleting it would leave #2 looking closed on evidence that had
+> quietly disappeared.
+
 # Gate Row Adjacency Sweep
 
 Generated for Issue #2.

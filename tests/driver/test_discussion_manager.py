@@ -2,6 +2,8 @@ import json
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pytest
+
 from agent_sessions.driver.discussion_manager import (
     check_category,
     ensure_category,
@@ -12,9 +14,37 @@ from agent_sessions.driver.discussion_manager import (
 
 MODULE_PATH = "agent_sessions.driver.discussion_manager"
 
+#: One instant, shared by the fixtures and by the code under test.
+#:
+#: `_today_title` used to read the real wall clock, and so does
+#: `get_or_create_daily_discussion`. Two independent reads of "now" agree almost always
+#: and disagree across a UTC midnight, so these tests failed for four minutes a day at
+#: 00:00 UTC -- as a title mismatch, which reads like a formatting bug. Freezing one
+#: instant and giving it to both sides removes the race rather than narrowing it.
+FROZEN_NOW = datetime(2026, 8, 19, 12, 0, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def frozen_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Freeze `discussion_manager`'s clock on the module that owns it.
+
+    `discussion_manager` imports the `datetime` module and calls
+    `datetime.datetime.now(...)` through it, so the patch goes here and not on a barrel
+    re-export -- patching a re-exported name binds a copy and is a trap this repo has
+    hit three separate times.
+    """
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: D102 - matches datetime.now
+            return FROZEN_NOW if tz is None else FROZEN_NOW.astimezone(tz)
+
+    monkeypatch.setattr(
+        f"{MODULE_PATH}.datetime.datetime", _FrozenDatetime, raising=True
+    )
+
 
 def _today_title() -> str:
-    return f"Lab Notebook: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+    return f"Lab Notebook: {FROZEN_NOW.strftime('%Y-%m-%d')}"
 
 
 def test_check_category_present():
@@ -114,3 +144,32 @@ def test_post_finish(tmp_path):
         assert len(comment_calls) == 1
         body = comment_calls[0][-1]
         assert "Hello narrative" in body
+
+
+def test_the_frozen_clock_reaches_the_code_under_test():
+    """Control for `frozen_clock`. Without this, the freeze could be inert.
+
+    Every check above compares a title the fixture built against a title the module
+    built. If the patch missed, both would read the real clock and agree anyway --
+    which is precisely the state these tests were already in, passing every day except
+    across a UTC midnight. So assert the module emits the *frozen* date, which the real
+    clock cannot produce.
+    """
+    created = []
+
+    def mock_run_gh(args):
+        if "discussion" in args and "list" in args:
+            return 0, "[]", ""
+        if "discussion" in args and "create" in args:
+            created.append(args)
+            return 0, "https://github.com/owner/repo/discussions/11\n", ""
+        return 1, "", "error"
+
+    with patch(f"{MODULE_PATH}.run_gh", side_effect=mock_run_gh):
+        get_or_create_daily_discussion("owner/repo")
+
+    assert created, "no `discussion create` was issued, so nothing exercised the clock"
+    argv = " ".join(str(a) for a in created[0])
+    assert "2026-08-19" in argv, (
+        f"the module built its title from a clock the fixture did not freeze: {argv}"
+    )
