@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from agent_sessions.driver import lifecycle
+
 
 def load_probe():
     try:
@@ -147,7 +149,7 @@ def test_probe_records_reproducible_success_evidence(
 
     settings = json.loads((output_dir / "settings.json").read_text(encoding="utf-8"))
     hook = Path(settings["hooks"]["PreToolUse"][0]["command"])
-    assert hook == (probe.PROJECT_ROOT / "driver" / "merge-block-hook.sh").resolve()
+    assert hook == lifecycle.hook_script_path().resolve()
     assert hook.is_file()
 
     summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))

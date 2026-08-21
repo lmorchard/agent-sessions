@@ -6,28 +6,10 @@ import json
 import os
 import subprocess
 import time
-from datetime import timezone
+from datetime import datetime, timezone
 
-from agent_sessions.driver import credentials, gh_query
-
-
-def say(msg: str) -> None:
-    from agent_sessions.driver import agent_session_driver
-
-    agent_session_driver.say(msg)
-
-
-def log(msg: str) -> None:
-    from agent_sessions.driver import agent_session_driver
-
-    agent_session_driver.log(msg)
-
-
-def die(msg: str, code: int = 2) -> None:
-    from agent_sessions.driver import agent_session_driver
-
-    agent_session_driver.die(msg, code)
-
+from agent_sessions.driver import credentials, gh_query, output
+from agent_sessions.driver.output import die, log, say
 
 _BOARD_METADATA_CACHE: dict[str, dict | None] = {}
 
@@ -138,15 +120,14 @@ def check_and_handle_rate_limit(
     max_wait_seconds: int = 300,
     say_fn=print,
 ) -> None:
-    from agent_sessions.driver import agent_session_driver
 
     remaining, limit, reset = gh_query.check_rate_limit(env)
     if remaining >= min_headroom:
         return
 
-    now_epoch = int(agent_session_driver.datetime.now(timezone.utc).timestamp())
+    now_epoch = int(output.now().timestamp())
     wait_sec = max(1, reset - now_epoch + 2) if reset > now_epoch else 1
-    reset_dt = agent_session_driver.datetime.fromtimestamp(reset, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if reset else "soon"
+    reset_dt = datetime.fromtimestamp(reset, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if reset else "soon"
 
     if wait_sec <= max_wait_seconds:
         say_fn(

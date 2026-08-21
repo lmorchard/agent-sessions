@@ -10,9 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agent_sessions.driver import agent_runner
+from agent_sessions.driver import agent_runner, lifecycle
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
 READ_MARKER_TEXT = "agent-session-permission-probe-read-ok"
 PROTECTED_MARKER_TEXT = "agent-session-permission-probe-protected-original\n"
 
@@ -34,11 +33,14 @@ Do not inspect credentials, contact a remote service, or perform any other work.
 
 
 def render_claude_settings(destination: Path) -> None:
-    template = PROJECT_ROOT / "driver" / "settings.json"
-    hook = (PROJECT_ROOT / "driver" / "merge-block-hook.sh").resolve()
-    settings = json.loads(template.read_text(encoding="utf-8"))
-    settings["hooks"]["PreToolUse"][0]["command"] = str(hook)
-    destination.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    """Render the run's settings via the driver, not a second copy of the substitution.
+
+    This used to resolve the two hook assets itself and redo the `command` substitution.
+    That made it the *only* correct resolver while `lifecycle` looked in the wrong place
+    -- so the probe reported a working hook that no real run ever installed. Delegating
+    means the probe can only ever attest to what the driver actually does.
+    """
+    lifecycle.render_hook_settings(destination.parent)
 
 
 def backend_version(backend: str) -> str:

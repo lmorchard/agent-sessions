@@ -17,9 +17,11 @@ conventions + gotchas only.
 - **An autonomy harness with a skill component.** The system's orchestration lives in
   `src/agent_sessions/driver/`; `driver/agent-session-driver.sh` is a compatibility launcher. The
   skill component lives at `skills/agent-session/` in *this repo* — it is NOT installed in
-  `~/.claude/skills/`. Test it by running its phase files manually (dogfooding), not via a
+  any harness's skills directory (`~/.claude/skills/`, `~/.codex/skills/`). Test it by running its
+  phase files manually (dogfooding), not via a
   registered skill.
-- **The reference skill it derives from** is at `~/.claude/skills/dev-session/` (phases +
+- **The reference skill it derives from** is `dev-session`, installed per harness
+  (`~/.claude/skills/dev-session/`, `~/.codex/skills/dev-session/` -- separate copies) (phases +
   references). Adapt from it; don't edit it.
 
 ## Project board
@@ -119,9 +121,16 @@ gate. Revisit if an unattended run ever weakens a test to admit its own change.
 
 ### Drivable (the allowlist)
 
-- **`tests/**` and `driver/**`, except `driver/agent-session-driver.sh`** — compatibility assets, fixtures, and
-  the `tests/driver/test_*.py` and `tests/scripts/test_*.py` harness tests. Note what this leaves: the tests are drivable, while the
-  launcher and every unlisted `src/**` implementation path remain `needs-review`.
+- **`tests/**`** — the `tests/driver/test_*.py` and `tests/scripts/test_*.py` harness suites and
+  their fixtures. Note what this leaves: the tests are drivable, while every unlisted `src/**`
+  implementation path remains `needs-review`.
+- **`driver/**`, except `driver/agent-session-driver.sh`** — as of 2026-08-19 this grants nothing,
+  because the directory holds only the gated launcher. The PreToolUse hook assets that used to make
+  it non-empty (`settings.json`, `merge-block-hook.sh`) moved into `src/agent_sessions/driver/`,
+  beside the module that loads them, after sitting where nothing read them since the Python
+  conversion. The clause stays in case the directory receives compatibility assets again. Note where
+  that puts the hook: gated as unlisted `src/**`, which is the correct side of the line for a
+  merge-prohibition control, and not where it was.
 - **`docs/`** — including `findings.md` and session notes.
 - **`Makefile`**.
 - **`scripts/**`** — support scripts and assets. This does not include the shipping implementations under
@@ -174,7 +183,8 @@ implementation). Every mode moves a weak-oracle "a human decides" toward a stron
   execution's per-phase work). Working context stays in the subagent, not the main loop.
 - **The board-driver is NOT part of the skill.** The unattended burndown loop (pick Ready
   issue → run → tiered merge) is orchestration that *invokes* the skill, each run a fresh
-  context. It lives above the skill (headless `claude -p` / GHA). Don't build it into a mode.
+  context. It lives above the skill (headless `claude -p`, `codex exec`, or GHA). Don't build it
+  into a mode.
 
 ## Criteria + tier (the core contract)
 

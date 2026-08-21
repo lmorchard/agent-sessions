@@ -323,11 +323,15 @@ def read_progress(run_dir: Path | str) -> Progress:
 def default_state_dir(repo: str) -> Path:
     """Where the driver keeps `repo`'s state -- mirrored from the driver itself.
 
-    `agent-session-driver.sh:347` derives
+    `lifecycle.preflight` derives
     `${XDG_STATE_HOME:-$HOME/.local/state}/agent-session/${REPO//\\//-}`, and this
-    reimplements that line. Issue #42 quotes the older `.driver-state/runs/...`
-    path, which #27 superseded; implementing what the issue says would point
-    `make watch` at a directory the driver no longer writes.
+    reimplements it. (It used to cite `agent-session-driver.sh:347`; the 2026-08-09
+    conversion left that file eight lines long, so the citation outlived its line.)
+    `evidence.py` imports this function rather than adding a third copy.
+
+    Issue #42 quotes the older `.driver-state/runs/...` path, which #27 superseded;
+    implementing what the issue says would point `make watch` at a directory the driver
+    no longer writes.
     """
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
     return Path(base) / "agent-session" / repo.replace("/", "-")

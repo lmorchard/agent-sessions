@@ -111,9 +111,11 @@ Top-level layout:
 - `skills/agent-session/` — the skill: `SKILL.md` (the dispatcher), `phases/` (one file per mode),
   `references/` (the shared engine). Detailed below.
 - `src/agent_sessions/driver/` — the unattended loop's Python implementation. Detailed below.
-- `driver/` — the Bash compatibility launcher, integration assets, fixtures, and harness tests.
+- `driver/` — the Bash compatibility launcher, and since 2026-08-19 nothing else: the PreToolUse
+  hook assets moved into `src/agent_sessions/driver/`, beside the module that loads them.
 - `src/agent_sessions/scripts/` — the shipping repo-health detectors and progress reader.
-- `scripts/` — root-level detector tests and test-support assets. Detailed below.
+- `scripts/` — operator support scripts. Detailed below.
+- `tests/` — `tests/driver/` and `tests/scripts/`, the harness and detector suites. Detailed below.
 - `docs/dev-sessions/` — one directory per work session, each with its spec, plan, frozen checks
   and notes. This is the real archaeological record, and it is frozen by design: the content is
   history, not maintained documentation.
@@ -182,17 +184,18 @@ If you only read two files in this directory, read `acceptance-criteria.md` and
 | `src/agent_sessions/driver/gate.py` | Parses the gate block and classifies the outcome. Importable **so its tests exercise the shipping code** — extraction was the fix for a hand-copied classifier in the test suite that had silently diverged from the driver it was supposed to be testing |
 | `src/agent_sessions/driver/writes.py` | Validates the write manifest against a closed kind allowlist, then constructs and executes the permitted write commands |
 | `driver/agent-session-driver.sh` | Thin Bash compatibility launcher for the packaged Python coordinator |
-| `driver/test_*.py` | The fixture and integration suites for the harness |
+| `src/agent_sessions/driver/settings.json`, `merge-block-hook.sh` | The PreToolUse merge-block hook and its settings template, rendered into each run's state dir by `lifecycle.render_hook_settings`. They live beside the module that loads them so an installed wheel ships them — and because when they lived elsewhere, the render silently never ran |
+| `tests/driver/test_*.py` | The fixture and integration suites for the harness |
 | `src/agent_sessions/scripts/docs_check.py` | Doc-rot detector: dead relative links, tables split by prose, stated assertion counts that no longer match the suite, and divergent risk-path policy in the two instruction files |
 | `src/agent_sessions/scripts/assertion_lint.py` | Catches presence-grep assertions in harness tests — a `grep -q` for a literal that a *comment* would satisfy just as well as the behaviour |
 | `src/agent_sessions/scripts/commit_lint.py` | Catches a closing keyword a commit message only quotes. Commit messages aren't markdown, so backticks don't quote anything, and GitHub closed a live backlog item off a sentence that was merely describing a test fixture |
 | `src/agent_sessions/scripts/run_progress.py` | A reader over a run's `stream.jsonl`, so a fifty-minute unattended run isn't a black box. Deliberately a *reader* — letting the run narrate its own progress is the same defect one level up |
-| `scripts/test_*.py` | Root-level tests for the shipping detectors, plus test-support code |
+| `tests/scripts/test_*.py` | Tests for the shipping detectors, plus test-support code |
 
 The detector modules under `src/agent_sessions/scripts/` exist because written rules had already
 failed to prevent the defects they catch. That is the project's most-repeated lesson, in file
-form. The shipping modules are default-gated as unlisted `src/**`; their root-level tests and
-support under `scripts/` are explicitly drivable.
+form. The shipping modules are default-gated as unlisted `src/**`; their tests under
+`tests/scripts/` are explicitly drivable.
 
 `make help` lists the targets; `make check` is the aggregate that runs the suites and the
 detectors together, and it's the row the merge gate cites as *local project gates*. One boundary
@@ -369,11 +372,10 @@ anything is drivable.
 ones.** `skills/**`, because there the implementer's work product *is* the instructions grading it;
 `src/agent_sessions/driver/gate.py`, because it classifies whether the run succeeded; and
 `src/agent_sessions/driver/agent_session_driver.py`, because it routes the result. The compatibility
-launcher also remains gated. Only the harness tests and compatibility assets under `driver/**`, plus
-`docs/`, root-level test and support assets under `scripts/**`, and the `Makefile`, are explicitly
-drivable. Shipping detectors under `src/agent_sessions/scripts/` remain default-gated, as does every
-other unlisted `src/**` path. Read the partition in [../AGENTS.md](../AGENTS.md) before assuming a
-path is drivable.
+launcher also remains gated. **The allowlist itself is not restated here** — an earlier version of
+this paragraph did restate it, and drifted out of date by omitting `tests/**` entirely, which is
+exactly the failure the no-duplicate-live-sources rule exists to prevent. Read it in
+[../AGENTS.md](../AGENTS.md) before assuming a path is drivable; nothing unlisted there is.
 
 **No document may state a fact a command can print.** Cite the command instead. If you must state
 a countable fact, date it, so it becomes history rather than an error. `make docs-check` enforces

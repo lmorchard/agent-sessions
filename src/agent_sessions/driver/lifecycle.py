@@ -7,9 +7,7 @@ import atexit
 import json
 import os
 import subprocess
-import sys
 from dataclasses import dataclass
-from datetime import timezone
 from pathlib import Path
 
 import requests
@@ -20,9 +18,18 @@ from agent_sessions.driver import (
     discussion_manager,
     gate,
     gh_query,
+    output,
     router,
     workspace,
 )
+
+# Imported, not aliased. `say`/`log`/`die` originate in `output`; binding them here is
+# for brevity in a module that calls `say` dozens of times, and binding them by import
+# keeps `lifecycle.say` patchable the way the suites already patch `board.log`.
+#
+# The clock stays `output.now()`, called through the module on purpose: a bound copy
+# could not be frozen, and freezing it is how the suites get deterministic timestamps.
+from agent_sessions.driver.output import die, log, say
 
 PHASE_TIERS = {
     "triage": "low",
@@ -106,20 +113,61 @@ class RunOutcome:
     exit_code: int = 0
 
 
-def log(msg: str) -> None:
-    from agent_sessions.driver import agent_session_driver
-
-    ts = agent_session_driver.datetime.now(timezone.utc).strftime("%H:%M:%SZ")
-    sys.stderr.write(f"{ts}  {msg}\n")
 
 
-def say(msg: str) -> None:
-    sys.stdout.write(f"{msg}\n")
+def hook_template_path() -> Path:
+    """The PreToolUse settings template, resolved beside the module that loads it.
+
+    A separate function so a test can replace it, and because *where* these two assets
+    live is the thing that broke: they sat in repo-root `driver/` while this module
+    looked for them beside itself, so the render silently never ran. They now ship inside
+    the package, which is also what makes them present in an installed wheel.
+    """
+    return Path(__file__).parent / "settings.json"
 
 
-def die(msg: str, code: int = 2) -> None:
-    sys.stderr.write(f"error: {msg}\n")
-    sys.exit(code)
+def hook_script_path() -> Path:
+    """The merge-block hook script. See `hook_template_path` for why this is a function."""
+    return Path(__file__).parent / "merge-block-hook.sh"
+
+
+def render_hook_settings(state_dir: Path) -> Path:
+    """Write the run's Claude settings file with the merge-block hook wired in.
+
+    Fails closed. The previous version guarded the whole body with
+    `if template.is_file():` and wrapped it in `except Exception: pass`, so a missing or
+    unreadable asset produced no hook, no message, and a green `make check` -- while
+    `invoke_agent` went on passing `--settings <path that was never written>`. This hook
+    is one of the layers standing between an unattended run and merging its own PR; when
+    it cannot be installed, the run must not start.
+    """
+    template = hook_template_path()
+    script = hook_script_path()
+
+    if not template.is_file():
+        die(f"merge-block hook template missing: {template}")
+    if not script.is_file():
+        die(f"merge-block hook script missing: {script}")
+    if not os.access(script, os.X_OK):
+        die(f"merge-block hook script is not executable: {script}")
+
+    try:
+        data = json.loads(template.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        die(f"merge-block hook template is unreadable: {template}: {exc}")
+
+    hooks = data.setdefault("hooks", {})
+    pre = hooks.setdefault("PreToolUse", [{}])
+    if not pre:
+        pre.append({})
+    pre[0]["command"] = str(script.resolve())
+
+    settings_file = state_dir / "settings.json"
+    try:
+        settings_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except OSError as exc:
+        die(f"could not write hook settings to {settings_file}: {exc}")
+    return settings_file
 
 
 def abspath(p: str) -> Path:
@@ -371,20 +419,7 @@ def preflight(argv: list[str] | None = None) -> RunContext:
         except Exception:
             pass
 
-    hook_settings_template = Path(__file__).parent / "settings.json"
-    hook_script = Path(__file__).parent / "merge-block-hook.sh"
-    hook_settings_file = state_dir / "settings.json"
-    if hook_settings_template.is_file():
-        try:
-            template_data = json.loads(hook_settings_template.read_text(encoding="utf-8"))
-            if "hooks" not in template_data:
-                template_data["hooks"] = {}
-            if "PreToolUse" not in template_data["hooks"]:
-                template_data["hooks"]["PreToolUse"] = [{}]
-            template_data["hooks"]["PreToolUse"][0]["command"] = str(hook_script.resolve())
-            hook_settings_file.write_text(json.dumps(template_data, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+    hook_settings_file = render_hook_settings(state_dir)
 
     return RunContext(
         repo=repo,
@@ -440,7 +475,7 @@ def run_classify_only(ctx: RunContext) -> int:
 
     cost = 0.0
     session = ""
-    ts = agent_session_driver.datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = output.now().strftime("%Y%m%dT%H%M%SZ")
 
     if rundir and (rundir / "stream.jsonl").is_file():
         say(f"  run dir  {rundir}")
@@ -634,7 +669,7 @@ def select_queue(ctx: RunContext) -> SelectionResult:
     for msg in sel_res["messages"]:
         say(msg)
 
-    ts_str = agent_session_driver.datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts_str = output.now().strftime("%Y%m%dT%H%M%SZ")
     for m in sel_res["unpark_actions"]:
         agent_session_driver.park_label_remove(m, ctx.repo)
 
@@ -696,7 +731,7 @@ def invoke_agent(
 
     agent_session_driver.increment_attempts(issue_num, ctx.repo)
     url = f"https://github.com/{ctx.repo}/issues/{issue_num}"
-    ts = agent_session_driver.datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = output.now().strftime("%Y%m%dT%H%M%SZ")
     rundir = ctx.runs_dir / f"{issue_num}-{ts}"
     rundir.mkdir(parents=True, exist_ok=True)
     raw_output = rundir / "stream.jsonl"

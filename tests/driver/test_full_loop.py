@@ -59,7 +59,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from agent_sessions.driver import agent_runner, agent_session_driver, credentials
+from agent_sessions.driver import agent_runner, agent_session_driver, credentials, locks, output
 
 REPO = "owner/repo"
 BOARD = "owner/9"
@@ -90,12 +90,15 @@ HUMAN_LOGIN = "lmorchard"
 GOLDEN = Path(__file__).parent / "fixtures" / "select_golden.txt"
 
 
-class FrozenDatetime:
-    """Stand-in for the driver's `datetime`, so timestamps are byte-stable."""
+def frozen_now():
+    """Stand-in for `output.now`, so every recorded timestamp is byte-stable.
 
-    @classmethod
-    def now(cls, tz=None):
-        return FROZEN
+    Replaces a `FrozenDatetime` class that stood in for a stdlib `datetime` re-exported
+    through `agent_session_driver`. The clock is now a named function in `output`, which
+    every driver module calls, so freezing it is one `setattr` on the module that owns it
+    rather than a patch on a barrel five other modules had to import to reach.
+    """
+    return FROZEN
 
 
 # --- fixture GitHub state --------------------------------------------------
@@ -731,10 +734,19 @@ class LoopHarness:
         monkeypatch.setenv(credentials.READ_TOKEN_VAR, READ_TOKEN)
         monkeypatch.setenv(credentials.WRITE_TOKEN_VAR, WRITE_TOKEN)
         monkeypatch.setenv(credentials.LOGIN_VAR, DRIVER_LOGIN)
-        monkeypatch.setattr(agent_session_driver, "datetime", FrozenDatetime)
-        # The driver releases its lock from an atexit hook keyed on this global.
-        # monkeypatch restores it to None, so no pass can leave a live lock behind.
-        monkeypatch.setattr(agent_session_driver, "CURRENT_LOCK_ISSUE", None)
+        monkeypatch.setattr(output, "now", frozen_now)
+        # The driver releases its lock from an atexit hook keyed on a module global in
+        # `locks`. Patch it there, on the owning module.
+        #
+        # This used to patch `agent_session_driver.CURRENT_LOCK_ISSUE` and claim the same
+        # effect. It had none: that module does `from ...locks import CURRENT_LOCK_ISSUE`,
+        # which binds a *copy* of a `str | None`, while `locks.acquire_lock` and
+        # `locks.release_lock` read and write `locks.CURRENT_LOCK_ISSUE` through `global`.
+        # Nothing in `src/` ever read the re-exported name. The visible symptom was real
+        # `Releasing lock for #N...` lines at pytest exit -- the atexit hook firing after
+        # monkeypatch had restored the true `subprocess.run` -- harmless only because these
+        # tmp_path repos have no `origin` to push a ref deletion to.
+        monkeypatch.setattr(locks, "CURRENT_LOCK_ISSUE", None)
 
     def seed_runs(self, rows):
         self.state_dir.mkdir(parents=True, exist_ok=True)

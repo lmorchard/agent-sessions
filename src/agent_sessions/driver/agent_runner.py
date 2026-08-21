@@ -39,8 +39,29 @@ BASE_DENIED_TOOLS = (
     "Bash(gh pr merge:*)",
     "Bash(gh pr merge *)",
     "Bash(git push --force:*)",
+    "Bash(git push --force *)",
+    "Bash(git push -f:*)",
+    "Bash(git push -f *)",
     "Bash(gh repo delete:*)",
 )
+# What is deliberately NOT here, and why, so the gap is a decision rather than an
+# oversight someone rediscovers.
+#
+# `gh api --method PUT .../pulls/N/merge` and the `curl` equivalent are the other two
+# ways to merge, and OPENCODE_DENIED_COMMANDS below denies both. They are absent here
+# because the merge endpoint appears *mid-command*, and these entries are prefix
+# patterns -- `Bash(gh pr merge:*)` matches a command that starts that way. Whether
+# Claude Code's rule syntax supports a mid-string glob is not something `--help`
+# states, and findings.md defect class 5 is precisely "I wrote a guard" not being
+# evidence. Adding an unverified pattern to a floor whose value is that it is verified
+# would be the wrong trade.
+#
+# Those two vectors are covered by the PreToolUse hook instead
+# (`merge-block-hook.sh`, cases 2 and 3), which greps the whole command line and is
+# tested per-vector in tests/driver/test_merge_hook.py. Promoting them to tool-level
+# rules as well needs one live run to confirm the syntax: `make backend-permission-probe
+# BACKEND=claude EVIDENCE_DIR=...`. Until then the hook is the load-bearing layer for
+# the REST paths, which is why its install is now fail-closed.
 
 OPENCODE_CONFIG_VAR = "OPENCODE_CONFIG_CONTENT"
 OPENCODE_AGENT_PREFIX = "agent-session"
@@ -57,6 +78,8 @@ OPENCODE_DENIED_COMMANDS = (
     "gh pr merge *",
     "git push --force",
     "git push --force *",
+    "git push -f",
+    "git push -f *",
     "gh repo delete",
     "gh repo delete *",
     "gh api *pulls/*/merge*",

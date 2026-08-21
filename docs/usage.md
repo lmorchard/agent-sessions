@@ -129,7 +129,14 @@ Two subtleties that were learned the hard way:
 
 ## Part 4 — Running the driver
 
-The driver picks eligible issues and runs `express` on them unattended.
+The driver picks eligible work and runs **one phase per invocation** on it, unattended. It does not
+run `express`; that mode is for driving the ladder by hand. The phases it can select are `triage`,
+`refine`, `execute`, `address_comments`, `fix_ci`, `fix_conflict`, `request_review` and `grade_gate`
+(`PHASE_TIERS` in `src/agent_sessions/driver/lifecycle.py`), and `request_review` runs
+deterministically with no agent at all.
+
+So an issue is carried forward across *several* runs, one phase at a time, which is what the
+outcomes, the parking and the attempt counters below are all in service of.
 
 ```bash
 make dry-run      # selection only — no agent invoked, no cost
@@ -153,7 +160,7 @@ user you create for it, with two fine-grained PATs on that one account:
 |---|---|---|
 | `DRIVER_GH_LOGIN` | `.env` | the account both tokens must belong to |
 | `AGENT_GH_READ_TOKEN` | `.env` | read-only PAT — Metadata, Contents, Issues, Pull requests, Actions, Checks |
-| `DRIVER_GH_WRITE_TOKEN` | **your shell, never `.env`** | write PAT — Contents, Issues, Pull requests |
+| `DRIVER_GH_WRITE_TOKEN` | `.env` | write PAT — Contents, Issues, Pull requests |
 
 The agent gets the read token and cannot write to GitHub at all. It records the writes it wants —
 comments, labels, the branch push, the PR — into `writes.jsonl` in the run directory, and the driver
@@ -222,8 +229,8 @@ The last row is a hard limit, not a configuration gap. A fine-grained PAT reache
 by its resource owner, so it cannot touch a private repo owned by some other user however it was
 invited — and a machine user will never own yours. A classic PAT is not owner-scoped and *can*
 reach it — but its scopes are coarse: `repo` is read **and** write, with no read-only-private
-variant, so granting the agent read would grant it write and collapse the split. There is no third
-option short of a GitHub App.
+variant, so granting the agent read would grant it write and collapse the split. The way out is a
+GitHub App, which *is* implemented — see "The boundary, if it is ever wanted" below.
 
 **Boards are a separate grant.** ProjectsV2 keeps its own collaborator list and repository access
 does not feed into it. A public board is readable by anyone; a private one needs the machine user
@@ -314,7 +321,21 @@ and all of it is GitHub-side configuration:
 
 ### The boundary, if it is ever wanted
 
-The write token should not be on the machine the agent runs on. None of these is built:
+The write token should not be on the machine the agent runs on.
+
+**One option is built and undocumented until now: GitHub App authentication.** Set
+`DRIVER_GH_APP_ID`, `DRIVER_GH_APP_INSTALLATION_ID` and `DRIVER_GH_APP_PRIVATE_KEY_FILE` (the
+`GH_APP_*` spellings also work) and `credentials.resolve` mints scoped read and write installation
+tokens per run instead of requiring either PAT — see `generate_app_jwt` and
+`fetch_app_installation_token` in `src/agent_sessions/driver/credentials.py`. The private key file
+should live outside the repository; `~/.config/agent-session/` is the conventional home. This also
+routes around the fine-grained-PAT resource-owner limit described above, because an App is installed
+per repository rather than owned by a user.
+
+There is a fourth credential variable, `DRIVER_GH_BOARD_TOKEN`, which falls back to the write token
+and exists for the separate ProjectsV2 grant described above.
+
+These three, by contrast, are **not** built:
 
 1. **Driver on a different host** — a GitHub Actions runner
    ([#3](https://github.com/lmorchard/agent-sessions/issues/3)). The agent's machine never holds a
@@ -324,17 +345,41 @@ The write token should not be on the machine the agent runs on. None of these is
 
 ### What "eligible" means
 
-Open **and** carries the marker **and** its anchored `## Tier:` line says `auto-ok` **and** no
-open PR references it **and** it doesn't carry the `driver-parked` label.
+Selection is a priority ladder, not a single predicate, and an open PR is the *highest* priority
+rather than an exclusion. The authority is `select` in `src/agent_sessions/driver/router.py`; this
+describes it as of 2026-08-19.
 
-Every one of those is read from GitHub, which is the point: selection consults **no local state**,
-so it answers the same way on any machine. The park bit used to be the exception — a gitignored
+First a queue filter. Unless you pass `--all-issues`, an open issue is only considered if it is
+**on the board with status `Ready`** (or board priority `P0`/`P1`), **or** carries a `P0`–`P5`
+**label**. So the board *does* gate — an issue nobody has moved to `Ready` is invisible to the
+driver, which is the most common reason a queue reads as empty.
+
+Then, for each surviving issue, in order:
+
+| Priority | When | Phase |
+|---|---|---|
+| **P1 Unblock** | an open PR references the issue | whatever the reconciler decides from PR state — `address_comments`, `fix_ci`, `fix_conflict`, `request_review` or `grade_gate` |
+| **P2 Execute** | specced, tier `auto-ok`, no PR | `execute` |
+| **P3 Groom** | specced, tier `needs-review`, no PR | `refine` |
+| **P3 Groom** | not specced | `triage` |
+
+"Specced" means the `agent-session:spec` **label** or the `<!-- agent-session:spec -->` body marker —
+the label is what `intake` and `triage` actually apply. Note what this means: a `needs-review` issue
+**is** selectable, and routes to `refine`; it is not skipped.
+
+Excluded at any priority: a park label (`agent-session:needs-human` or
+`agent-session:needs-human-interactive`) unless `--retry <n>` or a new human comment has arrived
+since the park; `agent-session:merge-ready`; an unparseable `## Tier:` line; and any issue that has
+already used up `--max-phase-attempts` (default 3) on its current phase, which parks it with
+`MAX_PHASE_ATTEMPTS (3) reached for phase <phase>` — a reason you will see in the output.
+
+There is also a `P4 Escalate` tier in the code. It is declared and never populated, so nothing
+reaches it today.
+
+Every input above is read from GitHub, which is the point: selection consults **no local state**, so
+it answers the same way on any machine. The park bit used to be the exception — a gitignored
 `parked.jsonl` relative to cwd, append-only with no un-park record, so it was both per-machine and
 wrong about every issue it named (#5).
-
-The board column is **advisory** — it's reported but doesn't gate. That's deliberate: the column
-answers *does a human want this*, the marker answers *can this be attempted unattended*, and on
-a real board those two sets can have an empty intersection.
 
 `dry-run` prints one line per excluded issue *with its reason*, because a queue read that yields
 zero must say why — otherwise "no work available" and "my query is broken" look identical.
@@ -344,20 +389,28 @@ zero must say why — otherwise "no work available" and "my query is broken" loo
 | Outcome | Meaning | Parked? |
 |---|---|---|
 | `gate-eligible` | reached `eligible-for-auto-merge` | no |
-| `gate-human` | reached `human-merge-required` | no |
+| `gate-human` | reached `human-merge-required` | **yes** — a human is the next step |
 | `ci-stale` | the gate's CI row describes a commit that's no longer the head | no |
-| `incomplete` | verdict still `pending` — the run stopped early | yes |
+| `incomplete` | verdict still `pending` — the run stopped early | **no** — deliberately left unparked so the loop can re-evaluate |
 | `no-gate` | a PR exists but carries no gate block | yes |
 | `parked` | no PR was opened | yes |
 | `failed` | the run genuinely failed | yes |
 | `budget-exhausted` | ≥95% of budget spent with no verdict | **no** — and it stops the loop |
 | `driver-fault` | the invocation never reached the agent | **no** |
 
-Parking **adds the `driver-parked` label** to the issue; reaching a verdict (`gate-eligible` or
-`gate-human`) **removes** it. So a parked issue is skipped by future selection until either a later
-run reaches a verdict, `--retry <n>` ignores the label for one invocation, or you take the label off
-by hand — which you can do from the issue page, because the state is visible there rather than
-buried in a state file.
+Parking **adds the `agent-session:needs-human` label** to the issue. There is a second park label,
+`agent-session:needs-human-interactive`, for work that needs a human at a terminal rather than just a
+human's opinion; selection treats either as parked.
+
+Which outcomes do what, since the table above is the part people read under pressure:
+`parked`, `failed`, `no-gate` and `gate-human` **add** the park label; `incomplete` **removes** it, so
+the loop can pick the issue up again; `gate-eligible` adds `agent-session:merge-ready` instead. The
+authority is `apply_park_state` in `src/agent_sessions/driver/parking.py` — read it rather than this
+paragraph if they ever disagree.
+
+So a parked issue is skipped by future selection until a later run reaches a verdict, `--retry <n>`
+ignores the label for one invocation, or you take the label off by hand — which you can do from the
+issue page, because the state is visible there rather than buried in a state file.
 
 `budget-exhausted` and `driver-fault` are deliberately never parked: both are recoverable
 configuration problems, and parking would hide them behind a skip reason on a perfectly good
@@ -416,8 +469,19 @@ Under `<state-dir>/runs/<issue>-<timestamp>/`:
 | `prompt.txt` | exactly what the run was asked |
 | `writes.jsonl` | the GitHub writes the agent recorded, one JSON object per line |
 | `writes-result.json` | what the driver made of them — validation errors, per-entry status, output |
-| `denials.txt` | permission denials, if any |
+| `stderr.txt` | the backend's stderr — the first thing to read on a `driver-fault` |
+| `parsed.json` | the parsed result stream: outcome, cost, session id |
 | `child.pid` | for orphan detection |
+
+And in the state dir itself, above the per-run directories:
+
+| File | What it is |
+|---|---|
+| `runs.jsonl` | one line per run — the durable ledger. `make evidence` reports over it |
+| `parked.jsonl` | one line per park, with the reason |
+| `inbox.md` | **the human work queue.** Every escalation appends here, so this is the file to read when you come back to a loop that has been running unattended |
+| `inflight.json` | the current run, for orphan detection |
+| `settings.json` | the rendered PreToolUse hook settings handed to the backend |
 
 `writes-result.json` is the first thing to read when a run "did nothing": a manifest with one
 malformed entry applies **none** of them, so a park comment can go missing while the run itself
