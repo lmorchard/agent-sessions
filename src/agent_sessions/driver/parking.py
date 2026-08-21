@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agent_sessions.driver import credentials, output
+from agent_sessions.driver import credentials, jsonl, output
 from agent_sessions.driver.labels import (
     INTERACTIVE_LABEL,
     MERGE_READY_LABEL,
@@ -303,18 +303,12 @@ def get_park_time(issue_number: str | int, state_dir: Path | None) -> str:
         log_file = state_dir / filename
         if not log_file.is_file():
             continue
-        for line in log_file.read_text(encoding="utf-8", errors="ignore").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                row = json.loads(line)
-                if str(row.get("issue")) == str(issue_number):
-                    ts = str(row.get(field, ""))
-                    if ts and ts > last_ts:
-                        last_ts = ts
-            except Exception:
-                pass
+        rows, _ = jsonl.read_records(log_file)
+        for row in rows:
+            if str(row.get("issue")) == str(issue_number):
+                ts = str(row.get(field, ""))
+                if ts and ts > last_ts:
+                    last_ts = ts
     return last_ts
 
 
@@ -342,18 +336,12 @@ def park_reason(issue_number: str | int, state_dir: Path) -> str:
     if not runs_log.is_file():
         return "no history recorded on this host"
     last_reason = ""
-    for line in runs_log.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-            if str(row.get("issue")) == str(issue_number):
-                reason = row.get("reason", "")
-                if reason:
-                    last_reason = reason
-        except Exception:
-            pass
+    rows, _ = jsonl.read_records(runs_log)
+    for row in rows:
+        if str(row.get("issue")) == str(issue_number):
+            reason = row.get("reason", "")
+            if reason:
+                last_reason = reason
     return last_reason or "no history recorded on this host"
 
 

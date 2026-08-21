@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agent_sessions.driver import agent_runner, lifecycle
+from agent_sessions.driver import agent_runner, jsonl, lifecycle
 
 READ_MARKER_TEXT = "agent-session-permission-probe-read-ok"
 PROTECTED_MARKER_TEXT = "agent-session-permission-probe-protected-original\n"
@@ -68,12 +68,10 @@ def backend_version(backend: str) -> str:
 
 
 def observed_denials(backend: str, raw_text: str) -> tuple[bool, bool]:
-    events = []
-    for line in raw_text.splitlines():
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
+    # Records only. This used to keep whatever `json.loads` returned and then call
+    # `.get` on it, so a bare scalar anywhere in a transcript raised `AttributeError`
+    # inside the tool whose job is to report on a misbehaving backend.
+    events, _ = jsonl.parse_records(raw_text)
 
     if backend == "opencode":
         denied_tools = {

@@ -23,13 +23,13 @@ that expression is how the second one went wrong.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, DefaultDict
 
+from agent_sessions.driver import jsonl
 from agent_sessions.scripts.run_progress import default_state_dir
 
 
@@ -80,23 +80,8 @@ def read_ledger(path: Path) -> tuple[list[dict[str, Any]], int]:
     distinguished from one that had fewer runs to report, and this project's rule is that
     a null must not render as a positive.
     """
-    rows: list[dict[str, Any]] = []
-    skipped = 0
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                parsed = json.loads(line)
-            except json.JSONDecodeError:
-                skipped += 1
-                continue
-            if isinstance(parsed, dict):
-                rows.append(parsed)
-            else:
-                skipped += 1
-    return rows, skipped
+    rows, skipped = jsonl.read_records(path)
+    return [dict(row) for row in rows], skipped
 
 
 def main(argv: list[str] | None = None) -> int:
