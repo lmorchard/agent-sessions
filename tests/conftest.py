@@ -163,10 +163,9 @@ def clear_git_lock_global() -> Iterator[None]:
 #
 # **This is deliberately not `FakeGitHub`.** That models issues, PRs, board items and
 # reactions as mutable fixture state, which is right for a full driver pass and far more
-# than a `preflight` unit test needs. Moving `FakeGitHub`, `StubAgent` and `LoopHarness`
-# here so all three suites can share them is the other half of #261's X2 and is left
-# undone: it is a ~700-line mechanical move of a working harness, and the defect X2 is
-# actually about is the silent success, which this closes without it.
+# than a `preflight` unit test needs. The two are siblings, not rivals: reach for
+# `tests/driver/loop_harness.py` when a test needs a GitHub it can read back, and for
+# this when it only needs a `gh` that cannot answer a question nobody modelled.
 
 
 class Result:
