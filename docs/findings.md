@@ -797,6 +797,9 @@ the entries most likely to be silently re-broken.**
 | **`gh pr view <n> --json reviewThreads` is not a valid field** (gh 2.96.0). It errors and prints the field list, which reads like "no threads." Use a GraphQL query. | move 2 |
 | **`gh pr checks --json state` returns `SUCCESS`, not `pass`.** The normalised `pass\|fail\|pending\|skipping\|cancel` lives in **`bucket`**. Filtering on `.state != "pass"` returned 2 non-passing checks on a fully green PR — it would have made every green PR ineligible. **Read `bucket`, never `state`.** | move 4a |
 | **`--required` is a trap on a repo with no required checks:** prints `no required checks reported` and **exits 1**. Grade *all* checks. | move 4a |
+| **Retargeting a PR's base does not run its checks.** A workflow triggered on `pull_request` fires for `opened`, `synchronize` and `reopened`. Changing the base is `edited`, which is not in the default set — so a retargeted PR keeps whatever checks it had, or none. With a ruleset on `main` requiring a status context, that reads as `mergeStateStatus: BLOCKED` with no failing check and no explanation. **Close and reopen the PR** to fire `reopened`. Hit twice in one session on a stacked pair. | 2026-08-21, PRs #264 and #265 |
+| **`gh api repos/{o}/{r}/branches/main/protection` returns 404 on a repo protected by a *ruleset*.** Classic branch protection and rulesets are different APIs. 404 there does not mean "unprotected" — read `repos/{o}/{r}/rulesets`. | 2026-08-21, while diagnosing the row above |
+| **`git push --force-with-lease` degrades silently when you push to an explicit URL.** With no remote-tracking ref for that branch the lease has nothing to compare and the push is refused as `stale info`, or — with a bare `--force` — proceeds with no protection at all. Pass the expectation: `--force-with-lease=<branch>:<sha>` from `git ls-remote`. | 2026-08-21, pushing a stacked branch over SSH |
 | **`gh pr checks <n> --watch` is the only settle-poll that survives `dontAsk`** — one `gh` invocation covered by the existing allow-rule, one turn instead of one per poll. `sleep` loops, backgrounded shells and the `Monitor` tool are all denied. Validated on a real 11m34s wait. | move 4c |
 | **`gh project item-list` silently truncates at 30.** Pass an explicit `--limit` everywhere *and print the count read*, so truncation is visible rather than inferred from an empty queue. | move 3, 185-item board |
 | **`gh project item-add` is not immediately readable by `item-list`.** The new item's id comes back empty on a read issued right after the add, so a follow-up `item-edit` fails with `Could not resolve to a node with the global id of ''`. Hit twice in a row. Re-read before editing, and **check the id is non-empty rather than interpolating it blind** — an empty id produces a confusing GraphQL error, not a clear one. | move 7, filing #12 and #13 |
@@ -892,6 +895,20 @@ above sharpens that rather than adding to the tally: **there was no warning to f
 about mutation-testing a guard that protects a dangerous state.
 
 ### Operational figures
+
+**A green `make check` in one checkout is not a green `make check`.** Every PR of the
+2026-08-19 audit was verified from a cold `.venv`, and `main` still went red on merge. The
+suites read `.env` from the current directory; three of them never left the repository
+root, so they picked up the operator's real `BOARD` and queried a live GitHub board from a
+unit test. It passed for years because the fake answered every unmodelled call with
+success, and it passed for me because **the audit's own first commit had moved the
+credentials out of my worktree** — so my tree had no `.env` and the main clone did.
+
+The generalisable part is not "check for `.env`". It is that a verification environment
+differing from the target environment is invisible to the verification, and the difference
+is most likely to be something the same session created. The mitigations that worked: a
+fake that records unmodelled calls instead of answering them, and running the aggregate
+check in the *real* clone after merge rather than trusting the branch's own run.
 
 - **The re-verification tax is structural, not bad luck.** Every upstream landing invalidates the
   freeze sha and forces rebase + re-anchor + full re-verify. `origin/main` moved three times during
