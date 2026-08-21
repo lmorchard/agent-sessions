@@ -108,6 +108,129 @@ def park_label_remove(issue_number: str | int, repo: str) -> None:
         say(f"  WARNING: could not remove the {PARK_LABEL} label from #{issue_number} -- it stays parked")
 
 
+#: The GraphQL query behind the reaction check. A 👍 on a comment does not move the
+#: issue's `updatedAt`, so REST alone cannot see an approval that is only a reaction --
+#: which is the shape a human approval most often takes.
+_COMMENTS_AND_REACTIONS_QUERY = """
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    issue(number: $number) {
+      comments(last: 50) {
+        nodes {
+          author { login }
+          createdAt
+          reactions(first: 20) {
+            nodes {
+              content
+              user { login }
+              createdAt
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _norm_ts(value: object) -> str:
+    """GitHub's ISO-8601 flattened to the driver's own `20260810T120000Z` shape.
+
+    Comparison is lexical on the flattened form, which works only because both sides
+    are UTC and zero-padded. Written out four times before this; a fifth spelling that
+    dropped one of the three characters would have made a comparison silently wrong in
+    one branch and right in the others.
+    """
+    return str(value or "").replace("-", "").replace(":", "").replace(" ", "")
+
+
+def _human_after_park(login: object, timestamp: object, known_bots: set[str], norm_park_time: str) -> str:
+    """The login, if this is a person who acted after the park. Empty string otherwise.
+
+    `is_bot_login` returns True for an empty login, so the truthiness check the comment
+    branches wrote out separately is subsumed here rather than dropped -- see
+    `tests/driver/test_has_new_human_comment.py`.
+    """
+    name = login if isinstance(login, str) else ""
+    if credentials.is_bot_login(name, known_bots=known_bots):
+        return ""
+    if norm_park_time:
+        norm = _norm_ts(timestamp)
+        if not norm or norm <= norm_park_time:
+            return ""
+    return name
+
+
+def _reaction_nodes(comment_obj: dict) -> list:
+    """The reactions on one comment, under either shape the two sources produce.
+
+    GraphQL returns `{"nodes": [...]}`. The REST branch also accepted a bare list, and
+    that tolerance is kept and now applies to both -- a widening of a path GraphQL
+    cannot reach, rather than the removal of one that REST might.
+    """
+    reactions = comment_obj.get("reactions") or {}
+    if isinstance(reactions, dict):
+        nodes = reactions.get("nodes", [])
+    elif isinstance(reactions, list):
+        nodes = reactions
+    else:
+        nodes = []
+    return nodes if isinstance(nodes, list) else []
+
+
+def _scan_comments(comments: object, known_bots: set[str], norm_park_time: str) -> tuple[bool, str]:
+    """Newest-first walk of comments and their reactions, for the first human.
+
+    One implementation for both sources. The GraphQL and REST payloads differ in how
+    they are *fetched*, not in their shape once fetched, and the previous two copies had
+    already begun to drift on the reaction case.
+    """
+    if not isinstance(comments, list):
+        return False, ""
+    for comment_obj in reversed(comments):
+        if not isinstance(comment_obj, dict):
+            continue
+        author = comment_obj.get("author") or {}
+        login = author.get("login", "") if isinstance(author, dict) else ""
+        actor = _human_after_park(login, comment_obj.get("createdAt"), known_bots, norm_park_time)
+        if actor:
+            return True, actor
+
+        for r in reversed(_reaction_nodes(comment_obj)):
+            if not isinstance(r, dict):
+                continue
+            user = r.get("user") or {}
+            u_login = user.get("login", "") if isinstance(user, dict) else ""
+            reactor = _human_after_park(u_login, r.get("createdAt"), known_bots, norm_park_time)
+            if reactor:
+                return True, reactor
+    return False, ""
+
+
+def _graphql_comments(issue_number: str | int, repo: str) -> object:
+    """Comment nodes from the GraphQL query, or `[]` if it could not answer."""
+    owner, repo_name = repo.split("/", 1)
+    cmd = [
+        "gh", "api", "graphql",
+        "-f", f"query={_COMMENTS_AND_REACTIONS_QUERY}",
+        "-F", f"owner={owner}",
+        "-F", f"repo={repo_name}",
+        "-F", f"number={issue_number}",
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0 or not res.stdout.strip():
+        return []
+    data = json.loads(res.stdout)
+    return (
+        data.get("data", {})
+        .get("repository", {})
+        .get("issue", {})
+        .get("comments", {})
+        .get("nodes", [])
+    )
+
+
 def has_new_human_comment(
     issue_number: str | int,
     repo: str,
@@ -115,118 +238,34 @@ def has_new_human_comment(
     park_time: str = "",
     issue_updated_at: str = "",
 ) -> tuple[bool, str]:
-    norm_park_time = park_time.replace("-", "").replace(":", "").replace(" ", "") if park_time else ""
+    """True, and who, if a person has acted on this issue since it was parked.
+
+    Three sources in priority order, each stopping the search once it says yes:
+    the GraphQL comment+reaction query, `gh issue view --json comments`, and
+    `gh pr view --json reviews`. Every one is wrapped in `except Exception` and falls
+    through on failure, because a parked issue nobody can query should stay parked
+    rather than crash the pass.
+
+    The three used to be written out in full, twice for the comment scan. The
+    per-branch code is now only the *fetch*; the scan is shared.
+    """
+    norm_park_time = _norm_ts(park_time) if park_time else ""
     known_bots = {name.lower() for name in (bot_logins or credentials.ALWAYS_BOT_LOGINS)}
 
     if repo and "/" in repo:
         try:
-            owner, repo_name = repo.split("/", 1)
-            query = """
-            query($owner: String!, $repo: String!, $number: Int!) {
-              repository(owner: $owner, name: $repo) {
-                issue(number: $number) {
-                  comments(last: 50) {
-                    nodes {
-                      author { login }
-                      createdAt
-                      reactions(first: 20) {
-                        nodes {
-                          content
-                          user { login }
-                          createdAt
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-            """
-            cmd = [
-                "gh",
-                "api",
-                "graphql",
-                "-f",
-                f"query={query}",
-                "-F",
-                f"owner={owner}",
-                "-F",
-                f"repo={repo_name}",
-                "-F",
-                f"number={issue_number}",
-            ]
-            res = subprocess.run(cmd, capture_output=True, text=True)
-            if res.returncode == 0 and res.stdout.strip():
-                data = json.loads(res.stdout)
-                comments = (
-                    data.get("data", {})
-                    .get("repository", {})
-                    .get("issue", {})
-                    .get("comments", {})
-                    .get("nodes", [])
-                )
-                if isinstance(comments, list) and comments:
-                    for comment_obj in reversed(comments):
-                        if not isinstance(comment_obj, dict):
-                            continue
-                        author = comment_obj.get("author") or {}
-                        login = author.get("login", "") if isinstance(author, dict) else ""
-                        if login and not credentials.is_bot_login(login, known_bots=known_bots):
-                            created_at = str(comment_obj.get("createdAt", ""))
-                            norm_created = created_at.replace("-", "").replace(":", "").replace(" ", "")
-                            if not norm_park_time or (norm_created and norm_created > norm_park_time):
-                                return True, login
-
-                        reactions = comment_obj.get("reactions") or {}
-                        r_nodes = reactions.get("nodes", []) if isinstance(reactions, dict) else []
-                        if isinstance(r_nodes, list):
-                            for r in reversed(r_nodes):
-                                if not isinstance(r, dict):
-                                    continue
-                                user = r.get("user") or {}
-                                u_login = user.get("login", "") if isinstance(user, dict) else ""
-                                if u_login and not credentials.is_bot_login(u_login, known_bots=known_bots):
-                                    r_created = str(r.get("createdAt", ""))
-                                    norm_r_created = r_created.replace("-", "").replace(":", "").replace(" ", "")
-                                    if not norm_park_time or (norm_r_created and norm_r_created > norm_park_time):
-                                        return True, u_login
+            found, who = _scan_comments(_graphql_comments(issue_number, repo), known_bots, norm_park_time)
+            if found:
+                return True, who
         except Exception:
             pass
 
     try:
         cmd = ["gh", "issue", "view", str(issue_number), "--repo", repo, "--json", "comments"]
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        data = json.loads(res.stdout)
-        comments = data.get("comments", [])
-        if isinstance(comments, list) and comments:
-            for comment_obj in reversed(comments):
-                if not isinstance(comment_obj, dict):
-                    continue
-                author = comment_obj.get("author") or {}
-                login = author.get("login", "") if isinstance(author, dict) else ""
-                if login and not credentials.is_bot_login(login, known_bots=known_bots):
-                    created_at = str(comment_obj.get("createdAt", "")) if isinstance(comment_obj, dict) else ""
-                    norm_created = created_at.replace("-", "").replace(":", "").replace(" ", "")
-                    if not norm_park_time or (norm_created and norm_created > norm_park_time):
-                        return True, login
-
-                reactions = comment_obj.get("reactions") or {}
-                r_nodes = (
-                    reactions.get("nodes", [])
-                    if isinstance(reactions, dict)
-                    else (reactions if isinstance(reactions, list) else [])
-                )
-                if isinstance(r_nodes, list):
-                    for r in reversed(r_nodes):
-                        if not isinstance(r, dict):
-                            continue
-                        user = r.get("user") or {}
-                        u_login = user.get("login", "") if isinstance(user, dict) else ""
-                        if u_login and not credentials.is_bot_login(u_login, known_bots=known_bots):
-                            r_created = str(r.get("createdAt", "")) if isinstance(r, dict) else ""
-                            norm_r_created = r_created.replace("-", "").replace(":", "").replace(" ", "")
-                            if not norm_park_time or (norm_r_created and norm_r_created > norm_park_time):
-                                return True, u_login
+        found, who = _scan_comments(json.loads(res.stdout).get("comments", []), known_bots, norm_park_time)
+        if found:
+            return True, who
     except Exception:
         pass
 
@@ -234,16 +273,19 @@ def has_new_human_comment(
         pr_cmd = ["gh", "pr", "view", str(issue_number), "--repo", repo, "--json", "reviews"]
         pr_res = subprocess.run(pr_cmd, capture_output=True, text=True)
         if pr_res.returncode == 0:
-            pr_data = json.loads(pr_res.stdout)
-            reviews = pr_data.get("reviews", [])
-            for rev in reversed(reviews):
+            for rev in reversed(json.loads(pr_res.stdout).get("reviews", [])):
                 author = rev.get("author", {}) if isinstance(rev, dict) else {}
                 login = author.get("login", "") if isinstance(author, dict) else ""
                 if credentials.is_bot_login(login, known_bots=known_bots):
                     continue
+                # Deliberately not `_human_after_park`. That rejects a missing
+                # timestamp when a park time is set; this accepts one, and the two
+                # have disagreed since before the split. Pinned in
+                # `test_a_review_with_no_timestamp_counts_while_a_comment_with_none_does_not`
+                # and left for #261 to decide, because reconciling them here would
+                # change what the driver does to a real PR inside a deduplication.
                 if norm_park_time:
-                    created_at = str(rev.get("submittedAt", "")) if isinstance(rev, dict) else ""
-                    norm_created = created_at.replace("-", "").replace(":", "").replace(" ", "")
+                    norm_created = _norm_ts(rev.get("submittedAt", "") if isinstance(rev, dict) else "")
                     if norm_created and norm_created <= norm_park_time:
                         continue
                 return True, login
