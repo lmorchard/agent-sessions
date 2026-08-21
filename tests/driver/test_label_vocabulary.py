@@ -107,10 +107,22 @@ def test_no_shipping_module_hardcodes_a_label_name(path):
     )
 
 
-def test_is_specced_has_one_implementation():
-    """C3. `router` used to carry a second copy that could not see `labels.MARKER`."""
-    assert router.is_specced is labels.is_specced
-    assert parking.is_specced is labels.is_specced
+@pytest.mark.parametrize("module_name", sorted(CONSUMERS))
+def test_is_specced_has_one_implementation(module_name):
+    """C3. `router` used to carry a second copy that could not see `labels.MARKER`.
+
+    Presence is not required -- a consumer that has no use for the predicate should not
+    import it, and `parking` does not. What is required is that a module exposing the
+    name exposes *the* implementation, so a hand-rolled second copy fails here even when
+    it imports `SPEC_LABEL` rather than inlining it (which is all C2 can see).
+    """
+    seen = getattr(CONSUMERS[module_name], "is_specced", None)
+    if seen is None:
+        pytest.skip(f"{module_name} does not consume is_specced")
+    assert seen is labels.is_specced, (
+        f"{module_name}.is_specced is a second implementation -- it cannot see a change "
+        f"to `labels.MARKER`, and nothing else would say so"
+    )
 
 
 def test_is_specced_honours_the_label_and_the_marker():

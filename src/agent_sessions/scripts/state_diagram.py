@@ -5,7 +5,9 @@ Why this exists:
 ----------------
 Docs should not state facts or state transition models that can be programmatically derived from
 live source code. This module programmatically generates the Mermaid diagram of issue & PR states,
-using live constants and definitions from `agent_sessions.driver` (`router`, `reconciler`, `gate`).
+reading the one constant it names -- the park label -- from `driver/labels.py`, its owner, so
+a rename reaches the README. The `reconciler` and `gate` calls the diagram shows are node
+labels, not live reads; grep this file before believing otherwise.
 
 It can update `README.md` or check `README.md` for drift as part of `docs-check`.
 """
@@ -16,7 +18,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from agent_sessions.driver import router
+from agent_sessions.driver import labels
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -26,7 +28,7 @@ MARKER_END = "<!-- END ISSUE_PR_STATE_DIAGRAM -->"
 
 def generate_diagram() -> str:
     """Generate the Mermaid flowchart for issue & PR states from source code constants."""
-    park_lbl = router.PARK_LABEL
+    park_lbl = labels.PARK_LABEL
 
     diagram = f"""flowchart TD
     subgraph Backlog ["1. Issue Selection & Intake"]

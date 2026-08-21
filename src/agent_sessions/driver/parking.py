@@ -8,13 +8,10 @@ import sys
 from pathlib import Path
 
 from agent_sessions.driver import credentials, output
-from agent_sessions.driver.labels import (  # noqa: F401 - re-exported for existing importers
+from agent_sessions.driver.labels import (
     INTERACTIVE_LABEL,
-    MARKER,
     MERGE_READY_LABEL,
     PARK_LABEL,
-    SPEC_LABEL,
-    is_specced,
 )
 from agent_sessions.driver.output import say
 

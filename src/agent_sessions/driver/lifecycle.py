@@ -23,6 +23,17 @@ from agent_sessions.driver import (
     workspace,
 )
 
+# Direct, not through the `agent_session_driver` facade the function calls below use. That
+# facade is a lazy import inside function bodies to break a cycle; `labels` is a leaf with
+# nothing to cycle against, so laundering the vocabulary through two modules only hides
+# where it is defined. Names rather than the module: `select_queue` binds a local `labels`.
+from agent_sessions.driver.labels import (
+    INTERACTIVE_LABEL,
+    MERGE_READY_LABEL,
+    PARK_LABEL,
+    is_specced,
+)
+
 # Imported, not aliased. `say`/`log`/`die` originate in `output`; binding them here is
 # for brevity in a module that calls `say` dozens of times, and binding them by import
 # keeps `lifecycle.say` patchable the way the suites already patch `board.log`.
@@ -671,13 +682,13 @@ def select_queue(ctx: RunContext) -> SelectionResult:
     candidates_json = [
         iss
         for iss in filtered_issues
-        if agent_session_driver.is_specced(iss)
+        if is_specced(iss)
         and not any(
-            isinstance(l, dict) and l.get("name") == agent_session_driver.MERGE_READY_LABEL
+            isinstance(l, dict) and l.get("name") == MERGE_READY_LABEL
             for l in iss.get("labels", [])
         )
     ]
-    markerless_json = [iss for iss in filtered_issues if not agent_session_driver.is_specced(iss)]
+    markerless_json = [iss for iss in filtered_issues if not is_specced(iss)]
     all_issues_json = candidates_json + markerless_json
     parked = agent_session_driver.parked_numbers(all_issues_json)
 
@@ -1219,7 +1230,7 @@ def classify_and_record(
                 except Exception:
                     lbls = []
                     issue_tier = "missing"
-                if agent_session_driver.PARK_LABEL in lbls or agent_session_driver.INTERACTIVE_LABEL in lbls:
+                if PARK_LABEL in lbls or INTERACTIVE_LABEL in lbls:
                     outcome = "parked"
                     if "inconclusive" in inv.final_text.lower():
                         reason = f"parked (inconclusive reply) by agent during {inv.phase}: {inv.final_text[:400]}"

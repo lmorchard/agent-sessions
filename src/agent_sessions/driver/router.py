@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent_sessions.driver.labels import (  # noqa: F401 - re-exported for existing importers
+from agent_sessions.driver.labels import (
     MERGE_READY_LABEL,
     PARK_LABEL,
     is_specced,
