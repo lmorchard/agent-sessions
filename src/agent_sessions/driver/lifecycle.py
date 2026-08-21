@@ -19,6 +19,7 @@ from agent_sessions.driver import (
     gate,
     gh_query,
     output,
+    pr_checks,
     router,
     workspace,
 )
@@ -81,7 +82,11 @@ class RunContext:
     classify_only: str
     dry_run: bool
     all_issues: bool
-    workspaces_dir: str
+    #: Resolved at preflight, or None for the default under the state directory. The
+    #: one path-shaped field that used to be a `str`, which meant both consumers wrote
+    #: `Path(ctx.workspaces_dir).resolve() if ctx.workspaces_dir else None` -- the
+    #: conversion repeated at every read instead of done once at the boundary.
+    workspaces_dir: Path | None
     no_workspace_isolation: bool
     setup_hook: str
     clean_workspaces: bool
@@ -111,7 +116,7 @@ class InvocationResult:
     session_id: str
     cost_known: bool
     final_text: str
-    writes_result: dict
+    writes_result: pr_checks.WritesResult
 
 
 @dataclass(frozen=True)
@@ -377,16 +382,16 @@ def preflight(argv: list[str] | None = None) -> RunContext:
                 f"error: --skill-dir ({skill_dir}) resolves inside --repo-path ({repo_path}); pass --allow-nested-skill-dir to proceed"
             )
 
-    if args.workspaces_dir:
-        ws_dir = abspath(args.workspaces_dir)
+    workspaces_dir = abspath(args.workspaces_dir) if args.workspaces_dir else None
+    if workspaces_dir is not None:
         try:
-            ws_dir.relative_to(repo_path)
+            workspaces_dir.relative_to(repo_path)
             nested_ws = True
         except ValueError:
             nested_ws = False
-        if nested_ws and not is_git_ignored(ws_dir, repo_path) and not args.allow_nested_workspaces_dir:
+        if nested_ws and not is_git_ignored(workspaces_dir, repo_path) and not args.allow_nested_workspaces_dir:
             die(
-                f"error: --workspaces-dir ({ws_dir}) resolves inside --repo-path ({repo_path}) and is not git-ignored; pass --allow-nested-workspaces-dir to proceed"
+                f"error: --workspaces-dir ({workspaces_dir}) resolves inside --repo-path ({repo_path}) and is not git-ignored; pass --allow-nested-workspaces-dir to proceed"
             )
 
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -458,7 +463,7 @@ def preflight(argv: list[str] | None = None) -> RunContext:
         classify_only=args.classify_only,
         dry_run=args.dry_run,
         all_issues=args.all_issues,
-        workspaces_dir=args.workspaces_dir,
+        workspaces_dir=workspaces_dir,
         no_workspace_isolation=args.no_workspace_isolation,
         setup_hook=args.setup_hook,
         clean_workspaces=args.clean_workspaces,
@@ -793,9 +798,8 @@ def select_queue(ctx: RunContext) -> SelectionResult:
     say(f"eligible: {c_count} ({eligible_str})")
 
     if ctx.clean_workspaces:
-        clean_ws_dir: Path | None = Path(ctx.workspaces_dir).resolve() if ctx.workspaces_dir else None
         active = {num for num, _ in locked_candidates}
-        removed = workspace.clean_stale_workspaces(ctx.state_dir, ctx.repo_path, active, clean_ws_dir)
+        removed = workspace.clean_stale_workspaces(ctx.state_dir, ctx.repo_path, active, ctx.workspaces_dir)
         say(f"cleaned {len(removed)} stale workspace(s)")
 
     return SelectionResult(
@@ -807,8 +811,7 @@ def select_queue(ctx: RunContext) -> SelectionResult:
 
 def prepare_workspace(ctx: RunContext, issue_num: str) -> Path:
     if not ctx.no_workspace_isolation:
-        run_ws_dir: Path | None = Path(ctx.workspaces_dir).resolve() if ctx.workspaces_dir else None
-        ws_path = workspace.get_workspace_path(ctx.state_dir, issue_num, run_ws_dir)
+        ws_path = workspace.get_workspace_path(ctx.state_dir, issue_num, ctx.workspaces_dir)
         return workspace.ensure_workspace(
             repo_path=ctx.repo_path,
             workspace_path=ws_path,
