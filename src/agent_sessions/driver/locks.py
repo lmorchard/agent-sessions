@@ -8,12 +8,9 @@ import time
 import uuid
 from pathlib import Path
 
-from agent_sessions.driver import output
+from agent_sessions.driver.output import log
 
 CURRENT_LOCK_ISSUE: str | None = None
-
-
-log = output.log
 
 
 def release_lock(repo_path: Path) -> None:

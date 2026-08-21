@@ -627,3 +627,41 @@ def test_the_facade_does_not_re_export_the_output_helpers():
         f"the facade re-exports {offered}; patching those reaches a copy, not the "
         f"emitter. Import them from `agent_sessions.driver.output`."
     )
+
+
+def test_no_driver_module_aliases_an_output_helper():
+    """`log = output.log` at module level is the re-export in another costume.
+
+    The alias and a real `from ... import log` bind the same object, so this is not
+    about behaviour — it is about what the line claims. An assignment reads as "this
+    module provides `log`", which invites patching it, and patching it reaches a copy.
+    An import reads as "this module uses `log`", which is true.
+
+    Six modules carried the assignment form. Five were caught in one pass and `locks.py`
+    was missed, which is why this is a check and not a tidy-up: the pattern is one line,
+    it is easy to add without thinking, and grepping for it by hand missed an instance.
+
+    `output.now()` is deliberately excluded — it must stay module-qualified so the suites
+    can freeze it, and a `now = output.now` alias is exactly what would break that. If
+    one appears, this catches it too.
+    """
+    import ast
+
+    driver_dir = Path(__file__).resolve().parents[2] / "src" / "agent_sessions" / "driver"
+    offenders = []
+    for path in sorted(driver_dir.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:  # module level only
+            if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Attribute):
+                continue
+            value = node.value
+            if isinstance(value.value, ast.Name) and value.value.id == "output":
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        offenders.append(f"{path.name}:{node.lineno}: {target.id} = output.{value.attr}")
+
+    assert offenders == [], (
+        "these modules alias an `output` helper instead of importing it:\n  "
+        + "\n  ".join(offenders)
+        + "\nUse `from agent_sessions.driver.output import <name>`."
+    )
