@@ -52,10 +52,11 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
+
+from agent_sessions.driver.workspace import workspace_is_dirty
 
 #: Never removed, whatever their age. The ledger first, because it is the point.
 PROTECTED = ("runs.jsonl", "parked.jsonl", "inbox.md", "inflight.json")
@@ -88,25 +89,6 @@ def stale_run_dirs(state_root: Path, keep_days: int, now: float) -> list[Path]:
             if run.stat().st_mtime < cutoff:
                 stale.append(run)
     return stale
-
-
-def workspace_is_dirty(path: Path) -> bool:
-    """True if the worktree holds uncommitted or untracked content, or cannot be read.
-
-    Unreadable counts as dirty. A worktree whose state we cannot determine is exactly
-    the one not to force-remove, and defaulting the other way would make an error look
-    like a clean tree.
-    """
-    try:
-        res = subprocess.run(
-            ["git", "-C", str(path), "status", "--porcelain"],
-            capture_output=True, text=True, timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return True
-    if res.returncode != 0:
-        return True
-    return bool(res.stdout.strip())
 
 
 def stale_workspaces(state_root: Path) -> tuple[list[Path], list[Path]]:

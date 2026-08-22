@@ -151,6 +151,61 @@ make run-self     # drive this repo (ISSUE=n to pin one)
 Override the target with `REPO=`, `REPO_PATH=`, `BOARD=`; the per-issue ceiling with `BUDGET=`;
 queue depth with `ISSUES=`.
 
+### Preparing a target repository
+
+Two things must exist on a repository before the driver is useful against it: the label
+vocabulary it selects and parks on, and a **Lab Notebook** discussion category for run reports.
+`scripts/bootstrap-repo.sh` provisions the first and reports on the second.
+
+```bash
+scripts/bootstrap-repo.sh owner/name
+```
+
+Observed against `lmorchard/agent-sessions` on 2026-08-22, on a repository that already had three
+of the six labels:
+
+```text
+==> Bootstrapping repository: lmorchard/agent-sessions
+    (Label 'agent-session:spec' already exists)
+    Created label 'agent-session:auto-ok'
+    Created label 'agent-session:needs-review'
+    (Label 'agent-session:needs-human' already exists)
+    Created label 'agent-session:needs-human-interactive'
+    Created label 'agent-session:merge-ready'
+==> Checking for the 'Lab Notebook' discussion category...
+    Found the 'Lab Notebook' category
+==> Done. lmorchard/agent-sessions is ready for agent-sessions.
+```
+
+**It is safe to re-run.** Every line becomes `(Label '...' already exists)` on a second pass;
+`gh label create` on an existing label exits 1 with `already exists`, which the script recognises
+and reports rather than treating as failure. It never edits a label it did not create, so a
+colour or description you changed by hand survives.
+
+**Running it is optional.** The driver creates each label on demand through
+`label_manager.ensure_label_exists`, so a repository that has never been bootstrapped still works.
+What the script buys you is the whole set up front — useful because a label that does not exist yet
+is invisible in the GitHub UI's filter list, so a human triaging the backlog cannot select on a tier
+before the driver has first applied it.
+
+**It does not create the discussion category, and cannot.** `createDiscussionCategory` is not a
+mutation in GitHub's GraphQL schema; categories exist only in repository settings. The script
+reports which case you are in. When the category is absent:
+
+```text
+==> Checking for the 'Lab Notebook' discussion category...
+    WARNING: discussion category 'No Such Category' is absent from lmorchard/agent-sessions.
+    Discussion categories must be created by hand in GitHub web settings (Settings -> Discussions).
+```
+
+Create it under **Settings → Discussions** on the target repository. Until it exists, runs still
+work and run reports are skipped.
+
+**What it does not provision.** The attempt counters (`agent-session:attempt-1` through `-3`) are
+not in the script's set; `label_manager` creates them when a phase first increments. Neither is the
+project board — `gh project create` applies no template, so a board made from the CLI starts with
+`Todo`/`In Progress`/`Done` and needs `Ready` and `In review` added by hand.
+
 ### The driver's own GitHub account
 
 **The driver does not use your credentials, for reads or for writes.** It runs under a machine
