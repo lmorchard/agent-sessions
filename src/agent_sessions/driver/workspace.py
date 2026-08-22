@@ -28,7 +28,9 @@ def ensure_workspace(
     # Check if workspace exists and is a valid git worktree
     is_valid_worktree = workspace_path.exists() and (workspace_path / ".git").exists()
     if workspace_path.exists() and not is_valid_worktree:
-        remove_workspace(repo_path, workspace_path)
+        # Force: the path is occupied by something that is not a worktree, so the
+        # dirty check has nothing to read and must not veto clearing the obstruction.
+        remove_workspace(repo_path, workspace_path, force=True)
 
     if not workspace_path.exists():
         workspace_path.parent.mkdir(parents=True, exist_ok=True)
@@ -56,13 +58,70 @@ def ensure_workspace(
     return workspace_path
 
 
-def remove_workspace(repo_path: Path, workspace_path: Path) -> None:
-    """Remove git worktree if workspace_path exists."""
+def workspace_is_dirty(path: Path) -> bool:
+    """True if the worktree holds uncommitted or untracked content, or cannot be read.
+
+    Unreadable counts as dirty. A worktree whose state we cannot determine is exactly
+    the one not to force-remove, and defaulting the other way would make an error look
+    like a clean tree.
+
+    Lives here rather than in `scripts/prune_run_state.py`, where it was written: both
+    the driver's own sweep and the operator's pruner need the same answer, and two
+    copies of a fail-closed predicate is one copy that can stop failing closed.
+    """
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(path), "status", "--porcelain"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True
+    if res.returncode != 0:
+        return True
+    return bool(res.stdout.strip())
+
+
+def holds_uncommitted_work(path: Path) -> bool:
+    """Dirty *and* actually a worktree — the narrower question the driver's sweep asks.
+
+    `workspace_is_dirty` answers True for a path git cannot read at all, which is the
+    right default for the operator's pruner: a human reads that list and decides. The
+    driver decides alone and forever, so the same answer there means a directory that is
+    not a worktree is kept on every pass, for good, and the workspaces root only grows.
+
+    `.git` is the discriminator, and deliberately the same one `ensure_workspace` uses to
+    call a path an obstruction rather than a workspace. So:
+
+    - a worktree git reports as dirty -- keep, that is the decision;
+    - a worktree git cannot read -- keep, because a transient `git` failure must not read
+      as a clean tree;
+    - a path with no `.git` -- remove, because nothing there is recoverable through git
+      and no later pass will find it any more readable.
+    """
+    if not (path / ".git").exists():
+        return False
+    return workspace_is_dirty(path)
+
+
+def remove_workspace(repo_path: Path, workspace_path: Path, *, force: bool = False) -> bool:
+    """Remove the worktree at `workspace_path`. False if it was kept because it is dirty.
+
+    `force` skips the dirty check. It exists for one caller: `ensure_workspace` clearing
+    a path that is occupied but is *not* a worktree, where `workspace_is_dirty` has
+    nothing to read and would answer True for an obstruction that must go.
+
+    Removal used to be unconditional -- `git worktree remove --force`, which does not
+    refuse a dirty worktree, and then `shutil.rmtree` for whatever survived. `findings.md`
+    records a run whose gate block existed only inside such a worktree.
+    """
     repo_path = repo_path.resolve()
 
     if workspace_path.is_symlink():
         workspace_path.unlink()
-        return
+        return True
+
+    if not force and workspace_path.exists() and holds_uncommitted_work(workspace_path):
+        return False
 
     if workspace_path.exists():
         resolved_ws = workspace_path.resolve()
@@ -79,6 +138,7 @@ def remove_workspace(repo_path: Path, workspace_path: Path) -> None:
         if resolved_ws.exists():
             import shutil
             shutil.rmtree(resolved_ws, ignore_errors=True)
+    return True
 
 
 def clean_stale_workspaces(
@@ -86,19 +146,27 @@ def clean_stale_workspaces(
     repo_path: Path,
     active_issue_numbers: set[str] | set[int] | set[str | int],
     workspaces_dir: Path | None = None,
-) -> list[Path]:
-    """Remove workspaces for issues not in active_issue_numbers."""
+) -> tuple[list[Path], list[Path]]:
+    """(removed, kept-because-dirty) for workspaces of issues not in active_issue_numbers.
+
+    Both halves are returned, so the caller can report what it declined to do. A count
+    of what was cleaned, with nothing said about what was skipped, is the shape this
+    project treats as a null rendering as a positive.
+    """
     base_dir = (workspaces_dir if workspaces_dir is not None else state_dir / "workspaces").resolve()
     removed: list[Path] = []
+    kept_dirty: list[Path] = []
     if not base_dir.exists():
-        return removed
+        return removed, kept_dirty
 
     active_strs = {str(n) for n in active_issue_numbers}
-    for child in base_dir.iterdir():
+    for child in sorted(base_dir.iterdir()):
         if child.is_dir() and child.name.startswith("issue-"):
             issue_num = child.name.removeprefix("issue-")
             if issue_num not in active_strs:
-                remove_workspace(repo_path, child)
-                removed.append(child)
+                if remove_workspace(repo_path, child):
+                    removed.append(child)
+                else:
+                    kept_dirty.append(child)
 
-    return removed
+    return removed, kept_dirty

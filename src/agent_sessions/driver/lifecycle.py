@@ -799,8 +799,15 @@ def select_queue(ctx: RunContext) -> SelectionResult:
 
     if ctx.clean_workspaces:
         active = {num for num, _ in locked_candidates}
-        removed = workspace.clean_stale_workspaces(ctx.state_dir, ctx.repo_path, active, ctx.workspaces_dir)
+        removed, kept_dirty = workspace.clean_stale_workspaces(
+            ctx.state_dir, ctx.repo_path, active, ctx.workspaces_dir
+        )
         say(f"cleaned {len(removed)} stale workspace(s)")
+        # Said out loud, because "cleaned 0" with five worktrees still on disk reads as
+        # nothing to do. Each of these holds uncommitted work the driver refused to
+        # discard; `make prune-state WORKSPACES=1` lists them for a human.
+        for ws in kept_dirty:
+            say(f"  KEPT     {ws.name} -- uncommitted changes, not removed")
 
     return SelectionResult(
         open_prs=open_prs,
