@@ -13,7 +13,9 @@ is a claim about a call that did not happen, and a catch-all fake cannot make it
 
 Written before collapsing the doubled scan, and unchanged by it. Their value is that
 they pass against both shapes, including the one tolerance nobody would choose on
-purpose (see `test_the_rest_branch_tolerates_a_bare_reaction_list`).
+purpose (see `test_the_rest_branch_tolerates_a_bare_reaction_list`). One case changed
+deliberately afterwards: `test_no_source_unparks_on_an_actor_it_cannot_date` records
+#261's decision to make the review branch fail closed like the other two.
 """
 
 from __future__ import annotations
@@ -208,27 +210,39 @@ def test_a_review_with_no_author_is_skipped_like_a_comment_with_none(recording_g
     assert call(recording_gh) == (False, "")
 
 
-def test_a_review_with_no_timestamp_counts_while_a_comment_with_none_does_not(recording_gh):
-    """A real divergence between the branches, pinned so a dedup cannot erase it.
+def test_no_source_unparks_on_an_actor_it_cannot_date(recording_gh):
+    """All three fail closed on a missing timestamp. Resolved on #261.
 
-    Given a park time, the comment branches demand a timestamp *strictly after* it and
-    so reject a missing one; the review branch skips only reviews it can prove are older
-    and so accepts a missing one. Same input, opposite verdict, and no note anywhere
-    says which was intended.
+    The comment branches always did. The review branch did not -- it skipped only
+    reviews it could prove were older, so an undated review unparked the issue while
+    an undated comment did not. Same input, opposite verdict, from one function.
 
-    Left as it is: this is a deduplication, and folding the two spellings into one
-    predicate would change what the driver does to a real PR under the cover of a
-    refactor. It belongs on #261 as a question, not in this diff as an answer.
+    Failing closed is the choice, because parked is the safe state: it means no human
+    has spoken yet, and an actor the driver cannot place in time is not evidence that
+    one has. The cost is named rather than hidden -- a real review that GitHub returns
+    without `submittedAt` now leaves the issue parked, and a person waiting on it has
+    to comment as well.
+
+    All three sources are consulted, which is the second half of the claim: the issue
+    stays parked because every source declined, not because one of them answered early.
     """
     recording_gh.on(is_graphql, graphql_comments(gql_comment("alice", "")))
     recording_gh.on(is_issue_view, rest_comments({"author": {"login": "alice"}}))
     recording_gh.on(is_pr_view, reviews({"author": {"login": "alice"}}))
-    assert call(recording_gh) == (True, "alice")
+    assert call(recording_gh) == (False, "")
     assert [c[:3] for c in recording_gh.calls] == [
         ["gh", "api", "graphql"],
         ["gh", "issue", "view"],
         ["gh", "pr", "view"],
     ]
+
+
+def test_a_dated_review_still_unparks(recording_gh):
+    """The control for the case above: failing closed must not close the door entirely."""
+    recording_gh.on(is_graphql, graphql_comments())
+    recording_gh.on(is_issue_view, rest_comments())
+    recording_gh.on(is_pr_view, reviews({"author": {"login": "alice"}, "submittedAt": AFTER}))
+    assert call(recording_gh) == (True, "alice")
 
 
 def test_no_park_time_means_any_human_activity_counts(recording_gh):
