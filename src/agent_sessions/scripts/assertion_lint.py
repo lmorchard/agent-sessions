@@ -76,8 +76,9 @@ The Makefile is out of scope: this detector guards harness assertions, while
 same self-matching problem by narrowing its glob."* Rule 1 is textual, so it cannot
 scan a suite whose fixtures contain the idiom -- and this detector's fixtures do.
 Rule 2 is an AST question: a fixture is a string constant, a real assertion is an
-`Assert` node, and no amount of quoting confuses the two. So rule 2 scans every test
-file in the repo, including its own, and rule 1 stays narrow. Widening *rule 1* was
+`Assert` node, and no amount of quoting confuses the two. So rule 2 scans every Python
+file under `tests/driver/` and `tests/scripts/` -- harness modules and `conftest.py`
+included, not only `test_*.py` -- and rule 1 stays narrow. Widening *rule 1* was
 put to a human and declined on measurement (#261, X1): six hits, all six in this
 detector's own fixtures, zero real findings.
 """
@@ -107,7 +108,12 @@ failures: list[str] = []
 #: this one is an AST question -- a fixture is a string constant, a real assertion is an
 #: `Assert` node, and the two are never confused. So the self-matching problem that keeps
 #: `SCOPE` narrow simply does not arise here.
-SOURCE_ASSERTION_SCOPE = ("tests/driver/test_*.py", "tests/scripts/test_*.py")
+#: `*.py`, not `test_*.py`: #261's X3 moved ~700 lines of the full-loop rig into
+#: `tests/driver/loop_harness.py`, and under the narrower glob that code left this
+#: detector's scope without anyone deciding it should. Harness code is exactly where the
+#: rule's target idiom lives, so the scope follows the assertions rather than the
+#: filename convention. Nothing under `tests/` is out of bounds for an AST rule.
+SOURCE_ASSERTION_SCOPE = ("tests/driver/*.py", "tests/scripts/*.py")
 
 #: Module-level names that conventionally point at a checked-in location. Stage one of
 #: the rule: a module that reads one of these is reading an artifact under version

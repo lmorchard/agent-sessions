@@ -20,7 +20,7 @@ from pathlib import Path
 
 from agent_sessions.scripts import run_progress
 
-from . import credentials
+from . import credentials, jsonl
 
 #: Where the agent records the GitHub writes it wants the driver to perform.
 WRITES_FILE_VAR = "AGENT_SESSION_WRITES"
@@ -458,19 +458,10 @@ def parse_result_stream(backend: str, raw_path: Path) -> dict:
     if not raw_path.exists() or raw_path.stat().st_size == 0:
         return {"final": "", "total_cost_usd": 0.0, "session_id": "", "cost_known": False}
 
-    lines = raw_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    events = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
+    events, _ = jsonl.read_records(raw_path)
 
     if backend == "claude":
-        results = [e for e in events if isinstance(e, dict) and e.get("type") == "result"]
+        results = [e for e in events if e.get("type") == "result"]
         if not results:
             return {"final": "", "total_cost_usd": 0.0, "session_id": "", "cost_known": False}
 
@@ -495,8 +486,6 @@ def parse_result_stream(backend: str, raw_path: Path) -> dict:
         text_parts = []
 
         for e in events:
-            if not isinstance(e, dict):
-                continue
             sid = e.get("sessionID")
             if sid:
                 session_id = str(sid)
@@ -552,17 +541,8 @@ def has_success_result(backend: str, raw_path: Path) -> bool:
     if not raw_path.exists() or raw_path.stat().st_size == 0:
         return False
     try:
-        lines = raw_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                e = json.loads(line)
-            except (json.JSONDecodeError, ValueError):
-                continue
-            if not isinstance(e, dict):
-                continue
+        events, _ = jsonl.read_records(raw_path)
+        for e in events:
             if backend == "claude":
                 if (
                     e.get("type") == "result"

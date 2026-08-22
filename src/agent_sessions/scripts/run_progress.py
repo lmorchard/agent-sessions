@@ -33,7 +33,6 @@ Three details are load-bearing, each of them a way a naive reader gets it wrong:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import time
@@ -41,6 +40,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+from agent_sessions.driver import jsonl
 
 STREAM_NAME = "stream.jsonl"
 
@@ -74,44 +75,6 @@ class Progress:
     skipped: int = 0
     #: Recent tool action summaries.
     actions: list[str] = field(default_factory=list)
-
-
-def read_records(path: Path | str) -> tuple[list[dict], int]:
-    """Parse every complete record; count the ones that aren't.
-
-    A stream being appended to has a partial final line more often than not, so a
-    reader that raises on it is a reader that dies exactly when it is wanted. A
-    missing file is not an error either -- the driver can ask before the run has
-    made anything at all -- and reports as `([], 0)`.
-    """
-    try:
-        # Explicit encoding, matching `scripts/assertion_lint.py`: without it the
-        # decoding depends on the host locale, and a stream written on one machine
-        # could read differently on another. `errors="replace"` stays -- a partial
-        # trailing write can split a multi-byte character mid-sequence.
-        text = Path(path).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        # Absent file, absent run directory, unreadable: all "nothing yet".
-        return [], 0
-
-    records: list[dict] = []
-    skipped = 0
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            record = json.loads(line)
-        except ValueError:
-            skipped += 1
-            continue
-        # A bare scalar on its own line is syntactically valid JSON but is not a
-        # record; treating it as one would mean .get() on a str further down.
-        if isinstance(record, dict):
-            records.append(record)
-        else:
-            skipped += 1
-    return records, skipped
 
 
 def _add_text_block(snap: Progress, text: str) -> None:
@@ -210,7 +173,7 @@ def _as_number(value: object) -> float | int | None:
     """A numeric field, or None if the stream carried something else.
 
     The module's contract is to degrade to "less information", never to a
-    traceback. `read_records` already honours that for a malformed *line*; this
+    traceback. `jsonl.read_records` already honours that for a malformed *line*; this
     honours it for a malformed *value*, which is the same failure one field in.
     A `total_cost_usd` of `null`, `"12.01"` or `{}` reaches `format_progress`'s
     `f"${...:.2f}"` otherwise, and a watcher that dies on the thing it is
@@ -226,7 +189,7 @@ def _as_number(value: object) -> float | int | None:
 def read_progress(run_dir: Path | str) -> Progress:
     """Digest `run_dir/stream.jsonl` into a Progress snapshot."""
     run_dir = Path(run_dir)
-    records, skipped = read_records(run_dir / STREAM_NAME)
+    records, skipped = jsonl.read_records(run_dir / STREAM_NAME)
 
     snap = Progress(
         run_dir=run_dir,

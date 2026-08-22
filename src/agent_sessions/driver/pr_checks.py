@@ -154,7 +154,24 @@ def check_pr_reviews(repo: str, pr_num: str | int) -> tuple[int, int, str]:
         return 0, 0, ""
 
 
-def perform_writes(writes_file: Path, repo: str, repo_path: Path, rundir: Path, board: str = "") -> dict:
+class WritesResult(writes.ExecuteResult):
+    """`writes.ExecuteResult` plus what the driver adds around it.
+
+    Previously these three keys were assigned onto the dict `writes.execute` returned,
+    so the function's declared type described neither the value it received nor the one
+    it handed back, and `lifecycle.py` indexed `["applied"]` and `["entries"]` on a bare
+    `dict` with nothing to check the spelling.
+    """
+
+    #: Lines for the run log, already formatted. The caller prints them in order.
+    messages: list[str]
+    #: The manifest as parsed. Empty when it would not parse at all.
+    entries: list
+    #: How many entries reached `status == "ok"`. Never more than `len(entries)`.
+    applied: int
+
+
+def perform_writes(writes_file: Path, repo: str, repo_path: Path, rundir: Path, board: str = "") -> WritesResult:
     messages: list[str] = []
     try:
         entries = writes.load(writes_file)
@@ -168,7 +185,7 @@ def perform_writes(writes_file: Path, repo: str, repo_path: Path, rundir: Path, 
         )
     except writes.ManifestError as e:
         entries = []
-        result = {"ok": False, "errors": [str(e)], "results": []}
+        result = writes.ExecuteResult(ok=False, errors=[str(e)], results=[])
 
     applied = sum(1 for r in result["results"] if r.get("status") == "ok")
     (rundir / "writes-result.json").write_text(
@@ -185,13 +202,17 @@ def perform_writes(writes_file: Path, repo: str, repo_path: Path, rundir: Path, 
         if r.get("status") == "failed":
             messages.append(f"  WRITE FAILED    {r.get('kind')}: {(r.get('stderr') or '').strip()[:200]}")
 
-    result["messages"] = messages
-    result["entries"] = entries
-    result["applied"] = applied
-    return result
+    return WritesResult(
+        ok=result["ok"],
+        errors=result["errors"],
+        results=result["results"],
+        messages=messages,
+        entries=entries,
+        applied=applied,
+    )
 
 
-def writes_summary(result: dict) -> str:
+def writes_summary(result: WritesResult) -> str:
     if result["ok"]:
         return ""
     if result["errors"]:

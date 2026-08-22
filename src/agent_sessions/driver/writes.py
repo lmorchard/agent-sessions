@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import TypedDict
 
 from agent_sessions.driver import credentials
 
@@ -353,6 +354,21 @@ def commands(
 # -- execution --------------------------------------------------------------
 
 
+class ExecuteResult(TypedDict):
+    """What `execute` returns. Declared because two modules index into it by hand.
+
+    `ok` is false for a manifest that failed validation *and* for one that failed
+    part-way through, and the two are told apart by whether `errors` is empty --
+    `pr_checks.writes_summary` is the only reader that makes the distinction, and it
+    made it against a bare `dict`, where a key typo is a `KeyError` at runtime rather
+    than a type error at check time.
+    """
+
+    ok: bool
+    errors: list[str]
+    results: list[dict]
+
+
 def execute(
     entries: list,
     *,
@@ -362,7 +378,7 @@ def execute(
     runner=None,
     env: dict[str, str] | None = None,
     board: str = "",
-) -> dict:
+) -> ExecuteResult:
     """Validate the whole manifest, then run it in order with the write credential.
 
     All-or-nothing on validation: a manifest with one bad entry means something is

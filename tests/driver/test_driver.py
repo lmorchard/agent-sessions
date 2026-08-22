@@ -583,7 +583,11 @@ def test_lifecycle_classify_and_record(tmp_path: Path, monkeypatch):
         session_id="sess-123",
         cost_known=True,
         final_text="Agent completed work.",
-        writes_result={"ok": True, "entries": [], "applied": 0, "messages": []},
+        # All six keys, because `WritesResult` declares six. The fixture carried four
+        # and passed only because `ok=True` short-circuits `writes_summary` before it
+        # reads `errors` or `results`; a case that set `ok=False` would have raised
+        # `KeyError` from the code under test.
+        writes_result={"ok": True, "errors": [], "results": [], "entries": [], "applied": 0, "messages": []},
     )
 
     outcome = agent_session_driver.classify_and_record(ctx, inv, open_prs=[])

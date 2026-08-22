@@ -11,7 +11,7 @@ import sys
 # The standard label vocabulary, owned by `driver/labels.py`. It was defined here too,
 # and in `parking.py`, and in `router.py` -- so a rename needed four edits and missing one
 # failed open, with an issue silently ceasing to be selected and nothing to say so.
-from agent_sessions.driver.labels import (  # noqa: F401 - re-exported for existing importers
+from agent_sessions.driver.labels import (
     ATTEMPT_LABELS,
     AUTO_OK_LABEL,
     INTERACTIVE_LABEL,

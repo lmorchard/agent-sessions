@@ -44,6 +44,14 @@ from agent_sessions.driver.board import (
     get_board_metadata,
     mark_board_in_progress,
 )
+from agent_sessions.driver.labels import (
+    INTERACTIVE_LABEL,
+    MARKER,
+    MERGE_READY_LABEL,
+    PARK_LABEL,
+    SPEC_LABEL,
+    is_specced,
+)
 from agent_sessions.driver.lifecycle import (
     PHASE_TIERS,
     InvocationResult,
@@ -69,18 +77,12 @@ from agent_sessions.driver.locks import (
     release_lock,
 )
 from agent_sessions.driver.parking import (
-    INTERACTIVE_LABEL,
-    MARKER,
-    MERGE_READY_LABEL,
-    PARK_LABEL,
-    SPEC_LABEL,
     apply_park_state,
     decrement_attempts,
     get_attempts,
     get_park_time,
     has_new_human_comment,
     increment_attempts,
-    is_specced,
     notify_human,
     park_label_add,
     park_label_remove,
