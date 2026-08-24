@@ -66,12 +66,20 @@ for name, color, description in SPEC:
     print(f"{name}\t{color}\t{description}")
 ')
 
-echo "==> Ensuring 'Lab Notebook' discussion category exists..."
+echo "==> Checking for the 'Lab Notebook' discussion category..."
 # Reported, not created: createDiscussionCategory is not a mutation in GitHub's GraphQL
 # schema, so a category has to be made by hand in repository settings. This says whether
 # it is there. It used to be reached by a relative path under the old top-level driver
 # directory, which the Python conversion left pointing at nothing -- the same dead-path
 # class as #261's C7. Reached as a module now, so there is no path left to go stale.
-uv run python -m agent_sessions.driver.discussion_manager ensure-category --repo "$REPO" || true
+#
+# `ensure-category` warns when the category is absent and says nothing when it is
+# present, reporting that case only through its exit status -- which `|| true` discarded.
+# So the success path was a heading followed by silence, indistinguishable from a step
+# that had not run. `if` keeps `set -e` happy and turns the silence into a confirmation;
+# the absent case already prints its own message, which says where to create one.
+if uv run python -m agent_sessions.driver.discussion_manager ensure-category --repo "$REPO"; then
+  echo "    Found the 'Lab Notebook' category"
+fi
 
 echo "==> Done. $REPO is ready for agent-sessions."

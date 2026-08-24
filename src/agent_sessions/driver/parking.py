@@ -248,6 +248,14 @@ def has_new_human_comment(
 
     The three used to be written out in full, twice for the comment scan. The
     per-branch code is now only the *fetch*; the scan is shared.
+
+    **All three fail closed on an actor they cannot date.** With a park time set, an
+    entry whose timestamp is missing does not unpark the issue. The comment branches
+    always worked that way and the review branch did not -- it skipped only reviews it
+    could prove were older, so an undated one unparked. Parked is the safe state: it
+    means no human has spoken yet, and an actor the driver cannot place in time is not
+    evidence that one has. Decided on #261 rather than inside the deduplication that
+    found it, because it changes what the driver does to a live PR.
     """
     norm_park_time = _norm_ts(park_time) if park_time else ""
     known_bots = {name.lower() for name in (bot_logins or credentials.ALWAYS_BOT_LOGINS)}
@@ -274,21 +282,13 @@ def has_new_human_comment(
         pr_res = subprocess.run(pr_cmd, capture_output=True, text=True)
         if pr_res.returncode == 0:
             for rev in reversed(json.loads(pr_res.stdout).get("reviews", [])):
-                author = rev.get("author", {}) if isinstance(rev, dict) else {}
-                login = author.get("login", "") if isinstance(author, dict) else ""
-                if credentials.is_bot_login(login, known_bots=known_bots):
+                if not isinstance(rev, dict):
                     continue
-                # Deliberately not `_human_after_park`. That rejects a missing
-                # timestamp when a park time is set; this accepts one, and the two
-                # have disagreed since before the split. Pinned in
-                # `test_a_review_with_no_timestamp_counts_while_a_comment_with_none_does_not`
-                # and left for #261 to decide, because reconciling them here would
-                # change what the driver does to a real PR inside a deduplication.
-                if norm_park_time:
-                    norm_created = _norm_ts(rev.get("submittedAt", "") if isinstance(rev, dict) else "")
-                    if norm_created and norm_created <= norm_park_time:
-                        continue
-                return True, login
+                author = rev.get("author") or {}
+                login = author.get("login", "") if isinstance(author, dict) else ""
+                reviewer = _human_after_park(login, rev.get("submittedAt"), known_bots, norm_park_time)
+                if reviewer:
+                    return True, reviewer
     except Exception:
         pass
 

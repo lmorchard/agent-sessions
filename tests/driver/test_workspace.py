@@ -74,11 +74,12 @@ def test_remove_workspace(dummy_git_repo: Path, tmp_path: Path):
     )
     assert ws_path.exists()
 
-    remove_workspace(dummy_git_repo, ws_path)
+    assert remove_workspace(dummy_git_repo, ws_path) is True
     assert not ws_path.exists()
 
-    # Re-running remove_workspace when path is gone is a safe no-op
-    remove_workspace(dummy_git_repo, ws_path)
+    # Re-running remove_workspace when path is gone is a safe no-op. True, not False:
+    # an absent workspace was not "kept because dirty".
+    assert remove_workspace(dummy_git_repo, ws_path) is True
 
 
 def test_clean_stale_workspaces(dummy_git_repo: Path, tmp_path: Path):
@@ -90,10 +91,86 @@ def test_clean_stale_workspaces(dummy_git_repo: Path, tmp_path: Path):
     assert ws_102.exists()
 
     # Active issues is only 101; 102 is stale
-    removed = clean_stale_workspaces(state_dir, dummy_git_repo, active_issue_numbers={"101"})
+    removed, kept_dirty = clean_stale_workspaces(state_dir, dummy_git_repo, active_issue_numbers={"101"})
     assert ws_101.exists()
     assert not ws_102.exists()
-    assert ws_102 in removed
+    assert removed == [ws_102]
+    assert kept_dirty == []
+
+
+def test_a_dirty_stale_workspace_is_kept_and_reported(dummy_git_repo: Path, tmp_path: Path):
+    """#261's decision: the driver's own sweep no longer discards uncommitted work.
+
+    `remove_workspace` ran `git worktree remove --force`, which does not refuse a dirty
+    worktree, and then `shutil.rmtree` for anything that survived. `findings.md` records
+    a run whose gate block existed only inside such a worktree.
+
+    Both halves are asserted. Keeping the directory is the safety property; returning it
+    is what lets the driver say so, and a sweep that silently cleaned nothing would look
+    identical to one with nothing to clean.
+    """
+    state_dir = tmp_path / "state"
+    ws_dirty = ensure_workspace(dummy_git_repo, get_workspace_path(state_dir, 201), "issue-201", base_ref="main")
+    ws_clean = ensure_workspace(dummy_git_repo, get_workspace_path(state_dir, 202), "issue-202", base_ref="main")
+    (ws_dirty / "unsaved.txt").write_text("the only copy of something", encoding="utf-8")
+
+    removed, kept_dirty = clean_stale_workspaces(state_dir, dummy_git_repo, active_issue_numbers=set())
+
+    assert ws_dirty.exists()
+    assert (ws_dirty / "unsaved.txt").read_text(encoding="utf-8") == "the only copy of something"
+    assert kept_dirty == [ws_dirty]
+    assert not ws_clean.exists()
+    assert removed == [ws_clean]
+
+
+def test_a_directory_that_is_not_a_worktree_is_still_removed(dummy_git_repo: Path, tmp_path: Path):
+    """The other half of the dirty rule, and the reason it is not `workspace_is_dirty`.
+
+    `git status` fails on a path that is not a repository, and `workspace_is_dirty`
+    calls that dirty -- correct for the operator's pruner, where a human reads the list.
+    Applied to the driver's sweep it would keep such a directory on every pass forever,
+    so the workspaces root could only grow. `holds_uncommitted_work` requires a `.git`
+    before it will believe there is anything to lose.
+    """
+    state_dir = tmp_path / "state"
+    debris = state_dir / "workspaces" / "issue-301"
+    debris.mkdir(parents=True)
+    (debris / "leftover.txt").write_text("not tracked by anything", encoding="utf-8")
+
+    removed, kept_dirty = clean_stale_workspaces(state_dir, dummy_git_repo, active_issue_numbers=set())
+
+    assert not debris.exists()
+    assert removed == [debris]
+    assert kept_dirty == []
+
+
+def test_an_unreadable_worktree_is_kept(dummy_git_repo: Path, tmp_path: Path, monkeypatch):
+    """A transient `git` failure must not read as a clean tree."""
+    state_dir = tmp_path / "state"
+    ws = ensure_workspace(dummy_git_repo, get_workspace_path(state_dir, 302), "issue-302", base_ref="main")
+    monkeypatch.setattr(
+        "agent_sessions.driver.workspace.subprocess.run",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("git is not on PATH")),
+    )
+
+    removed, kept_dirty = clean_stale_workspaces(state_dir, dummy_git_repo, active_issue_numbers=set())
+
+    assert ws.exists()
+    assert kept_dirty == [ws]
+    assert removed == []
+
+
+def test_remove_workspace_refuses_a_dirty_worktree_and_force_overrides(dummy_git_repo: Path, tmp_path: Path):
+    """The primitive's contract, and the one caller that legitimately overrides it."""
+    ws_path = tmp_path / "workspaces" / "issue-203"
+    ensure_workspace(dummy_git_repo, ws_path, "issue-203", base_ref="main")
+    (ws_path / "untracked.txt").write_text("x", encoding="utf-8")
+
+    assert remove_workspace(dummy_git_repo, ws_path) is False
+    assert ws_path.exists()
+
+    assert remove_workspace(dummy_git_repo, ws_path, force=True) is True
+    assert not ws_path.exists()
 
 
 def test_ensure_workspace_recreates_corrupted_directory(dummy_git_repo: Path, tmp_path: Path):
