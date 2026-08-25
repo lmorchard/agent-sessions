@@ -822,38 +822,47 @@ poll-reactions acquires one source lease per repository, fetches outside a trans
 
 **TDD and implementation steps:**
 
-- [ ] Add failing credential tests proving the Projects resolver never evaluates write/read token commands and the reaction resolver never evaluates write/board token commands.
-- [ ] Implement scoped credential resolution by reusing existing token-command and App-token helpers. Re-run tests/driver/test_credentials.py.
-- [ ] Add failing pure project-diff tests for silent baseline, add, remove with old coordinates, Status change, Priority change, irrelevant-field change, and cross-repository filtering.
-- [ ] Add failing paginated fetch tests for complete multi-page results, GraphQL/rate-limit failure, malformed middle page, and missing pageInfo; assert no snapshot mutation on every failure.
-- [ ] Run uv run pytest -q tests/events/test_poll_projects.py and confirm failure.
-- [ ] Implement Projects fetch/diff/one-pass orchestration. Re-run tests/events/test_poll_projects.py.
-- [ ] Add failing reaction tests for first silent observation, false-to-true and true-to-false changes, unchanged predicates, human-vs-bot filtering, park timestamp boundary, grouped pagination, source lease exclusion, and failed-fetch preservation.
-- [ ] Run uv run pytest -q tests/events/test_poll_reactions.py and confirm failure.
-- [ ] Implement reaction fetch/conditional update/one-pass orchestration. Re-run tests/events/test_poll_reactions.py.
-- [ ] Add an integration test that writes an approval watch, runs the synthetic reaction observation through QueueStore, and lets the driver claim the resulting issue target.
-- [ ] Add poll-projects and poll-reactions CLI composition with no resident scheduler.
-- [ ] Run make events-test.
-- [ ] Run make driver-test.
-- [ ] Run make lint.
-- [ ] Run make typecheck.
-- [ ] Run make check.
-- [ ] Commit only Phase 4 files with message: Phase 4: add project and reaction pollers
+- [x] Add failing credential tests proving the Projects resolver never evaluates write/read token commands and the reaction resolver never evaluates write/board token commands. The focused RED produced five expected missing-resolver failures; guarded mappings fail on any broader-key access.
+- [x] Implement scoped credential resolution by reusing existing token-command and App-token helpers. `tests/driver/test_credentials.py` passed after GREEN; absence-path guards also forbid broader literal fallback.
+- [x] Add failing pure project-diff tests for silent baseline, add, remove with old coordinates, Status change, Priority change, irrelevant-field change, and cross-repository filtering. Literal expected invalidations cover each permitted change.
+- [x] Add failing paginated fetch tests for complete multi-page results, GraphQL/rate-limit failure, malformed middle page, and missing pageInfo; assert no snapshot mutation on every failure. Complete response fixtures include item/content/field/rate-limit/pageInfo shapes.
+- [x] Run uv run pytest -q tests/events/test_poll_projects.py and confirm failure. RED stopped at collection on the absent `CompleteProjectSnapshot` API.
+- [x] Implement Projects fetch/diff/one-pass orchestration. The focused suite passed after GREEN and after the source-provenance regression.
+- [x] Add failing reaction tests for first silent observation, false-to-true and true-to-false changes, unchanged predicates, human-vs-bot filtering, park timestamp boundary, grouped pagination, source lease exclusion, and failed-fetch preservation.
+- [x] Run uv run pytest -q tests/events/test_poll_reactions.py and confirm failure. RED stopped at collection on the absent `fetch_approval_predicates` API.
+- [x] Implement reaction fetch/conditional update/one-pass orchestration. The focused suite passed after GREEN, including re-park baseline reset.
+- [x] Add an integration test that writes an approval watch, runs the synthetic reaction observation through QueueStore, and lets the driver claim the resulting issue target. `test_changed_reaction_observation_is_claimable_by_the_driver` exercises the real store.
+- [x] Add poll-projects and poll-reactions CLI composition with no resident scheduler. CLI tests prove one invocation and the command-specific credential resolver.
+- [x] Run make events-test. All 180 event tests passed.
+- [x] Run make driver-test. 758 passed and 2 skipped.
+- [x] Run make lint. Ruff and the repository lint checks passed.
+- [x] Run make typecheck. Mypy reported no issues in 101 source files.
+- [x] Run make check. The complete target exited 0 with 758 passed, 2 skipped, and the documented gate-test availability skip.
+- [x] Commit only Phase 4 files with message: Phase 4: add project and reaction pollers. Named-path staging excludes the ignored task brief/report and every file outside this phase.
 
 **Verification — automated:**
 
-- [ ] The first complete Projects fetch is silent and every later membership/Status/Priority difference emits exactly one coalesced target generation.
-- [ ] Incomplete Projects fetches preserve the old snapshot and cannot infer removals.
-- [ ] Approval predicates emit only on conditional value changes and concurrent pollers cannot duplicate a pass.
-- [ ] The synthetic-poll-to-SQLite-to-driver-claim integration test passes.
-- [ ] Scoped credential tests prove each poller cannot receive the write credential.
-- [ ] make lint, make typecheck, make driver-test, and make check pass.
+- [x] The first complete Projects fetch is silent and every later membership/Status/Priority difference emits exactly one coalesced target generation. Covered by `test_first_complete_project_fetch_is_a_silent_baseline_even_when_empty` and literal diff cases.
+- [x] Incomplete Projects fetches preserve the old snapshot and cannot infer removals. Covered for transport, GraphQL, rate-limit, malformed-middle-page, and missing-pageInfo failures.
+- [x] Approval predicates emit only on conditional value changes and concurrent pollers cannot duplicate a pass. Covered by the observation sequence and source-lease tests.
+- [x] The synthetic-poll-to-SQLite-to-driver-claim integration test passes. The claimed coordinates are `(1, issue, 42)`.
+- [x] Scoped credential tests prove each poller cannot receive the write credential. Forbidden-key mappings cover literal, command, App-mint, and absence paths.
+- [x] make lint, make typecheck, make driver-test, and make check pass. The focused credential/project/reaction suite also passed all 92 tests.
 
 **Verification — manual:**
 
-- [ ] Review the GraphQL loops for explicit pageInfo handling and no record-count shortcut.
-- [ ] Confirm source-specific leases distinguish every configured board and repository.
-- [ ] Confirm each command performs one pass and contains no internal timer or scheduler.
+- [x] Review the GraphQL loops for explicit pageInfo handling and no record-count shortcut. Every connection page is validated; terminal `hasNextPage` must be false.
+- [x] Confirm source-specific leases distinguish every configured board and repository. Keys are `projects:<owner>/<number>` and `reactions:<repository-id>` in leases and synthetic provenance.
+- [x] Confirm each command performs one pass and contains no internal timer or scheduler. CLI composition invokes one `poll_*_once` function and returns its exit code.
+
+### Review fix round 1
+
+- [x] Sanitize scoped credential failures without changing the broad driver resolver. Four adversarial resolver/CLI cases first exposed child stderr and App exception content; traceback-chain and empty-App regressions then exposed two remaining metadata leaks. Scoped errors now report only variable, failure category, exception type where safe, and exit status; eight category/leak cases pass.
+- [x] Make approval observation writes a full compare-and-swap. Two real-store interleavings first reproduced stale reverse invalidation and timestamp regression; the SQL predicate now includes fetched `parked_at`, `last_value`, and `last_checked_at`, and both cases pass without extra invalidations.
+- [x] Apply the current board repository allowlist before project diffing. The regression first emitted two removals; it now emits only the still-configured repository removal while silently dropping the stale unconfigured row.
+- [x] Reject malformed Projects item discriminators and page cursors while retaining known unsupported items. Seven malformed fixtures first committed destructive diffs; all now fail closed, while complete DraftIssue and null-content REDACTED shapes remain ignorable.
+- [x] Fence post-fetch writes on lease owner and unexpired lease inside each SQLite transaction. Projects and reactions each first mutated after a real second-store lease handoff; bare-expiry mutation checks also failed when the expiry predicate was removed, and a two-watch batch exposed reuse of one pre-expiry clock value. All five owner/expiry regressions now return nonzero without stale mutation.
+- [x] Re-run the focused suites, `make events-test`, `make driver-test`, `make lint`, `make typecheck`, `make docs-check`, `make check`, and `git diff --check`; inspect named staging and amend the Phase 4 commit. The focused suite passed 118 cases, events passed 199, driver/full check passed 765 with 2 skipped, and all static/docs/diff checks exited 0.
 
 ---
 

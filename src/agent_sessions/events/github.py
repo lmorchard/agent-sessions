@@ -6,9 +6,20 @@ import json
 import os
 import subprocess
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Callable, cast
 
-from .models import ClaimedTarget, JSONValue, RepositoryConfig
+from agent_sessions.driver import credentials
+
+from .models import (
+    ApprovalWatch,
+    BoardConfig,
+    ClaimedTarget,
+    JSONValue,
+    PollFailure,
+    ProjectItemProjection,
+    RepositoryConfig,
+)
 
 
 class GitHubError(RuntimeError):
@@ -116,6 +127,59 @@ query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
   }
 }
 """
+_PROJECT_ITEMS_QUERY = """
+query($owner:String!,$number:Int!,$endCursor:String){
+  user(login:$owner){
+    projectV2(number:$number){
+      id
+      items(first:100,after:$endCursor){
+        nodes {
+          id
+          type
+          content {
+            __typename
+            ... on Issue {
+              number
+              repository { databaseId nameWithOwner }
+            }
+            ... on PullRequest {
+              number
+              repository { databaseId nameWithOwner }
+            }
+          }
+          fieldValues(first:100){
+            nodes {
+              __typename
+              ... on ProjectV2ItemFieldSingleSelectValue {
+                name
+                field { ... on ProjectV2SingleSelectField { name } }
+              }
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+  rateLimit { limit cost remaining resetAt }
+}
+"""
+_SUPPORTED_PROJECT_ITEM_TYPES = frozenset({"ISSUE", "PULL_REQUEST"})
+_UNSUPPORTED_PROJECT_ITEM_TYPES = frozenset({"DRAFT_ISSUE", "REDACTED"})
+
+
+@dataclass(frozen=True)
+class CompleteProjectSnapshot:
+    board_key: str
+    items: tuple[ProjectItemProjection, ...]
+    fetched_at: datetime
+
+
+@dataclass(frozen=True)
+class ApprovalPredicateObservation:
+    watch: ApprovalWatch
+    value: bool
 
 
 class LiveTargetResolver:
@@ -217,16 +281,27 @@ class LiveTargetResolver:
         subject: str,
     ) -> list[dict[str, JSONValue]]:
         nodes: list[dict[str, JSONValue]] = []
-        last_page_info: dict[str, JSONValue] | None = None
-        for page in pages:
+        for index, page in enumerate(pages):
             current: JSONValue = page
             for key in path:
                 current = self._dict(current, subject).get(key)
             connection = self._dict(current, subject)
             nodes.extend(self._list(connection.get("nodes"), subject))
-            last_page_info = self._dict(connection.get("pageInfo"), subject)
-        if last_page_info is None or last_page_info.get("hasNextPage") is not False:
-            raise GitHubTransientError(f"GitHub returned incomplete {subject} pagination")
+            page_info = self._dict(connection.get("pageInfo"), subject)
+            terminal = index == len(pages) - 1
+            if terminal:
+                if page_info.get("hasNextPage") is not False:
+                    raise GitHubTransientError(
+                        f"GitHub returned incomplete {subject} pagination"
+                    )
+            elif (
+                page_info.get("hasNextPage") is not True
+                or not isinstance(page_info.get("endCursor"), str)
+                or not page_info.get("endCursor")
+            ):
+                raise GitHubTransientError(
+                    f"GitHub returned malformed {subject} pagination"
+                )
         return nodes
 
     def _issue(self, repository: RepositoryConfig, number: str) -> dict[str, JSONValue] | None:
@@ -597,3 +672,258 @@ def fetch_board_items(
         "board",
     )
     return resolver._list(value.get("items"), "board items")
+
+
+def _project_item_projection(
+    resolver: LiveTargetResolver,
+    board: BoardConfig,
+    raw_item: dict[str, JSONValue],
+    *,
+    fetched_at: datetime,
+) -> ProjectItemProjection | None:
+    item_node_id = raw_item.get("id")
+    if not isinstance(item_node_id, str) or not item_node_id:
+        raise PollFailure("GitHub returned a project item without a stable node ID")
+    item_type = raw_item.get("type")
+    if not isinstance(item_type, str):
+        raise PollFailure("GitHub returned a project item without a valid type")
+    if (
+        item_type not in _SUPPORTED_PROJECT_ITEM_TYPES
+        and item_type not in _UNSUPPORTED_PROJECT_ITEM_TYPES
+    ):
+        raise PollFailure(f"GitHub returned an unknown project item type: {item_type}")
+
+    field_values = resolver._dict(raw_item.get("fieldValues"), "project field values")
+    field_page_info = resolver._dict(
+        field_values.get("pageInfo"), "project field pagination"
+    )
+    if "hasNextPage" not in field_page_info or "endCursor" not in field_page_info:
+        raise PollFailure("GitHub returned malformed project field pagination")
+    field_end_cursor = field_page_info["endCursor"]
+    if (
+        field_page_info["hasNextPage"] is not False
+        or not (field_end_cursor is None or isinstance(field_end_cursor, str))
+    ):
+        raise PollFailure("GitHub returned incomplete project field pagination")
+    field_nodes = resolver._list(field_values.get("nodes"), "project field values")
+
+    raw_content = raw_item.get("content")
+    if item_type == "REDACTED":
+        if raw_content is not None:
+            raise PollFailure("GitHub returned inconsistent unsupported project item content")
+        return None
+    content = resolver._dict(raw_content, "project item content")
+    if item_type == "DRAFT_ISSUE":
+        if content.get("__typename") != "DraftIssue":
+            raise PollFailure("GitHub returned inconsistent unsupported project item content")
+        return None
+    expected_typename = "Issue" if item_type == "ISSUE" else "PullRequest"
+    if content.get("__typename") != expected_typename:
+        raise PollFailure("GitHub returned inconsistent project item content")
+    repository = resolver._dict(content.get("repository"), "project item repository")
+    repository_id = repository.get("databaseId")
+    repository_name = repository.get("nameWithOwner")
+    content_number = content.get("number")
+    if (
+        not isinstance(repository_id, int)
+        or isinstance(repository_id, bool)
+        or repository_id <= 0
+        or not isinstance(repository_name, str)
+        or "/" not in repository_name
+        or not isinstance(content_number, int)
+        or isinstance(content_number, bool)
+        or content_number <= 0
+    ):
+        raise PollFailure("GitHub returned unstable project item coordinates")
+
+    status: str | None = None
+    priority: str | None = None
+    for field_value in field_nodes:
+        if field_value.get("__typename") != "ProjectV2ItemFieldSingleSelectValue":
+            continue
+        field = resolver._dict(field_value.get("field"), "project field")
+        field_name = field.get("name")
+        value_name = field_value.get("name")
+        if not isinstance(field_name, str) or not isinstance(value_name, str):
+            raise PollFailure("GitHub returned malformed project field data")
+        if field_name == "Status":
+            status = value_name
+        elif field_name == "Priority":
+            priority = value_name
+
+    if repository_id not in board.repository_ids:
+        return None
+    return ProjectItemProjection(
+        board.key,
+        item_node_id,
+        repository_id,
+        "issue" if item_type == "ISSUE" else "pull_request",
+        content_number,
+        status,
+        priority,
+        fetched_at,
+    )
+
+
+def fetch_project_items(
+    board: BoardConfig,
+    token: str,
+    *,
+    runner: Callable[..., Any] | None = None,
+    now: datetime | None = None,
+) -> CompleteProjectSnapshot:
+    """Fetch and validate one complete Projects V2 routing projection."""
+    fetched_at = datetime.now(UTC) if now is None else now
+    resolver = LiveTargetResolver(read_token=token, runner=runner)
+    try:
+        pages = resolver._graphql_pages(
+            _PROJECT_ITEMS_QUERY,
+            subject="project items",
+            variables=(("owner", board.owner), ("number", str(board.number))),
+        )
+        projections: list[ProjectItemProjection] = []
+        item_ids: set[str] = set()
+        for index, page in enumerate(pages):
+            data = resolver._dict(page.get("data"), "project response")
+            rate_limit = resolver._dict(data.get("rateLimit"), "GraphQL rate limit")
+            remaining = rate_limit.get("remaining")
+            if (
+                not isinstance(remaining, int)
+                or isinstance(remaining, bool)
+                or remaining <= 0
+            ):
+                raise PollFailure("GitHub GraphQL rate limit is exhausted or malformed")
+            user = resolver._dict(data.get("user"), "project owner")
+            project = resolver._dict(user.get("projectV2"), "project")
+            items = resolver._dict(project.get("items"), "project items")
+            page_info = resolver._dict(items.get("pageInfo"), "project pagination")
+            if "hasNextPage" not in page_info or "endCursor" not in page_info:
+                raise PollFailure("GitHub returned malformed project pagination")
+            has_next = page_info["hasNextPage"]
+            end_cursor = page_info["endCursor"]
+            if not (end_cursor is None or isinstance(end_cursor, str)):
+                raise PollFailure("GitHub returned malformed project pagination")
+            terminal = index == len(pages) - 1
+            if terminal:
+                if has_next is not False:
+                    raise PollFailure("GitHub returned incomplete project pagination")
+            elif has_next is not True or not isinstance(end_cursor, str) or not end_cursor:
+                raise PollFailure("GitHub returned malformed project pagination")
+            for raw_item in resolver._list(items.get("nodes"), "project items"):
+                projection = _project_item_projection(
+                    resolver,
+                    board,
+                    raw_item,
+                    fetched_at=fetched_at,
+                )
+                if projection is None:
+                    continue
+                if projection.item_node_id in item_ids:
+                    raise PollFailure("GitHub returned a duplicate project item")
+                item_ids.add(projection.item_node_id)
+                projections.append(projection)
+    except PollFailure:
+        raise
+    except GitHubError as error:
+        raise PollFailure(str(error)) from error
+    return CompleteProjectSnapshot(board.key, tuple(projections), fetched_at)
+
+
+def _github_timestamp(value: JSONValue, subject: str) -> datetime:
+    if not isinstance(value, str):
+        raise PollFailure(f"GitHub returned an undated {subject}")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise PollFailure(f"GitHub returned a malformed {subject} timestamp") from error
+    if parsed.tzinfo is None:
+        raise PollFailure(f"GitHub returned a timezone-free {subject} timestamp")
+    return parsed
+
+
+def _human_actor_after(
+    actor: JSONValue,
+    created_at: JSONValue,
+    parked_at: datetime,
+    bot_logins: frozenset[str],
+    *,
+    subject: str,
+) -> bool:
+    if actor is None:
+        return False
+    if not isinstance(actor, dict):
+        raise PollFailure(f"GitHub returned a malformed {subject} actor")
+    login = actor.get("login")
+    if login is None:
+        return False
+    if not isinstance(login, str):
+        raise PollFailure(f"GitHub returned a malformed {subject} login")
+    if credentials.is_bot_login(login, known_bots=set(bot_logins)):
+        return False
+    if parked_at.tzinfo is None:
+        raise PollFailure("approval watch parked_at must be timezone-aware")
+    return _github_timestamp(created_at, subject) > parked_at
+
+
+def _approval_predicate(
+    resolver: LiveTargetResolver,
+    comments: list[dict[str, JSONValue]],
+    watch: ApprovalWatch,
+    bot_logins: frozenset[str],
+) -> bool:
+    for comment in comments:
+        if _human_actor_after(
+            comment.get("author"),
+            comment.get("createdAt"),
+            watch.parked_at,
+            bot_logins,
+            subject="comment",
+        ):
+            return True
+        reactions = resolver._dict(comment.get("reactions"), "comment reactions")
+        for reaction in resolver._list(reactions.get("nodes"), "comment reactions"):
+            content = reaction.get("content")
+            if not isinstance(content, str):
+                raise PollFailure("GitHub returned a reaction without content")
+            if content != "THUMBS_UP":
+                continue
+            if _human_actor_after(
+                reaction.get("user"),
+                reaction.get("createdAt"),
+                watch.parked_at,
+                bot_logins,
+                subject="reaction",
+            ):
+                return True
+    return False
+
+
+def fetch_approval_predicates(
+    repository: RepositoryConfig,
+    watches: tuple[ApprovalWatch, ...],
+    token: str,
+    bot_logins: frozenset[str],
+    *,
+    runner: Callable[..., Any] | None = None,
+) -> tuple[ApprovalPredicateObservation, ...]:
+    """Resolve only active approval watches for one repository."""
+    resolver = LiveTargetResolver(read_token=token, runner=runner)
+    observations: list[ApprovalPredicateObservation] = []
+    try:
+        for watch in watches:
+            if watch.repository_id != repository.identity.id:
+                raise PollFailure("approval watch belongs to a different repository")
+            if watch.predicate != "human_approval_since_park":
+                raise PollFailure(f"unsupported approval predicate: {watch.predicate}")
+            comments = resolver._issue_comments(repository, str(watch.issue_number))
+            observations.append(
+                ApprovalPredicateObservation(
+                    watch,
+                    _approval_predicate(resolver, comments, watch, bot_logins),
+                )
+            )
+    except PollFailure:
+        raise
+    except GitHubError as error:
+        raise PollFailure(str(error)) from error
+    return tuple(observations)

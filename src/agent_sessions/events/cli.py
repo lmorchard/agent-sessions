@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import socket
 import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -11,7 +12,10 @@ from typing import Sequence
 
 import uvicorn
 
-from . import config, operations
+from agent_sessions.driver import credentials
+
+from . import config, operations, pollers
+from . import logging as event_logging
 from .store import QueueStore
 from .webhook import create_app
 
@@ -50,9 +54,47 @@ def _parser() -> argparse.ArgumentParser:
     prune.add_argument("--deliveries-days", type=int)
     prune.add_argument("--invalidations-days", type=int)
     serve = subparsers.add_parser("serve")
-    for command in (migrate, status, doctor, prune, serve):
+    poll_projects = subparsers.add_parser("poll-projects")
+    poll_reactions = subparsers.add_parser("poll-reactions")
+    for command in (
+        migrate,
+        status,
+        doctor,
+        prune,
+        serve,
+        poll_projects,
+        poll_reactions,
+    ):
         command.add_argument("--config", type=Path, default=argparse.SUPPRESS)
     return parser
+
+
+def _worker_id(command: str) -> str:
+    return f"{socket.gethostname()}:{os.getpid()}:{command}"
+
+
+def _reaction_bot_logins() -> frozenset[str]:
+    extras = tuple(
+        value.strip()
+        for value in os.environ.get(credentials.BOT_LOGINS_VAR, "").split(",")
+        if value.strip()
+    )
+    return credentials.bot_logins(
+        credentials.Credentials(
+            login=os.environ.get(credentials.LOGIN_VAR, "").strip(),
+            extra_bot_logins=extras,
+        )
+    )
+
+
+def _log_poll_result(command: str, result: pollers.PollRunResult) -> None:
+    event_logging.emit(
+        command.replace("-", "_"),
+        message=(
+            f"attempted={result.attempted} skipped={result.skipped} "
+            f"invalidations={result.invalidations} errors={len(result.errors)}"
+        ),
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -69,6 +111,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         store.register_repositories(item.identity for item in loaded.repositories)
         uvicorn.run(create_app(config=loaded, store=store, webhook_secret=webhook_secret), host="127.0.0.1", port=8080)
         return 0
+    if args.command in {"poll-projects", "poll-reactions"}:
+        store = QueueStore.open(loaded.database, busy_timeout_ms=loaded.busy_timeout_ms)
+        store.register_repositories(item.identity for item in loaded.repositories)
+        now = datetime.now(UTC)
+        try:
+            if args.command == "poll-projects":
+                result = pollers.poll_projects_once(
+                    loaded,
+                    store,
+                    credentials.resolve_board_credential(),
+                    worker_id=_worker_id(args.command),
+                    now=now,
+                )
+            else:
+                result = pollers.poll_reactions_once(
+                    loaded,
+                    store,
+                    credentials.resolve_read_credential(),
+                    _reaction_bot_logins(),
+                    worker_id=_worker_id(args.command),
+                    now=now,
+                )
+        except RuntimeError as error:
+            event_logging.emit(
+                args.command.replace("-", "_"), message=f"failed: {error}"
+            )
+            return 1
+        _log_poll_result(args.command, result)
+        return result.exit_code
     if args.command == "doctor":
         return operations.doctor(loaded.database, busy_timeout_ms=loaded.busy_timeout_ms)
     if args.command == "queue-status":

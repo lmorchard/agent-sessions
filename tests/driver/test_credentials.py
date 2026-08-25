@@ -6,7 +6,10 @@ the agent must not be able to write to GitHub, whatever the agent decides to run
 
 from __future__ import annotations
 
+import traceback
 from pathlib import Path
+
+import pytest
 
 from agent_sessions.driver import credentials
 
@@ -385,6 +388,256 @@ class FakeCommandRunner:
 
 CMD = "security find-generic-password -s agent-write -w"
 WRITE_CMD_VAR = credentials.WRITE_TOKEN_VAR + credentials.CMD_SUFFIX
+READ_CMD_VAR = credentials.READ_TOKEN_VAR + credentials.CMD_SUFFIX
+BOARD_CMD_VAR = credentials.BOARD_TOKEN_VAR + credentials.CMD_SUFFIX
+
+
+class GuardedCredentialEnv(dict[str, str]):
+    """Fail when a scoped resolver inspects an out-of-scope credential."""
+
+    def __init__(self, values: dict[str, str], forbidden: set[str]):
+        super().__init__(values)
+        self.forbidden = forbidden
+
+    def get(self, key: str, default=None):
+        assert key not in self.forbidden, f"scoped resolver inspected {key}"
+        return super().get(key, default)
+
+
+def test_board_credential_resolver_reads_only_the_board_literal():
+    forbidden = {
+        credentials.READ_TOKEN_VAR,
+        READ_CMD_VAR,
+        credentials.WRITE_TOKEN_VAR,
+        WRITE_CMD_VAR,
+    }
+    env = GuardedCredentialEnv({credentials.BOARD_TOKEN_VAR: "board-only"}, forbidden)
+
+    assert credentials.resolve_board_credential(env) == "board-only"
+
+
+def test_board_credential_resolver_executes_only_the_board_command():
+    board_command = "security find-generic-password -s agent-board -w"
+    runner = FakeCommandRunner({board_command: "board-command-token", CMD: WRITE})
+    env = GuardedCredentialEnv(
+        {BOARD_CMD_VAR: board_command, WRITE_CMD_VAR: CMD},
+        {credentials.READ_TOKEN_VAR, READ_CMD_VAR, credentials.WRITE_TOKEN_VAR, WRITE_CMD_VAR},
+    )
+
+    assert credentials.resolve_board_credential(env, runner=runner) == "board-command-token"
+    assert runner.calls == [["security", "find-generic-password", "-s", "agent-board", "-w"]]
+
+
+def test_board_credential_resolver_never_falls_back_to_a_broader_literal():
+    env = GuardedCredentialEnv(
+        {
+            credentials.READ_TOKEN_VAR: READ,
+            credentials.WRITE_TOKEN_VAR: WRITE,
+        },
+        {credentials.READ_TOKEN_VAR, credentials.WRITE_TOKEN_VAR},
+    )
+
+    with pytest.raises(RuntimeError, match=credentials.BOARD_TOKEN_VAR):
+        credentials.resolve_board_credential(env)
+
+
+def test_read_credential_resolver_reads_only_the_read_literal():
+    forbidden = {
+        credentials.BOARD_TOKEN_VAR,
+        BOARD_CMD_VAR,
+        credentials.WRITE_TOKEN_VAR,
+        WRITE_CMD_VAR,
+    }
+    env = GuardedCredentialEnv({credentials.READ_TOKEN_VAR: "read-only"}, forbidden)
+
+    assert credentials.resolve_read_credential(env) == "read-only"
+
+
+def test_read_credential_resolver_executes_only_the_read_command():
+    read_command = "security find-generic-password -s agent-read -w"
+    runner = FakeCommandRunner({read_command: "read-command-token", CMD: WRITE})
+    env = GuardedCredentialEnv(
+        {READ_CMD_VAR: read_command, WRITE_CMD_VAR: CMD},
+        {
+            credentials.BOARD_TOKEN_VAR,
+            BOARD_CMD_VAR,
+            credentials.WRITE_TOKEN_VAR,
+            WRITE_CMD_VAR,
+        },
+    )
+
+    assert credentials.resolve_read_credential(env, runner=runner) == "read-command-token"
+    assert runner.calls == [["security", "find-generic-password", "-s", "agent-read", "-w"]]
+
+
+def test_read_credential_resolver_mints_only_the_scoped_app_read_token(tmp_path: Path):
+    key_file = tmp_path / "key.pem"
+    key_file.write_text("fake-key-content")
+    minted: list[dict[str, str] | None] = []
+
+    def signing_runner(cmd: list[str], **kwargs):
+        class Result:
+            stdout = b"signature"
+
+        return Result()
+
+    def http_post(_installation_id, _jwt, permissions):
+        minted.append(permissions)
+        return "installation-read-token"
+
+    env = GuardedCredentialEnv(
+        {
+            credentials.APP_ID_VAR: "123456",
+            credentials.APP_INSTALLATION_ID_VAR: "789012",
+            credentials.APP_PRIVATE_KEY_FILE_VAR: str(key_file),
+        },
+        {
+            credentials.BOARD_TOKEN_VAR,
+            BOARD_CMD_VAR,
+            credentials.WRITE_TOKEN_VAR,
+            WRITE_CMD_VAR,
+        },
+    )
+
+    assert credentials.resolve_read_credential(
+        env, runner=signing_runner, http_post=http_post
+    ) == "installation-read-token"
+    assert minted == [
+        {
+            "contents": "read",
+            "issues": "read",
+            "pull_requests": "read",
+            "discussions": "read",
+        }
+    ]
+
+
+def test_read_credential_resolver_never_falls_back_to_a_broader_literal():
+    env = GuardedCredentialEnv(
+        {
+            credentials.BOARD_TOKEN_VAR: "board-token",
+            credentials.WRITE_TOKEN_VAR: WRITE,
+        },
+        {credentials.BOARD_TOKEN_VAR, credentials.WRITE_TOKEN_VAR},
+    )
+
+    with pytest.raises(RuntimeError, match=credentials.READ_TOKEN_VAR):
+        credentials.resolve_read_credential(env)
+
+
+@pytest.mark.parametrize(
+    ("resolver", "variable"),
+    [
+        (credentials.resolve_board_credential, credentials.BOARD_TOKEN_VAR),
+        (credentials.resolve_read_credential, credentials.READ_TOKEN_VAR),
+    ],
+)
+def test_scoped_credential_command_failures_never_expose_child_output(
+    resolver,
+    variable: str,
+):
+    stdout_secret = "ghp_stdout_secret_value"
+    stderr_secret = "ghs_stderr_secret_value"
+
+    def failing_runner(_argv, **_kwargs):
+        class Failure:
+            returncode = 23
+            stdout = stdout_secret
+            stderr = stderr_secret
+
+        return Failure()
+
+    with pytest.raises(RuntimeError) as caught:
+        resolver(
+            {variable + credentials.CMD_SUFFIX: "credential-helper read"},
+            runner=failing_runner,
+        )
+
+    message = str(caught.value)
+    assert variable + credentials.CMD_SUFFIX in message
+    assert "exit" in message and "23" in message
+    assert stdout_secret not in message
+    assert stderr_secret not in message
+
+
+@pytest.mark.parametrize("category", ["parse", "run", "empty"])
+def test_scoped_credential_command_error_reports_only_its_failure_category(
+    category: str,
+):
+    secret = "ghs_command_exception_secret"
+
+    def runner(_argv, **_kwargs):
+        if category == "run":
+            raise RuntimeError(secret)
+
+        class EmptyOutput:
+            returncode = 0
+            stdout = "  \n"
+            stderr = secret
+
+        return EmptyOutput()
+
+    command = 'credential-helper "' if category == "parse" else "credential-helper read"
+    with pytest.raises(RuntimeError) as caught:
+        credentials.resolve_board_credential(
+            {BOARD_CMD_VAR: command},
+            runner=runner,
+        )
+
+    message = str(caught.value)
+    assert BOARD_CMD_VAR in message and category in message
+    assert secret not in message
+
+
+def test_scoped_app_credential_failure_never_exposes_exception_content(tmp_path: Path):
+    key_file = tmp_path / "key.pem"
+    key_file.write_text("fake-key-content")
+    secret = "ghs_exception_secret_value"
+
+    def signing_runner(_cmd, **_kwargs):
+        raise RuntimeError(secret)
+
+    with pytest.raises(RuntimeError) as caught:
+        credentials.resolve_read_credential(
+            {
+                credentials.APP_ID_VAR: "123456",
+                credentials.APP_INSTALLATION_ID_VAR: "789012",
+                credentials.APP_PRIVATE_KEY_FILE_VAR: str(key_file),
+            },
+            runner=signing_runner,
+        )
+
+    assert credentials.READ_TOKEN_VAR in str(caught.value)
+    assert secret not in str(caught.value)
+    assert secret not in "".join(traceback.format_exception(caught.value))
+
+
+def test_scoped_app_empty_credential_names_the_variable_and_failure_category(
+    tmp_path: Path,
+):
+    key_file = tmp_path / "key.pem"
+    key_file.write_text("fake-key-content")
+
+    def signing_runner(_cmd, **_kwargs):
+        class Result:
+            stdout = b"signature"
+
+        return Result()
+
+    with pytest.raises(RuntimeError) as caught:
+        credentials.resolve_read_credential(
+            {
+                credentials.APP_ID_VAR: "123456",
+                credentials.APP_INSTALLATION_ID_VAR: "789012",
+                credentials.APP_PRIVATE_KEY_FILE_VAR: str(key_file),
+            },
+            runner=signing_runner,
+            http_post=lambda *_args: "",
+        )
+
+    message = str(caught.value)
+    assert credentials.READ_TOKEN_VAR in message
+    assert "empty" in message
 
 
 def test_a_token_can_come_from_a_command():
@@ -548,4 +801,3 @@ def test_apply_driver_env_installs_git_vars_in_target():
     assert target["GIT_AUTHOR_EMAIL"] == "apply-bot@users.noreply.github.com"
     assert target["GIT_COMMITTER_NAME"] == "apply-bot"
     assert target["GIT_COMMITTER_EMAIL"] == "apply-bot@users.noreply.github.com"
-

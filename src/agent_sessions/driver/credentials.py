@@ -19,8 +19,10 @@ import stat
 import subprocess
 import time
 import urllib.request
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, TypeAlias, cast
 
 #: Read-scoped credential handed to the agent. Safe to keep in `.env`.
 READ_TOKEN_VAR = "AGENT_GH_READ_TOKEN"
@@ -84,6 +86,16 @@ TOKEN_VARS = (
 #: Variables the read token is installed into for the child.
 AGENT_TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN")
 
+READ_PERMISSIONS = {
+    "contents": "read",
+    "issues": "read",
+    "pull_requests": "read",
+    "discussions": "read",
+}
+
+
+CommandRunner: TypeAlias = Callable[..., Any]
+
 
 @dataclass(frozen=True)
 class Credentials:
@@ -105,25 +117,42 @@ class Credentials:
         return bool(self.read_token) and bool(self.write_token) and self.read_token != self.write_token
 
 
-def _from_command(spec: str, runner) -> tuple[str, str]:
+def _from_command(
+    spec: str,
+    runner,
+    *,
+    sanitize_error: bool = False,
+) -> tuple[str, str]:
     """Run a `<VAR>_CMD` and return (token, error). Never both."""
     try:
         argv = shlex.split(spec)
     except ValueError as e:
+        if sanitize_error:
+            return "", "credential command parse failure"
         return "", f"could not parse the command: {e}"
     if not argv:
-        return "", "the command is empty"
+        return "", (
+            "credential command is empty" if sanitize_error else "the command is empty"
+        )
     try:
         # No shell: a config file is not a code-execution surface, and the commands
         # this exists for (`security`, `op read`, `pass`) need none.
         res = runner(argv, capture_output=True, text=True)
     except Exception as e:  # noqa: BLE001 -- every failure has the same answer here
+        if sanitize_error:
+            return "", f"credential command run failure ({type(e).__name__})"
         return "", f"the command could not be run: {type(e).__name__}"
     if res.returncode != 0:
+        if sanitize_error:
+            return "", f"credential command exit failure (status {res.returncode})"
         return "", f"the command exited {res.returncode}: {(res.stderr or '').strip()[:200]}"
     token = (res.stdout or "").strip()
     if not token:
-        return "", "the command printed nothing"
+        return "", (
+            "credential command produced empty output"
+            if sanitize_error
+            else "the command printed nothing"
+        )
     return token, ""
 
 
@@ -182,6 +211,87 @@ def fetch_app_installation_token(
         return str(res_data.get("token", ""))
 
 
+def _resolve_scoped_value(
+    src: Mapping[str, str],
+    variable: str,
+    runner: CommandRunner,
+) -> str:
+    literal = (src.get(variable) or "").strip()
+    if literal:
+        return literal
+    spec = (src.get(variable + CMD_SUFFIX) or "").strip()
+    if not spec:
+        return ""
+    token, error = _from_command(spec, runner, sanitize_error=True)
+    if error:
+        raise RuntimeError(f"{variable}{CMD_SUFFIX}: {error}")
+    return token
+
+
+def resolve_read_credential(
+    env: Mapping[str, str] | None = None,
+    *,
+    runner: CommandRunner | None = None,
+    http_post: Callable[..., str] | None = None,
+) -> str:
+    """Resolve only the installation-readable credential used by reaction polling."""
+    src = os.environ if env is None else env
+    command_runner = cast(CommandRunner, subprocess.run) if runner is None else runner
+    token = _resolve_scoped_value(src, READ_TOKEN_VAR, command_runner)
+    if token:
+        return token
+
+    app_id = (src.get(APP_ID_VAR) or src.get("GH_APP_ID") or "").strip()
+    installation_id = (
+        src.get(APP_INSTALLATION_ID_VAR)
+        or src.get("GH_APP_INSTALLATION_ID")
+        or ""
+    ).strip()
+    private_key_file = (
+        src.get(APP_PRIVATE_KEY_FILE_VAR)
+        or src.get("GH_APP_PRIVATE_KEY_FILE")
+        or ""
+    ).strip()
+    if not (app_id and installation_id and private_key_file):
+        raise RuntimeError(
+            f"{READ_TOKEN_VAR}, {READ_TOKEN_VAR}{CMD_SUFFIX}, or complete GitHub App credentials are required"
+        )
+    try:
+        jwt_token = generate_app_jwt(app_id, private_key_file, runner=command_runner)
+        token = fetch_app_installation_token(
+            jwt_token,
+            installation_id,
+            permissions=READ_PERMISSIONS,
+            http_post=http_post,
+        ).strip()
+    except Exception as error:
+        raise RuntimeError(
+            f"{READ_TOKEN_VAR}: GitHub App credential mint failure "
+            f"({type(error).__name__})"
+        ) from None
+    if not token:
+        raise RuntimeError(
+            f"{READ_TOKEN_VAR}: GitHub App credential mint produced empty output"
+        )
+    return token
+
+
+def resolve_board_credential(
+    env: Mapping[str, str] | None = None,
+    *,
+    runner: CommandRunner | None = None,
+) -> str:
+    """Resolve only the Projects-readable credential used by board polling."""
+    src = os.environ if env is None else env
+    command_runner = cast(CommandRunner, subprocess.run) if runner is None else runner
+    token = _resolve_scoped_value(src, BOARD_TOKEN_VAR, command_runner)
+    if not token:
+        raise RuntimeError(
+            f"{BOARD_TOKEN_VAR} or {BOARD_TOKEN_VAR}{CMD_SUFFIX} is required"
+        )
+    return token
+
+
 def resolve(env: dict[str, str] | None = None, runner=None, http_post=None) -> Credentials:
     src = os.environ if env is None else env
     if runner is None:
@@ -220,7 +330,7 @@ def resolve(env: dict[str, str] | None = None, runner=None, http_post=None) -> C
                 tokens[READ_TOKEN_VAR] = fetch_app_installation_token(
                     jwt_token,
                     app_inst_id,
-                    permissions={"contents": "read", "issues": "read", "pull_requests": "read", "discussions": "read"},
+                    permissions=READ_PERMISSIONS,
                     http_post=http_post,
                 )
             if not tokens.get(WRITE_TOKEN_VAR):

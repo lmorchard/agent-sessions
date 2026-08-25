@@ -216,6 +216,7 @@ def test_leases_watches_snapshots_and_pruning_preserve_live_tables(tmp_path: Pat
     watch = ApprovalWatch(1, 42, "approved", NOW)
     store.upsert_watch(watch)
     assert not store.record_watch_observation(watch, value=True, observed_at=NOW)
+    watch = store.list_watches(1)[0]
     assert store.record_watch_observation(watch, value=False, observed_at=NOW + timedelta(seconds=1))
     projection = ProjectItemProjection("owner/9", "item", 1, "issue", 42, "Ready", None, NOW)
     store.replace_project_snapshot("owner/9", (projection,), (invalidation(),), now=NOW)
@@ -235,7 +236,9 @@ def test_watches_list_remove_and_only_invalidate_on_a_changed_observation(tmp_pa
     store.upsert_watch(second)
     assert tuple(watch.issue_number for watch in store.list_watches(1)) == (42, 43)
     assert not store.record_watch_observation(first, value=True, observed_at=NOW)
+    first = store.list_watches(1)[0]
     assert not store.record_watch_observation(first, value=True, observed_at=NOW + timedelta(seconds=1))
+    first = store.list_watches(1)[0]
     assert store.record_watch_observation(first, value=False, observed_at=NOW + timedelta(seconds=2))
     store.remove_watch(1, 42)
     assert tuple(watch.issue_number for watch in store.list_watches(1)) == (43,)
