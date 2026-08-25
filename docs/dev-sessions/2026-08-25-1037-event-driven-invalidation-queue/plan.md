@@ -540,36 +540,39 @@ Structured receiver logs contain only delivery GUID, event, action, repository I
 
 **TDD and implementation steps:**
 
-- [ ] Add failing pure normalization tests for every mapping above, the one-to-many check case, check fallback to revision, issue-comment PR detection, installation filtering, ping/meta no-target behavior, unknown events/actions, malformed identity, and unconfigured repositories.
-- [ ] Run uv run pytest -q tests/events/test_normalize.py and confirm failure.
-- [ ] Implement normalize.py with immutable NormalizedDelivery output. Re-run tests/events/test_normalize.py and record the passing result.
-- [ ] Add failing ASGI tests using httpx.ASGITransport for exact-byte HMAC, missing headers, bad signatures, malformed JSON, streamed body limits, duplicate GUIDs, readiness, disabled docs routes, 503 database errors, and commit-before-202.
-- [ ] For commit-before-202, wrap QueueStore.enqueue_webhook with a barrier and prove the request remains pending until the store call returns.
-- [ ] Run uv run pytest -q tests/events/test_webhook.py and confirm failure.
-- [ ] Add FastAPI, Uvicorn, and httpx through uv so pyproject.toml and uv.lock change together.
-- [ ] Implement webhook.py and the serve CLI without starting a socket from create_app.
-- [ ] Re-run tests/events/test_webhook.py and record the passing result.
-- [ ] Add an integration test that signs a real payload, posts through ASGI, opens a second QueueStore connection, and claims the resulting target.
-- [ ] Run make events-test.
-- [ ] Run make lint.
-- [ ] Run make typecheck.
-- [ ] Run make check.
-- [ ] Commit only Phase 2 files with message: Phase 2: add verified webhook ingestion
+- [x] Add failing pure normalization tests for every mapping above, the one-to-many check case, check fallback to revision, issue-comment PR detection, installation filtering, ping/meta no-target behavior, unknown events/actions, malformed identity, and unconfigured repositories.
+- [x] Run `uv run pytest -q tests/events/test_normalize.py` and confirm failure: 55 failures, all from the absent `agent_sessions.events.normalize` module.
+- [x] Implement normalize.py with immutable NormalizedDelivery output. Re-run tests/events/test_normalize.py: 55 passed; review-fix action-state additions bring the current focused suite to 62 passed.
+- [x] Add failing ASGI tests using httpx.ASGITransport for exact-byte HMAC, missing headers, bad signatures, malformed JSON, streamed body limits, duplicate GUIDs, readiness, disabled docs routes, 503 database errors, and commit-before-202.
+- [x] For commit-before-202, wrap QueueStore.enqueue_webhook with a barrier and prove the request remains pending until the store call returns.
+- [x] Run `uv run pytest -q tests/events/test_webhook.py` and confirm failure: async ASGI test support was absent before the required HTTP dependencies were added.
+- [x] Add FastAPI, Uvicorn, and httpx through uv so pyproject.toml and uv.lock change together.
+- [x] Implement webhook.py and the serve CLI without starting a socket from create_app.
+- [x] Re-run tests/events/test_webhook.py: 9 passed; review-fix signature, malformed-action, and real-lock additions bring the current focused suite to 14 passed.
+- [x] Add an integration test that signs a real payload, posts through ASGI, opens a second QueueStore connection, and claims the resulting target.
+- [x] Run make events-test: exited 0.
+- [x] Run make lint: passed.
+- [x] Run make typecheck: passed.
+- [x] Run make check: passed (the full gate exited 0).
+- [x] Commit only Phase 2 files with message: `Phase 2: add verified webhook ingestion`.
 
 **Verification — automated:**
 
-- [ ] Every selected event family reaches the expected target kind and unknown inputs create no dirty target.
-- [ ] A duplicate delivery returns 202 and does not increment target generation.
-- [ ] No JSON parser or normalizer is called for a bad signature.
-- [ ] The ASGI request does not finish before the SQLite commit returns.
-- [ ] The signed ASGI-to-SQLite-to-claim integration test passes.
-- [ ] make lint, make typecheck, and make check pass.
+- [x] Every selected event family reaches the expected target kind and unknown inputs create no dirty target.
+- [x] A duplicate delivery returns 202 and does not increment target generation.
+- [x] No JSON parser or normalizer is called for a bad signature.
+- [x] The ASGI request does not finish before the SQLite commit returns.
+- [x] The signed ASGI-to-SQLite-to-claim integration test passes.
+- [x] A real second SQLite `BEGIN IMMEDIATE` lock maps to QueueBusy and the ASGI receiver returns 503 after the configured busy timeout.
+- [x] Missing action is accepted only for status/ping; present non-string action values are malformed, and unknown strings remain ignored.
+- [x] Missing signature is 400; malformed prefix/length/non-hex syntax is 400 before parsing; a valid-form mismatched digest is 401.
+- [x] make lint, make typecheck, and make check pass.
 
 **Verification — manual:**
 
-- [ ] Review imports and serve startup to confirm the receiver cannot resolve GitHub credentials.
-- [ ] Review structured log calls for the safe-field allowlist and absence of payload/comment/signature values.
-- [ ] Review the supported action map against the event inventory captured in the spec; additions require explicit tests.
+- [x] Review imports and serve startup: webhook.py/cli.py import no credentials resolver and serve reads only AGENT_SESSION_WEBHOOK_SECRET_FILE.
+- [x] Review structured log calls: `_log` emits only the specified safe fields and accepts no request-body, signature, or secret argument.
+- [x] Review the supported action map against the event inventory captured in the spec; every listed action has a parameterized test.
 
 ---
 

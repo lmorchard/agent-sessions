@@ -1,0 +1,16 @@
+{
+  "issues": {"action": "opened", "repository": {"id": 1}, "issue": {"number": 1}},
+  "issue_comment": {"action": "created", "repository": {"id": 1}, "issue": {"number": 1}},
+  "pull_request": {"action": "opened", "repository": {"id": 1}, "pull_request": {"number": 1}},
+  "pull_request_review": {"action": "submitted", "repository": {"id": 1}, "pull_request": {"number": 1}},
+  "pull_request_review_comment": {"action": "created", "repository": {"id": 1}, "pull_request": {"number": 1}},
+  "pull_request_review_thread": {"action": "resolved", "repository": {"id": 1}, "pull_request": {"number": 1}},
+  "check_run": {"action": "completed", "repository": {"id": 1}, "check_run": {"pull_requests": [{"number": 1}]}},
+  "check_suite": {"action": "completed", "repository": {"id": 1}, "check_suite": {"pull_requests": [{"number": 1}]}},
+  "status": {"repository": {"id": 1}, "sha": "abc123"},
+  "installation": {"action": "created", "repository": {"id": 1}, "installation": {"id": 10}, "repositories": [{"id": 1}]},
+  "installation_repositories": {"action": "added", "repository": {"id": 1}, "installation": {"id": 10}, "repositories_added": [{"id": 1}], "repositories_removed": []},
+  "installation_target": {"action": "renamed", "repository": {"id": 1}, "installation": {"id": 10}},
+  "ping": {"repository": {"id": 1}},
+  "meta": {"action": "deleted", "repository": {"id": 1}}
+}

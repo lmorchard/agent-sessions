@@ -20,7 +20,9 @@ from .models import (
     PollerStatus,
     ProjectItemProjection,
     PruneResult,
+    QueueBusy,
     QueueStatus,
+    QueueUnavailable,
     RepositoryIdentity,
     RepositoryStatus,
     StoreHealth,
@@ -38,6 +40,23 @@ def _stamp(value: datetime) -> str:
 
 def _time(value: str | None) -> datetime | None:
     return None if value is None else datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _queue_error(error: sqlite3.Error) -> QueueBusy | QueueUnavailable | None:
+    if isinstance(error, sqlite3.OperationalError):
+        if any(token in str(error).lower() for token in ("locked", "busy")):
+            return QueueBusy("queue database is busy")
+        return QueueUnavailable("queue database is unavailable")
+    if isinstance(error, sqlite3.DatabaseError) and not isinstance(error, sqlite3.IntegrityError):
+        return QueueUnavailable("queue database is unavailable")
+    return None
+
+
+def _raise_queue_error(error: sqlite3.Error) -> None:
+    translated = _queue_error(error)
+    if translated is None:
+        raise error
+    raise translated from error
 
 
 class QueueStore:
@@ -102,14 +121,33 @@ class QueueStore:
 
     @contextmanager
     def _transaction(self, mode: str = "IMMEDIATE") -> Iterator[sqlite3.Connection]:
-        self.connection.execute(f"BEGIN {mode}")
+        try:
+            self.connection.execute(f"BEGIN {mode}")
+        except sqlite3.Error as error:
+            _raise_queue_error(error)
         try:
             yield self.connection
+        except sqlite3.Error as error:
+            try:
+                self.connection.rollback()
+            except sqlite3.Error:
+                pass
+            _raise_queue_error(error)
         except Exception:
-            self.connection.rollback()
+            try:
+                self.connection.rollback()
+            except sqlite3.Error:
+                pass
             raise
         else:
-            self.connection.commit()
+            try:
+                self.connection.commit()
+            except sqlite3.Error as error:
+                try:
+                    self.connection.rollback()
+                except sqlite3.Error:
+                    pass
+                _raise_queue_error(error)
 
     def ready(self) -> StoreHealth:
         try:

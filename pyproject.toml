@@ -9,7 +9,9 @@ description = "Autonomous agent session board driver and reconciliation loop"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "fastapi>=0.141.1",
     "requests>=2.34.2",
+    "uvicorn>=0.52.4",
 ]
 
 [dependency-groups]
@@ -18,6 +20,7 @@ dev = [
     "pytest-xdist>=3",
     "ruff>=0.8.0",
     "mypy>=1.10.0",
+    "httpx>=0.28.1",
 ]
 
 [project.scripts]

@@ -14,6 +14,7 @@ from agent_sessions.events.models import (
     ApprovalWatch,
     Invalidation,
     ProjectItemProjection,
+    QueueBusy,
     RepositoryIdentity,
     VerifiedDelivery,
 )
@@ -138,6 +139,21 @@ def test_delivery_enqueue_is_atomic_and_duplicate_is_a_noop(tmp_path: Path) -> N
     assert store.enqueue_webhook(delivery(), (invalidation("other"),), now=NOW).duplicate is True
     assert store.connection.execute("SELECT count(*) FROM invalidations").fetchone()[0] == 1
     assert store.connection.execute("SELECT generation FROM dirty_targets").fetchone()[0] == 1
+
+
+def test_locked_database_translates_to_queue_busy_without_committing(tmp_path: Path) -> None:
+    store = migrated(tmp_path)
+    locker = sqlite3.connect(tmp_path / "events.sqlite3", isolation_level=None)
+    locker.execute("BEGIN IMMEDIATE")
+    try:
+        with pytest.raises(QueueBusy) as raised:
+            store.enqueue_webhook(delivery(), (invalidation(),), now=NOW)
+    finally:
+        locker.rollback()
+        locker.close()
+
+    assert isinstance(raised.value.__cause__, sqlite3.OperationalError)
+    assert store.connection.execute("SELECT count(*) FROM webhook_deliveries").fetchone()[0] == 0
 
 
 def test_ignored_unconfigured_webhook_delivery_is_retained_without_a_dirty_target(tmp_path: Path) -> None:
