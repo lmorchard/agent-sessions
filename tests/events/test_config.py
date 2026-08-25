@@ -40,6 +40,19 @@ number = 9
 repository_ids = [123456]
 '''
 
+REPOSITORY_TABLE = '''[[repositories]]
+id = 123456
+owner = "lmorchard"
+name = "agent-sessions"
+installation_id = 7890
+
+'''
+BOARD_TABLE = '''[[boards]]
+owner = "lmorchard"
+number = 9
+repository_ids = [123456]
+'''
+
 
 def test_loads_the_shared_events_configuration(tmp_path: Path) -> None:
     loaded = config.load(write_config(tmp_path / "events.toml", VALID))
@@ -84,6 +97,31 @@ def test_rejects_invalid_values(tmp_path: Path, change: str, message: str) -> No
     else:
         key = change.split(" = ")[0]
         text = text.replace(next(line for line in VALID.splitlines() if line.startswith(key + " =")), change)
+    with pytest.raises(ValueError, match=message):
+        config.load(write_config(tmp_path / "events.toml", text))
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        (VALID.replace('database = "/var/lib/agent-session/events.sqlite3"', "database = 42"), "database"),
+        (
+            VALID.replace("[scan]", "repositories = {}\n\n[scan]").replace(
+                REPOSITORY_TABLE, ""
+            ),
+            "repositories",
+        ),
+        (
+            VALID.replace("[scan]", "boards = {}\n\n[scan]").replace(
+                BOARD_TABLE, ""
+            ),
+            "boards",
+        ),
+    ],
+)
+def test_rejects_wrong_top_level_types_as_value_errors(
+    tmp_path: Path, text: str, message: str
+) -> None:
     with pytest.raises(ValueError, match=message):
         config.load(write_config(tmp_path / "events.toml", text))
 

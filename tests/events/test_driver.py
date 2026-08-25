@@ -1248,6 +1248,122 @@ def test_selected_pr_claim_is_not_released_when_it_closes_multiple_candidates(
     assert row["lease_owner"] == "worker"
 
 
+def test_selected_pr_claim_materializes_unselected_closing_issue_for_the_next_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = runtime(tmp_path)
+    enqueue(current, ("pull_request", "120"))
+    spec = "<!-- agent-session:spec -->\n## Tier: auto-ok"
+    install_resolver(
+        monkeypatch,
+        FakeResolver(
+            {
+                ("pull_request", "120"): ResolvedTarget(
+                    claim("pull_request", "120"),
+                    (issue(20, body=spec), issue(21, body=spec)),
+                    (pull(120, closes=(20, 21)),),
+                    (),
+                )
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "agent_sessions.driver.agent_session_driver.acquire_lock", lambda *_args: True
+    )
+
+    first = select_work(context(tmp_path), current, now=NOW, worker_id="first")
+
+    assert first.selection is not None
+    assert first.selection.candidates == [("20", "request_review")]
+    assert first.selected_claim is not None
+    assert current.store.acknowledge(first.selected_claim)
+    dirty = current.store.connection.execute(
+        "SELECT target_kind,target_key,generation,lease_owner "
+        "FROM dirty_targets ORDER BY target_kind,target_key"
+    ).fetchall()
+    assert [tuple(row) for row in dirty] == [("issue", "21", 1, None)]
+
+    install_resolver(
+        monkeypatch,
+        FakeResolver(
+            {
+                ("issue", "21"): ResolvedTarget(
+                    claim("issue", "21"),
+                    (issue(21, body=spec),),
+                    (),
+                    (),
+                )
+            }
+        ),
+    )
+    second = select_work(
+        context(tmp_path),
+        current,
+        now=NOW + timedelta(seconds=1),
+        worker_id="second",
+    )
+
+    assert second.selection is not None
+    assert second.selection.candidates == [("21", "execute")]
+    assert second.selected_claim is not None
+    assert second.selected_claim.target_kind == "issue"
+    assert second.selected_claim.target_key == "21"
+
+
+def test_pr_sibling_materialization_coalesces_and_preserves_a_newer_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = runtime(tmp_path)
+    enqueue(current, ("pull_request", "120"), ("issue", "21"))
+    concurrent_claims = current.store.claim_targets(
+        1,
+        worker_id="concurrent",
+        limit=2,
+        lease_until=NOW + timedelta(minutes=1),
+        now=NOW,
+    )
+    source_claim = next(
+        item for item in concurrent_claims if item.target_kind == "pull_request"
+    )
+    sibling_claim = next(
+        item for item in concurrent_claims if item.target_kind == "issue"
+    )
+    spec = "<!-- agent-session:spec -->\n## Tier: auto-ok"
+    # Release only the source claim so this worker can reconcile the PR while the
+    # sibling issue remains leased to a concurrent generation.
+    assert current.store.release(source_claim)
+    install_resolver(
+        monkeypatch,
+        FakeResolver(
+            {
+                ("pull_request", "120"): ResolvedTarget(
+                    claim("pull_request", "120"),
+                    (issue(20, body=spec), issue(21, body=spec)),
+                    (pull(120, closes=(20, 21)),),
+                    (),
+                )
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "agent_sessions.driver.agent_session_driver.acquire_lock", lambda *_args: True
+    )
+
+    result = select_work(context(tmp_path), current, now=NOW, worker_id="worker")
+
+    assert result.selected_claim is not None
+    row = current.store.connection.execute(
+        "SELECT generation,lease_owner FROM dirty_targets "
+        "WHERE target_kind='issue' AND target_key='21'"
+    ).fetchone()
+    assert tuple(row) == (2, None)
+    assert current.store.acknowledge(sibling_claim) is False
+    assert current.store.connection.execute(
+        "SELECT count(*) FROM dirty_targets "
+        "WHERE target_kind='issue' AND target_key='21'"
+    ).fetchone()[0] == 1
+
+
 def test_lock_contended_actionable_claim_is_released_without_a_candidate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

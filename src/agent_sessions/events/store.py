@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import stat
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from importlib.resources import files
@@ -29,7 +30,18 @@ from .models import (
     VerifiedDelivery,
 )
 
-CURRENT_SCHEMA_VERSION = 2
+MIGRATION_RESOURCES = (
+    "001_queue.sql",
+    "002_pollers.sql",
+    "003_scan_errors.sql",
+)
+CURRENT_SCHEMA_VERSION = len(MIGRATION_RESOURCES)
+
+
+def migration_scripts() -> tuple[str, ...]:
+    """Return shipped schema migrations in their authoritative version order."""
+    resources = files("agent_sessions.events.migrations")
+    return tuple(resources.joinpath(name).read_text() for name in MIGRATION_RESOURCES)
 
 
 def _stamp(value: datetime) -> str:
@@ -95,11 +107,17 @@ class QueueStore:
     @classmethod
     def migrate(cls, path: Path, *, busy_timeout_ms: int) -> tuple[int, ...]:
         path.parent.mkdir(parents=True, exist_ok=True)
+        parent_mode = stat.S_IMODE(path.parent.stat().st_mode)
+        shared_parent = (
+            parent_mode & stat.S_ISGID
+            and parent_mode & 0o077 == 0o070
+        )
+        database_mode = 0o660 if shared_parent else 0o600
         existed = path.exists()
         if not existed:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR, database_mode)
             os.close(fd)
-        os.chmod(path, 0o600)
+        os.chmod(path, database_mode)
         connection = cls._connect(path, busy_timeout_ms)
         try:
             connection.execute("BEGIN EXCLUSIVE")
@@ -109,10 +127,9 @@ class QueueStore:
             if applied != expected_prefix or any(version > CURRENT_SCHEMA_VERSION for version in applied):
                 raise IncompatibleSchema("database schema is incompatible")
             changed: list[int] = []
-            for version in range(1, CURRENT_SCHEMA_VERSION + 1):
+            for version, sql in enumerate(migration_scripts(), start=1):
                 if version in applied:
                     continue
-                sql = files("agent_sessions.events.migrations").joinpath(f"{version:03d}_{'queue' if version == 1 else 'pollers'}.sql").read_text()
                 for statement in sql.split(";"):
                     if statement.strip():
                         connection.execute(statement)
@@ -220,7 +237,7 @@ class QueueStore:
 
     def finish_scan(self, repository_id: int, *, worker_id: str, succeeded: bool, now: datetime, error: str = "") -> None:
         with self._transaction() as db:
-            db.execute("UPDATE repository_state SET scan_lease_owner=NULL,scan_lease_until=NULL,last_scan_success_at=CASE WHEN ? THEN ? ELSE last_scan_success_at END WHERE repository_id=? AND scan_lease_owner=?", (succeeded, _stamp(now), repository_id, worker_id))
+            db.execute("UPDATE repository_state SET scan_lease_owner=NULL,scan_lease_until=NULL,last_scan_success_at=CASE WHEN ? THEN ? ELSE last_scan_success_at END,last_scan_error=CASE WHEN ? THEN '' ELSE ? END WHERE repository_id=? AND scan_lease_owner=?", (succeeded, _stamp(now), succeeded, error, repository_id, worker_id))
 
     def acquire_poller_lease(self, source_key: str, *, worker_id: str, lease_until: datetime, now: datetime) -> bool:
         with self._transaction() as db:
@@ -459,9 +476,9 @@ class QueueStore:
     def status(self, *, now: datetime) -> QueueStatus:
         backlog, oldest, leased, backed = self.connection.execute("SELECT count(*),min(first_seen_at),sum(lease_until IS NOT NULL AND lease_until>?),sum(next_attempt_at IS NOT NULL AND next_attempt_at>?) FROM dirty_targets", (_stamp(now), _stamp(now))).fetchone()
         latest = self.connection.execute("SELECT max(received_at) FROM webhook_deliveries").fetchone()[0]
-        repositories = tuple(RepositoryStatus(row["repository_id"], _time(row["last_hint_at"]), _time(row["last_scan_started_at"]), _time(row["last_scan_success_at"]), row["scan_lease_owner"], _time(row["scan_lease_until"])) for row in self.connection.execute("SELECT * FROM repository_state ORDER BY repository_id"))
+        repositories = tuple(RepositoryStatus(row["repository_id"], _time(row["last_hint_at"]), _time(row["last_scan_started_at"]), _time(row["last_scan_success_at"]), row["scan_lease_owner"], _time(row["scan_lease_until"]), row["last_scan_error"] or "") for row in self.connection.execute("SELECT * FROM repository_state ORDER BY repository_id"))
         pollers = tuple(PollerStatus(row["source_key"], _time(row["last_success_at"]), row["lease_owner"], _time(row["lease_until"]), row["last_error"] or "") for row in self.connection.execute("SELECT * FROM poller_state ORDER BY source_key"))
-        errors = tuple(row[0] for row in self.connection.execute("SELECT last_error FROM poller_state WHERE last_error <> '' UNION ALL SELECT last_error FROM dirty_targets WHERE last_error IS NOT NULL ORDER BY 1 DESC LIMIT 10"))
+        errors = tuple(row[0] for row in self.connection.execute("SELECT last_scan_error FROM repository_state WHERE last_scan_error <> '' UNION ALL SELECT last_error FROM poller_state WHERE last_error <> '' UNION ALL SELECT last_error FROM dirty_targets WHERE last_error IS NOT NULL ORDER BY 1 DESC LIMIT 10"))
         return QueueStatus(CURRENT_SCHEMA_VERSION, backlog, _time(oldest), leased or 0, backed or 0, _time(latest), repositories, pollers, self.connection.execute("SELECT count(*) FROM poll_watches").fetchone()[0], errors)
 
     def prune(self, *, deliveries_before: datetime, invalidations_before: datetime) -> PruneResult:

@@ -190,6 +190,9 @@ before anything is spent, and the driver refuses to start if either belongs to s
 See [docs/usage.md](docs/usage.md) for the operator's guide — what the outcomes mean, what
 files a run leaves behind, and how to recover an interrupted one.
 
+The optional event invalidation queue has a separate [operations runbook](docs/events.md) for
+configuration, diagnostics, service examples, migration, and recovery.
+
 ## Status
 
 The skill is complete and has real-run evidence on its routing paths. Every PR it has produced
@@ -211,6 +214,8 @@ Ordered by how likely you are to want it:
 - **[docs/orientation.md](docs/orientation.md)** — the newcomer's introduction: the vocabulary,
   what's in the repo, how one issue flows through it, and what is and isn't proven yet.
 - **[docs/usage.md](docs/usage.md)** — operator's guide: commands, outcomes, artifacts, recovery.
+- **[docs/events.md](docs/events.md)** — optional event queue: configuration, diagnostics,
+  service examples, migration, and recovery.
 - **[docs/design.md](docs/design.md)** — what the system is and why it has this shape, with the
   reasoning trail preserved.
 - **[docs/findings.md](docs/findings.md)** — the durable lessons: recurring defect classes, what

@@ -1,4 +1,4 @@
-"""Initial command line interface for queue maintenance."""
+"""Command line interface for the event invalidation queue."""
 
 from __future__ import annotations
 
@@ -18,6 +18,15 @@ from . import config, operations, pollers
 from . import logging as event_logging
 from .store import QueueStore
 from .webhook import create_app
+
+CONFIG_HELP = "shared TOML path (default: AGENT_SESSION_EVENTS_CONFIG)"
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
 
 
 def _secret_from_environment(parser: argparse.ArgumentParser) -> bytes:
@@ -43,19 +52,45 @@ def _secret_from_environment(parser: argparse.ArgumentParser) -> bytes:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="agent-session-events")
-    parser.add_argument("--config", type=Path, default=os.environ.get("AGENT_SESSION_EVENTS_CONFIG"))
+    parser = argparse.ArgumentParser(
+        prog="agent-session-events",
+        description="Receive GitHub hints and inspect or maintain the local queue.",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=os.environ.get("AGENT_SESSION_EVENTS_CONFIG"),
+        help=CONFIG_HELP,
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    migrate = subparsers.add_parser("migrate")
-    status = subparsers.add_parser("queue-status")
-    status.add_argument("--json", action="store_true")
-    doctor = subparsers.add_parser("doctor")
-    prune = subparsers.add_parser("prune")
-    prune.add_argument("--deliveries-days", type=int)
-    prune.add_argument("--invalidations-days", type=int)
-    serve = subparsers.add_parser("serve")
-    poll_projects = subparsers.add_parser("poll-projects")
-    poll_reactions = subparsers.add_parser("poll-reactions")
+    migrate = subparsers.add_parser(
+        "migrate", help="apply schema migrations while services are stopped"
+    )
+    status = subparsers.add_parser(
+        "queue-status", help="show backlog, lease, clock, and error state"
+    )
+    status.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    doctor = subparsers.add_parser(
+        "doctor", help="run read-only configuration and capability probes"
+    )
+    prune = subparsers.add_parser(
+        "prune", help="remove expired immutable history and checkpoint WAL"
+    )
+    prune.add_argument(
+        "--deliveries-days", type=_positive_int, help="override delivery retention age"
+    )
+    prune.add_argument(
+        "--invalidations-days", type=_positive_int, help="override invalidation retention age"
+    )
+    serve = subparsers.add_parser(
+        "serve", help="run the loopback webhook receiver with one worker"
+    )
+    poll_projects = subparsers.add_parser(
+        "poll-projects", help="poll configured Projects once, then exit"
+    )
+    poll_reactions = subparsers.add_parser(
+        "poll-reactions", help="poll active approval watches once, then exit"
+    )
     for command in (
         migrate,
         status,
@@ -65,7 +100,9 @@ def _parser() -> argparse.ArgumentParser:
         poll_projects,
         poll_reactions,
     ):
-        command.add_argument("--config", type=Path, default=argparse.SUPPRESS)
+        command.add_argument(
+            "--config", type=Path, default=argparse.SUPPRESS, help=CONFIG_HELP
+        )
     return parser
 
 
@@ -102,14 +139,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.config is None:
         parser.error("--config or AGENT_SESSION_EVENTS_CONFIG is required")
-    loaded = config.load(args.config)
+    if args.command == "doctor":
+        return operations.doctor(args.config)
+    try:
+        loaded = config.load(args.config)
+    except (OSError, ValueError) as error:
+        parser.error(f"invalid events configuration: {error}")
     if args.command == "migrate":
         return operations.migrate(loaded.database, busy_timeout_ms=loaded.busy_timeout_ms)
     if args.command == "serve":
         webhook_secret = _secret_from_environment(parser)
         store = QueueStore.open(loaded.database, busy_timeout_ms=loaded.busy_timeout_ms)
         store.register_repositories(item.identity for item in loaded.repositories)
-        uvicorn.run(create_app(config=loaded, store=store, webhook_secret=webhook_secret), host="127.0.0.1", port=8080)
+        uvicorn.run(
+            create_app(config=loaded, store=store, webhook_secret=webhook_secret),
+            host="127.0.0.1",
+            port=8080,
+            workers=1,
+        )
         return 0
     if args.command in {"poll-projects", "poll-reactions"}:
         store = QueueStore.open(loaded.database, busy_timeout_ms=loaded.busy_timeout_ms)
@@ -140,9 +187,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         _log_poll_result(args.command, result)
         return result.exit_code
-    if args.command == "doctor":
-        return operations.doctor(loaded.database, busy_timeout_ms=loaded.busy_timeout_ms)
     if args.command == "queue-status":
-        return operations.queue_status(loaded.database, busy_timeout_ms=loaded.busy_timeout_ms, as_json=args.json, now=datetime.now(UTC))
+        return operations.queue_status(
+            loaded.database,
+            busy_timeout_ms=loaded.busy_timeout_ms,
+            as_json=args.json,
+            now=datetime.now(UTC),
+        )
     now = datetime.now(UTC)
-    return operations.prune(loaded.database, busy_timeout_ms=loaded.busy_timeout_ms, deliveries_before=now - timedelta(days=args.deliveries_days or loaded.delivery_retention.days), invalidations_before=now - timedelta(days=args.invalidations_days or loaded.invalidation_retention.days))
+    return operations.prune(
+        loaded.database,
+        busy_timeout_ms=loaded.busy_timeout_ms,
+        deliveries_before=now
+        - timedelta(
+            days=(
+                loaded.delivery_retention.days
+                if args.deliveries_days is None
+                else args.deliveries_days
+            )
+        ),
+        invalidations_before=now
+        - timedelta(
+            days=(
+                loaded.invalidation_retention.days
+                if args.invalidations_days is None
+                else args.invalidations_days
+            )
+        ),
+    )

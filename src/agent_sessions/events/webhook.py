@@ -97,7 +97,8 @@ def create_app(*, config: EventsConfig, store: WebhookStore, webhook_secret: byt
             _log(None, status=400, invalidation_count=0, started_at=started_at)
             return JSONResponse({"detail": "webhook signature has invalid syntax"}, status_code=400)
         expected = "sha256=" + hmac.new(webhook_secret, raw_body, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, signature):
+        normalized_signature = "sha256=" + signature[7:].lower()
+        if not hmac.compare_digest(expected, normalized_signature):
             _log(None, status=401, invalidation_count=0, started_at=started_at)
             return JSONResponse({"detail": "invalid webhook signature"}, status_code=401)
         try:

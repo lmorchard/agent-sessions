@@ -72,3 +72,78 @@
 - Poller writes now obtain a fresh post-fetch time and check source owner plus unexpired lease in the same transaction as snapshot replacement or watch CAS. Reaction batches resample that clock for every watch transaction. A worker that loses or outlives its lease records no stale mutation; conditional `finish_poller` cannot disturb a successor's lease.
 - TDD evidence: credential leakage produced four expected failures plus traceback-chain and empty-App metadata failures; watch CAS produced two failures; current allowlist produced one; malformed Projects produced seven while valid unsupported data stayed green; real-store lease handoff produced two, removing only the expiry predicate made both bare-expiry regressions fail, and a two-watch batch exposed a reused pre-expiry timestamp. Each focused case passed after its narrow fix.
 - Round-one verification on 2026-08-25: the focused credential/project/reaction suite passed 118 cases; `make events-test` passed 199; `make driver-test` and `make check` passed 765 with 2 skipped; `make lint`, `make typecheck`, `make docs-check`, and `git diff --check` exited 0. The explicit gate-test availability skip remains labeled as unverified rather than a pass.
+
+## Phase 5 — event queue operations
+
+- `doctor` now returns structured pass, fail, warn, and skip probes for strict configuration, private database paths, read-only SQLite health, exact schema compatibility, queue clocks, repository identity, board fields, scoped credentials, and the protected webhook-secret file. It opens SQLite with `mode=ro`, issues only GitHub repository and project reads, and omits command output and credential values from diagnostics.
+- Missing webhook, poll, or scan success clocks remain warnings rather than successes. Missing credentials skip the dependent capability checks with a concrete remedy. Any failed probe makes the command exit 1; warnings and skips remain nonfatal so an operator can inspect all independent boundaries in one pass.
+- `queue-status` adds delivery, hint, and scan-start ages to JSON and includes delivery age in its concise human summary. Unknown clocks remain `null`, `unknown`, or `never`.
+- Parsed example tests validate the shared TOML through the production loader, parse strict systemd units and command vectors, and parse the Caddy block tree. The examples keep the receiver on loopback with one Uvicorn worker, make pollers one-shot while timers own cadence, load one scoped credential environment per service, pass the optional event config to drivers, and publish only `/github/webhook`.
+- The operator runbook covers local permissions, GitHub App reads and subscriptions, separate Projects credentials, stopped-service migration and backup order, readiness and degraded driver behavior, timers, status interpretation, pruning, recovery, and the non-deployment review boundary. README and usage documentation only point to that canonical guide.
+- TDD evidence: the first doctor/status RED produced 14 expected failures and 12 passes; the CLI error-path RED produced 2 expected failures and 26 passes. The example RED produced 8 expected failures for seven absent artifacts and the missing one-worker argument. GREEN produced 28 operations passes and 7 example passes; the combined example/worker regression passed 8 cases.
+- Final verification on 2026-08-25: all eight CLI help surfaces exited 0; `make events-test` passed 227 collected tests; `make driver-test` passed 765 with 2 skipped; Ruff passed; mypy found no issues in 102 source files; `make docs-check` and `make check` exited 0. Docs-check still labels its nested gate-test assertion-count probe as skipped, while the independently run driver suite verifies the gate tests.
+- No deployment, service-manager action, Caddy reload, GitHub App mutation, push, or pull-request action occurred. The manual review boxes remain open for Les, including the required needs-review classification for dependency, shipping source, lifecycle, and credential changes.
+
+### Review fix round 1
+
+- Every SQLite client in the example topology now runs as `agent-session-driver`, matching the owner-only database directory and file modes. The driver unit also names its repository, state, and workspace paths in both its command and `ReadWritePaths`, so `ProtectSystem=strict` permits its required writes.
+- Strict TOML loading converts wrong database, repository-array, and board-array types into actionable `ValueError` diagnostics. Both `doctor` and the other CLI commands exit cleanly without tracebacks or credential disclosure.
+- The read-only schema probe now validates expected table columns, foreign keys, and named index columns as well as migration versions. Damage tests remove `project_items`, `invalidations`, and a required index and confirm that diagnosis leaves `sqlite_master` unchanged.
+- Projects field diagnosis requests up to 1,000 fields and compares `totalCount` with the returned list before asserting that Status or Priority is missing. Malformed queue clocks produce a non-disclosing failed probe while independent GitHub reads continue.
+- The runbook now defines the common effective user, file modes, writable driver paths, accepted literal and command-backed credential variables, bot-login metadata, separated-environment doctor runs, and reaction-instance scope. Its status sample uses a schema-version placeholder.
+- TDD evidence: the focused review RED produced 13 expected failures among 60 cases. The unchanged command passed all 60 after implementation; the operations/example subset passed 44. Review verification passed 239 event tests, all eight CLI help surfaces, Ruff, mypy over 102 source files, docs-check, and the full check with 765 passing and 2 skipped tests.
+- No deployment, service-manager action, Caddy reload, GitHub App mutation, push, or pull-request action occurred during the review fix.
+
+### Review fix round 2
+
+- The common-UID topology from round 1 made SQLite writable but also let the public receiver read every same-owner credential file. The corrected examples use separate webhook, Projects, reactions, and driver users with private primary groups. Only the supplementary `agent-session-events-db` group is shared.
+- A parsed permission manifest confines the database group to the setgid `2770` database directory and `0660` database file. Every environment, webhook secret, and App key remains `0600`, owned by its service user and private group; the database group has no credential-file read bit.
+- Queue migration detects a `2770` setgid, group-writable, non-world-accessible parent and creates or resets its database to `0660`; owner-only directories retain `0600`. Every queue unit sets `UMask=0007` so SQLite sidecar files inherit usable group modes.
+- Database path probes accept exact owner-only access or complete access through one of the caller's effective groups. They fail on world access, partial group modes, and inactive groups. The webhook secret still requires the receiver EUID and owner-only mode.
+- The runbook now names all four users, private groups, the database group, exact directory/file ownership and modes, migration EUID and umask, and four separately scoped doctor runs.
+- TDD evidence: the five-case focused RED produced four expected failures and one existing pass; the unchanged GREEN command passed all five in 1.88 seconds. The complete store/operations/example focus passed 65, and the required operations/example subset passed 47.
+- Round-two verification on 2026-08-25: `make events-test` passed 243 cases; Ruff passed; mypy found no issues in 102 source files; docs-check exited 0 with its existing explicit nested gate-count skip; and `make check` passed 765 with 2 skips.
+- No deployment, service-manager action, Caddy reload, GitHub App mutation, push, or pull-request action occurred during round 2.
+
+### Whole-branch review fix
+
+- App-minted read tokens now request Checks and Commit statuses alongside the existing read surfaces. `doctor` discovers one repository commit and exercises check-run and combined-status reads; empty repositories skip both probes, and denied reads fail without exposing the response.
+- Control-plane normalization runs before the repository requirement. Genuine repository-less installation families, ping, and meta deliveries remain diagnostic records. Installation targets come only from configured repositories that share the payload's installation ID; repository targets also require an explicit affected-repository entry.
+- When one PR claim resolves to several actionable closing issues, selection creates durable dirty targets for every unselected sibling before the source claim can be acknowledged. Coalescing advances generations and invalidates stale leases, so a concurrent older claim cannot delete the sibling.
+- Database diagnosis now requires set-group-ID on group-shared directories, validates existing WAL and SHM ownership and modes, and inspects a temporary snapshot without creating source sidecars. Schema diagnosis derives complete column, foreign-key, and index metadata from the shipped migrations, including primary-key and unique-index shape.
+- Retention overrides accept only positive integers. Migration `003_scan_errors.sql` stores the latest failed full-scan error without advancing its success clock; a later successful scan clears the error. Queue status exposes repository scan errors and includes them in recent errors.
+- Focused TDD evidence: permission scope failed 1 case; capability probes failed 3; repository-less normalization failed 15 while 49 existing cases passed; sibling durability failed 2; path diagnosis failed 5; schema metadata failed 4; retention parsing failed 4; and scan-error persistence failed 1 while its stale-lease guard passed. The combined GREEN focus passed 88 cases.
+- Component verification passed `make events-test` with 265 cases and `make driver-test` with 765 passed and 2 skipped. Ruff, mypy over 102 source files, docs-check, all eight CLI help surfaces, and `make check` also passed. The complete check reported 765 passed and 2 skipped; docs-check retained its explicit nested assertion-count skip.
+- No deployment, service-manager action, Caddy reload, GitHub mutation, push, or pull-request action occurred during the whole-branch fix.
+
+### Whole-branch scoped re-review
+
+- The first snapshot implementation still opened the source database with SQLite when a WAL or SHM file existed. SQLite created a missing source SHM and changed lock bytes and timestamps in an existing SHM, violating doctor's read-only contract.
+- Doctor now copies the source database and every existing WAL or SHM file into a private temporary directory with matching basenames before any SQLite open. All SQLite reads target that copied set. Source path, setgid, group, and mode probes still run before the copy; cleanup remains under `TemporaryDirectory`.
+- TDD evidence: the WAL-only source test failed because doctor created a source SHM; the complete source-set test failed because doctor changed the existing SHM's bytes and modification time. GREEN passed both cases plus the existing no-sidecar-creation guard.
+- Verification passed the 76-case operations/store focus, `make events-test` with 267 cases, Ruff, mypy over 102 source files, docs-check, and `make check` with 765 passed and 2 skipped. The documentation check retained its explicit nested assertion-count skip.
+- No deployment, service-manager action, Caddy reload, GitHub mutation, push, or pull-request action occurred during the scoped re-review fix.
+
+## Final controller acceptance
+
+- Direct source-immutability verification passed all three WAL/SHM guards.
+- `make events-test` passed 267 tests; `make driver-test` passed 765 with 2 documented skips; `make check` passed 765 with the same 2 skips and printed `all checks passed`.
+- `git diff --check` is clean. The branch contains exactly five Phase commits above `1bb3164`; no deployment, GitHub mutation, push, or PR action occurred.
+- Every acceptance category in `spec.md` maps to the named event, driver, poller, operations, or example test suites recorded in `plan.md`.
+- At controller acceptance, PR creation and Copilot review were still pending Les's integration choice; the next section records that choice and its result.
+
+## Pull request and Copilot review
+
+- Les chose the PR integration path. The branch was still five commits ahead of the unchanged `origin/main`; PR #275 opened at <https://github.com/lmorchard/agent-sessions/pull/275>. Issue #269 was already in the configured board's `In review` column after linking the PR.
+- The standard PR workflow calls for squashing, but this session's accepted plan requires five independently testable Phase commits. The push preserved those five commits.
+- Copilot reported that signature syntax accepted uppercase hexadecimal while constant-time comparison used the lowercase header verbatim. The regression first returned 401; normalizing only the validated digest to lowercase made the complete 15-case webhook suite pass.
+- Copilot suppressed one note about the empty `research.md`. The issue-first session captured research directly in `spec.md`, so `research.md` now says that explicitly instead of appearing accidental.
+- Copilot's review summary correctly keeps the PR in `needs-review` because it changes dependencies, migrations, credentials, shipping source, and lifecycle behavior. No worthwhile review comment was skipped, and no merge or deployment occurred.
+
+## Operator onboarding follow-up
+
+- Les identified that the runbook explained each boundary but did not first explain why several services exist. `docs/events.md` now opens with the data flow, distinguishes the one long-running receiver from timer-driven one-shot jobs, and states that only the repository driver invokes an agent.
+- The runbook now compares legacy, webhook-driven, private-polling, and full deployment shapes. It also gives one ordered setup checklist and identifies the existing repository driver timer as the owner of driver cadence.
+- Omitting an event producer is documented as a latency trade-off: fresh GitHub reads and scheduled full scans remain authoritative. The configuration section also explains the optional repository `installation_id` used for installation-level webhook mapping.
+- Les requested a Simple English pass from the skill installed at `~/.claude/skills/simple-english` (version 1.2.0). The runbook now uses pragmatic mode with strict procedural rules, consistent `configuration` terminology, condition-first commands, and one instruction per sentence.
+- The skill self-check found no prose sentence over 20 words and no paragraph over six sentences. Its mechanical scan found no banned modals, contractions, semicolons, perfect tenses, Latin abbreviations, or selected verification synonyms. Code, commands, identifiers, paths, and output samples remained unchanged.

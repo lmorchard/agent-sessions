@@ -1,0 +1,11 @@
+https://events.invalid {
+	@github_webhook path /github/webhook
+
+	handle @github_webhook {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	handle {
+		respond 404
+	}
+}

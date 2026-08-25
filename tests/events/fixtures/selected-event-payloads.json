@@ -8,9 +8,9 @@
   "check_run": {"action": "completed", "repository": {"id": 1}, "check_run": {"pull_requests": [{"number": 1}]}},
   "check_suite": {"action": "completed", "repository": {"id": 1}, "check_suite": {"pull_requests": [{"number": 1}]}},
   "status": {"repository": {"id": 1}, "sha": "abc123"},
-  "installation": {"action": "created", "repository": {"id": 1}, "installation": {"id": 10}, "repositories": [{"id": 1}]},
-  "installation_repositories": {"action": "added", "repository": {"id": 1}, "installation": {"id": 10}, "repositories_added": [{"id": 1}], "repositories_removed": []},
-  "installation_target": {"action": "renamed", "repository": {"id": 1}, "installation": {"id": 10}},
-  "ping": {"repository": {"id": 1}},
-  "meta": {"action": "deleted", "repository": {"id": 1}}
+  "installation": {"action": "created", "installation": {"id": 10, "account": {"login": "octo-org", "id": 7}, "repository_selection": "selected"}, "repositories": [{"id": 1, "name": "repo", "full_name": "owner/repo", "private": true}], "requester": null, "sender": {"login": "octocat", "id": 1}},
+  "installation_repositories": {"action": "added", "installation": {"id": 10, "account": {"login": "octo-org", "id": 7}, "repository_selection": "selected"}, "repository_selection": "selected", "repositories_added": [{"id": 1, "name": "repo", "full_name": "owner/repo", "private": true}], "repositories_removed": [], "requester": null, "sender": {"login": "octocat", "id": 1}},
+  "installation_target": {"action": "renamed", "account": {"login": "octo-org-renamed", "id": 7}, "changes": {"login": {"from": "octo-org"}}, "installation": {"id": 10, "account": {"login": "octo-org-renamed", "id": 7}, "repository_selection": "selected"}, "repository_selection": "selected", "target_type": "Organization", "sender": {"login": "octocat", "id": 1}},
+  "ping": {"zen": "Keep it logically awesome.", "hook_id": 12345678, "hook": {"type": "App", "id": 12345678, "active": true}, "sender": {"login": "octocat", "id": 1}},
+  "meta": {"action": "deleted", "hook_id": 12345678, "hook": {"type": "App", "id": 12345678, "active": false}, "sender": {"login": "octocat", "id": 1}}
 }

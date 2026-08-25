@@ -151,6 +151,11 @@ make run-self     # drive this repo (ISSUE=n to pin one)
 Override the target with `REPO=`, `REPO_PATH=`, `BOARD=`; the per-issue ceiling with `BUDGET=`;
 queue depth with `ISSUES=`.
 
+The driver can optionally consume durable event hints before scanning. With no events
+configuration it keeps this legacy full-scan behavior; an unavailable or incompatible configured
+queue also degrades to the same scan. See the [event queue operations runbook](events.md) for the
+shared TOML, `--events-config`, diagnostics, service examples, migration, and recovery.
+
 ### Preparing a target repository
 
 Two things must exist on a repository before the driver is useful against it: the label

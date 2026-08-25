@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule agent-session Projects polling
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+RandomizedDelaySec=15
+Persistent=true
+Unit=agent-session-projects.service
+
+[Install]
+WantedBy=timers.target

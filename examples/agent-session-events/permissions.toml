@@ -1,0 +1,71 @@
+# Ownership and modes for the example paths. This file contains no commands or secrets.
+
+[[paths]]
+role = "events-config-directory"
+path = "/etc/agent-session-events"
+owner = "root"
+group = "root"
+mode = "0755"
+
+[[paths]]
+role = "driver-config-directory"
+path = "/etc/agent-session-driver"
+owner = "root"
+group = "root"
+mode = "0755"
+
+[[paths]]
+role = "database-directory"
+path = "/var/lib/agent-session-events"
+owner = "agent-session-driver"
+group = "agent-session-events-db"
+mode = "2770"
+
+[[paths]]
+role = "database-file"
+path = "/var/lib/agent-session-events/events.sqlite3"
+owner = "agent-session-driver"
+group = "agent-session-events-db"
+mode = "0660"
+
+[[paths]]
+role = "webhook-environment"
+path = "/etc/agent-session-events/webhook.env"
+owner = "agent-session-events-webhook"
+group = "agent-session-events-webhook"
+mode = "0600"
+
+[[paths]]
+role = "webhook-secret"
+path = "/etc/agent-session-events/webhook.secret"
+owner = "agent-session-events-webhook"
+group = "agent-session-events-webhook"
+mode = "0600"
+
+[[paths]]
+role = "projects-environment"
+path = "/etc/agent-session-events/projects.env"
+owner = "agent-session-events-projects"
+group = "agent-session-events-projects"
+mode = "0600"
+
+[[paths]]
+role = "reactions-environment"
+path = "/etc/agent-session-events/reactions-primary.env"
+owner = "agent-session-events-reactions"
+group = "agent-session-events-reactions"
+mode = "0600"
+
+[[paths]]
+role = "reactions-app-key"
+path = "/etc/agent-session-events/reactions-app-private-key.pem"
+owner = "agent-session-events-reactions"
+group = "agent-session-events-reactions"
+mode = "0600"
+
+[[paths]]
+role = "driver-environment"
+path = "/etc/agent-session-driver/EXAMPLE_REPOSITORY.env"
+owner = "agent-session-driver"
+group = "agent-session-driver"
+mode = "0600"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,11 @@ import pytest
 from agent_sessions.events.models import EventsConfig, RepositoryConfig, RepositoryIdentity, ScanPolicy
 
 MISSING = object()
+CONTROL_PLANE_FIXTURES = json.loads(
+    (Path(__file__).parent / "fixtures" / "control-plane-event-payloads.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 
 def config() -> EventsConfig:
@@ -50,7 +56,6 @@ def payload(repository_id: int = 1, **values: Any) -> dict[str, Any]:
         ("check_run", "completed", {"check_run": {"pull_requests": [{"number": 17}]}}, "pull_request", "17"),
         ("check_suite", "requested", {"check_suite": {"pull_requests": [{"number": 18}]}}, "pull_request", "18"),
         ("status", "", {"sha": "abc123"}, "revision", "abc123"),
-        ("installation_target", "renamed", {"installation": {"id": 10}}, "installation", "10"),
     ],
 )
 def test_selected_event_families_normalize_to_identity_targets(
@@ -90,14 +95,14 @@ def test_all_selected_actions_are_not_unknown(event_type: str, action: str) -> N
         body["pull_request"] = {"number": 1}
     elif event_type.startswith("check_"):
         body[event_type] = {"pull_requests": [], "head_sha": "head"}
-    elif event_type == "installation":
-        body.update({"installation": {"id": 10}, "repositories": [{"id": 1}]})
-    elif event_type == "installation_repositories":
-        body.update({"installation": {"id": 10}, "repositories_added": [{"id": 1}], "repositories_removed": []})
-    elif event_type == "meta":
-        body = {"action": action}
+    if event_type in CONTROL_PLANE_FIXTURES:
+        body = dict(CONTROL_PLANE_FIXTURES[event_type])
+        body["action"] = action
+        value = body
+    else:
+        value = payload(**body)
 
-    assert normalize_delivery(event_type, payload(**body), config()).disposition == "accepted"
+    assert normalize_delivery(event_type, value, config()).disposition == "accepted"
 
 
 def test_issue_comment_uses_pull_request_identity_when_present() -> None:
@@ -124,29 +129,98 @@ def test_check_delivery_falls_back_to_head_revision() -> None:
     assert [(item.target_kind, item.target_key) for item in delivery.invalidations] == [("revision", "abc123")]
 
 
-def test_installation_delivery_filters_repositories_to_configured_ids() -> None:
+@pytest.mark.parametrize(
+    ("event_type", "expected_targets"),
+    (
+        (
+            "installation",
+            (
+                (1, "installation", "10"),
+                (2, "installation", "10"),
+                (1, "repository", "1"),
+            ),
+        ),
+        (
+            "installation_repositories",
+            (
+                (1, "installation", "10"),
+                (2, "installation", "10"),
+                (1, "repository", "1"),
+                (2, "repository", "2"),
+            ),
+        ),
+        (
+            "installation_target",
+            ((1, "installation", "10"), (2, "installation", "10")),
+        ),
+    ),
+)
+def test_repository_less_installation_deliveries_target_only_configured_installation_repositories(
+    event_type: str,
+    expected_targets: tuple[tuple[int, str, str], ...],
+) -> None:
     from agent_sessions.events.normalize import normalize_delivery
 
-    delivery = normalize_delivery("installation", payload(action="created", installation={"id": 10}, repositories=[{"id": 1}, {"id": 99}]), config())
+    delivery = normalize_delivery(
+        event_type,
+        CONTROL_PLANE_FIXTURES[event_type],
+        config(),
+    )
 
-    assert [(item.repository_id, item.target_kind, item.target_key) for item in delivery.invalidations] == [(1, "installation", "10"), (1, "repository", "1")]
+    assert delivery.repository_id is None
+    assert delivery.disposition == "accepted"
+    assert tuple(
+        (item.repository_id, item.target_kind, item.target_key)
+        for item in delivery.invalidations
+    ) == expected_targets
+    assert delivery.diagnostic["installation_id"] == 10
 
 
-def test_installation_repositories_uses_added_and_removed_allowed_repositories() -> None:
+def test_unconfigured_installation_cannot_dirty_a_configured_repository() -> None:
     from agent_sessions.events.normalize import normalize_delivery
 
-    delivery = normalize_delivery("installation_repositories", payload(action="added", installation={"id": 10}, repositories_added=[{"id": 1}], repositories_removed=[{"id": 2}, {"id": 99}]), config())
+    event = dict(CONTROL_PLANE_FIXTURES["installation_repositories"])
+    event["installation"] = {"id": 999}
 
-    assert [(item.repository_id, item.target_kind, item.target_key) for item in delivery.invalidations] == [(1, "installation", "10"), (1, "repository", "1"), (2, "repository", "2")]
+    delivery = normalize_delivery("installation_repositories", event, config())
+
+    assert delivery.repository_id is None
+    assert delivery.disposition == "accepted"
+    assert delivery.invalidations == ()
 
 
-@pytest.mark.parametrize(("event_type", "body"), [("ping", {}), ("meta", {"action": "deleted"})])
-def test_ping_and_meta_are_accepted_without_workflow_targets(event_type: str, body: dict[str, Any]) -> None:
+@pytest.mark.parametrize("event_type", ("ping", "meta"))
+def test_repository_less_app_ping_and_meta_retain_safe_diagnostics_without_targets(
+    event_type: str,
+) -> None:
     from agent_sessions.events.normalize import normalize_delivery
 
-    delivery = normalize_delivery(event_type, payload(**body), config())
+    delivery = normalize_delivery(
+        event_type,
+        CONTROL_PLANE_FIXTURES[event_type],
+        config(),
+    )
 
-    assert delivery.disposition == "accepted" and delivery.invalidations == ()
+    assert delivery.repository_id is None
+    assert delivery.disposition == "accepted"
+    assert delivery.invalidations == ()
+    assert delivery.diagnostic == {
+        "hook_id": 12345678,
+        "sender_login": "octocat",
+    }
+
+
+def test_repository_scoped_event_without_repository_remains_malformed() -> None:
+    from agent_sessions.events.normalize import normalize_delivery
+
+    delivery = normalize_delivery(
+        "issues",
+        {"action": "opened", "issue": {"number": 1}},
+        config(),
+    )
+
+    assert delivery.disposition == "malformed"
+    assert delivery.invalidations == ()
 
 
 def test_unknown_event_and_action_are_retained_as_ignored() -> None:
@@ -173,7 +247,11 @@ def test_action_presence_and_type_are_distinct_from_unknown_actions(
 ) -> None:
     from agent_sessions.events.normalize import normalize_delivery
 
-    value = payload(**body)
+    value = (
+        dict(CONTROL_PLANE_FIXTURES["ping"])
+        if event_type == "ping"
+        else payload(**body)
+    )
     if action is not MISSING:
         value["action"] = action
 

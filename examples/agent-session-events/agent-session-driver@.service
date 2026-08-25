@@ -1,0 +1,17 @@
+[Unit]
+Description=Agent-session repository driver (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=agent-session-driver
+Group=agent-session-driver
+SupplementaryGroups=agent-session-events-db
+UMask=0007
+EnvironmentFile=/etc/agent-session-driver/%i.env
+ExecStart=/usr/local/bin/agent-session-driver --repo-path /srv/agent-session-repositories/%i --state-dir /var/lib/agent-session-driver/%i --workspaces-dir /var/lib/agent-session-driver/%i/workspaces --events-config /etc/agent-session-events/events.toml
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/agent-session-events /srv/agent-session-repositories/%i /var/lib/agent-session-driver/%i /var/lib/agent-session-driver/%i/workspaces

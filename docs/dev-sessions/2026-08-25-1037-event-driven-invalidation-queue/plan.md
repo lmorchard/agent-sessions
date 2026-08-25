@@ -929,26 +929,26 @@ doctor does not probe by writing a label or project item. Capability it cannot p
 
 **TDD and implementation steps:**
 
-- [ ] Add failing doctor tests for each probe/status above, including repository-ID mismatch, inaccessible board, incompatible schema, absent success clocks, and secret-file modes without secret disclosure.
-- [ ] Complete doctor and queue-status diagnostics. Run uv run pytest -q tests/events/test_operations.py and record the passing result.
-- [ ] Add failing structural example tests for one worker, one-shot pollers, timer ownership, scoped EnvironmentFile use, webhook-only proxying, no secret literals, and no deployment invocation.
-- [ ] Add the example files and run uv run pytest -q tests/events/test_examples.py.
-- [ ] Write docs/events.md and add only short cross-references to README.md and docs/usage.md.
-- [ ] Run agent-session-events --help and each subcommand --help; record command names and exit codes.
-- [ ] Run make events-test.
-- [ ] Run make driver-test.
-- [ ] Run make lint.
-- [ ] Run make typecheck.
-- [ ] Run make docs-check.
-- [ ] Run make check.
-- [ ] Commit only Phase 5 files with message: Phase 5: document event queue operations
+- [x] Add failing doctor tests for each probe/status above, including repository-ID mismatch, inaccessible board, incompatible schema, absent success clocks, and secret-file modes without secret disclosure. The first focused RED produced 14 expected failures and 12 passes; the CLI error-path RED then produced 2 expected failures and 26 passes.
+- [x] Complete doctor and queue-status diagnostics. `uv run pytest -q tests/events/test_operations.py` passed all 28 cases.
+- [x] Add failing structural example tests for one worker, one-shot pollers, timer ownership, scoped EnvironmentFile use, webhook-only proxying, no secret literals, and no deployment invocation. The focused RED produced 8 expected failures: seven absent example artifacts and the absent one-worker argument.
+- [x] Add the example files and run uv run pytest -q tests/events/test_examples.py. All 7 structural cases passed; the combined service/worker regression passed 8 cases.
+- [x] Write docs/events.md and add only short cross-references to README.md and docs/usage.md. The runbook keeps deployment commands abstract and identifies prerequisites and expected outcomes.
+- [x] Run agent-session-events --help and each subcommand --help; record command names and exit codes. Top-level, serve, poll-projects, poll-reactions, doctor, queue-status, migrate, and prune help each exited 0.
+- [x] Run make events-test. All 227 collected event tests passed.
+- [x] Run make driver-test. 765 passed and 2 skipped.
+- [x] Run make lint. Ruff reported all checks passed.
+- [x] Run make typecheck. Mypy reported no issues in 102 source files.
+- [x] Run make docs-check. It exited 0; links, tables, counts, and risk policies passed, while its nested gate-test assertion-count probe remained explicitly skipped rather than reported as verified.
+- [x] Run make check. The complete target exited 0 with 765 passed, 2 skipped, and the documented nested assertion-count skip.
+- [x] Commit only Phase 5 files with message: Phase 5: document event queue operations. Named-path staging contained the 19 Phase 5 files and excluded the ignored task brief/report.
 
 **Verification — automated:**
 
-- [ ] doctor distinguishes failure, warning, skip, and pass without making GitHub writes.
-- [ ] Example structure tests enforce one worker, one-shot pollers, timer cadence ownership, credential separation, and private health routes.
-- [ ] agent-session-events exposes serve, poll-projects, poll-reactions, doctor, queue-status, migrate, and prune; repair-deliveries is absent.
-- [ ] make events-test, make driver-test, make docs-check, and make check pass.
+- [x] doctor distinguishes failure, warning, skip, and pass without making GitHub writes. Exact command-vector assertions allow only repository GET and project field-list reads; adversarial stderr and credential contents remain absent from output.
+- [x] Example structure tests enforce one worker, one-shot pollers, timer cadence ownership, credential separation, and private health routes. TOML, systemd units, commands, and Caddy blocks are parsed before their semantics are asserted.
+- [x] agent-session-events exposes serve, poll-projects, poll-reactions, doctor, queue-status, migrate, and prune; repair-deliveries is absent. Behavioral help checks and all eight installed help invocations exited 0.
+- [x] make events-test, make driver-test, make docs-check, and make check pass. Events passed 227; driver and complete checks passed 765 with 2 skipped; docs-check exited 0 with its explicit nested assertion-count skip.
 
 **Verification — manual:**
 
@@ -957,17 +957,54 @@ doctor does not probe by writing a label or project item. Capability it cannot p
 - [ ] Confirm no deployment, GitHub App mutation, Caddy reload, systemctl action, or infrastructure write was performed.
 - [ ] Confirm dependency, shipping src, lifecycle, and credential changes remain needs-review regardless of test results.
 
+### Review fix round 1
+
+- [x] Make the systemd topology executable under owner-only database permissions. All SQLite clients share one Unix identity, and parsed unit tests require the driver command and `ReadWritePaths` to name its repository, state, workspace, and database paths.
+- [x] Normalize wrong top-level TOML types and malformed stored clocks at diagnostic boundaries. Focused tests cover non-string database values, non-array repositories and boards, clean CLI exits, non-disclosure, and continued independent probes.
+- [x] Validate schema shape without mutation. Damage tests remove `project_items`, `invalidations`, and a required index; each reports `sqlite-schema=fail` while the captured `sqlite_master` rows remain unchanged.
+- [x] Make board field diagnosis complete before testing field absence. The exact command vector includes `--limit 1000`, and a `totalCount` mismatch produces a skip rather than a false missing-field failure.
+- [x] Document exact credential variables and command-backed forms, bot metadata, service EUID and modes, separated-environment doctor runs, and the all-configured-repositories scope of reaction instances. Replace the hard-coded schema number in the output example.
+- [x] Assert the exact top-level CLI command set. The focused review RED produced 13 expected failures among 60 cases; GREEN passed all 60, and the operations/example subset passed 44.
+- [x] Re-run all required verification. All eight help surfaces exited 0; `make events-test` passed 239 collected tests; `make lint`, `make typecheck`, and `make docs-check` exited 0; and `make check` passed 765 tests with 2 skips. Both worktree and staged diff checks pass.
+
+### Review fix round 2
+
+- [x] Restore the receiver-only-secret boundary with four distinct Unix service identities. Parsed unit tests require private primary groups, the common `agent-session-events-db` supplementary group, `UMask=0007`, the shared database write path, and the driver's explicit repository/state/workspace paths.
+- [x] Define group sharing as executable data. The parsed permission manifest requires a setgid `2770` database directory and `0660` database while proving each credential file is `0600`, belongs to its service's private group, and is not readable by `agent-session-events-db`.
+- [x] Preserve database group access across migration and diagnosis. A focused real-filesystem test proves migration selects `0660` only for the reviewed shared-directory shape; doctor tests prove a group member passes, a non-member fails, and world access still fails. The webhook-secret test retains strict EUID/owner-only behavior.
+- [x] Document exact account, group, ownership, mode, migration EUID/umask, WAL/SHM, and separately scoped doctor requirements for a cold operator. No brittle prose-content assertion was added.
+- [x] Record RED and GREEN. The five-case RED produced four expected failures and one pass; the unchanged GREEN command passed five in 1.88 seconds. The complete store/operations/example focus passed 65, and operations/examples passed 47.
+- [x] Re-run required verification. `make events-test` passed 243 cases; lint, typecheck, and docs-check exited 0; `make check` passed 765 tests with 2 skips; and worktree/staged diff checks passed.
+
+### Whole-branch review fix
+
+- [x] Expand exact App read permissions and probe check-run and combined-status access with pass, fail, and empty-repository skip behavior.
+- [x] Normalize repository-less control-plane deliveries before repository-scoped validation and constrain all targets to configured installation and repository identities.
+- [x] Materialize every unselected actionable issue from a selected PR claim before conditional source acknowledgement; preserve coalescing and stale-generation safety.
+- [x] Require set-group-ID for shared database directories, validate existing SQLite sidecars, and keep diagnosis from creating source sidecars.
+- [x] Derive complete required table and index metadata from shipped migrations; reject type, nullability, default, primary-key, and uniqueness damage.
+- [x] Reject non-positive retention overrides before pruning and persist failed full-scan errors through the new ordered migration.
+- [x] Record behavioral RED and GREEN evidence. The combined focused GREEN command passed 88 cases after every finding failed for its stated reason.
+- [x] Complete the final broad verification. `make events-test` passed 265 cases; `make driver-test` and `make check` passed 765 with 2 skips; lint, typecheck, docs-check, and all eight CLI help surfaces exited 0. Inspect the whole branch, amend Phase 5, and record the new commit in the final fix report.
+
+### Whole-branch scoped re-review
+
+- [x] Reproduce source-sidecar mutation with a valid WAL-only source and an existing-SHM source. RED failed both cases for the reviewed reasons: source SHM creation and source SHM byte/time mutation.
+- [x] Copy the database and existing WAL/SHM files to matching basenames in a private temporary directory before any SQLite open. Preserve source path and permission probes; open only the copied set.
+- [x] Verify source immutability and cleanup. The two new cases and the existing both-absent guard passed; the complete operations/store focus passed 76 cases.
+- [x] Re-run the required gates. `make events-test` passed 267 cases; lint, typecheck, and docs-check exited 0; and `make check` passed 765 tests with 2 skips.
+
 ---
 
 ## Final acceptance and PR preparation
 
-- [ ] Run make events-test and record the exact result.
-- [ ] Run make driver-test and record the exact result.
-- [ ] Run make check and record the exact result.
-- [ ] Run git diff --check and inspect git diff origin/main...HEAD.
-- [ ] Verify every acceptance bullet in spec.md maps to a named test above.
-- [ ] Confirm the PR contains five logical Phase commits and no deployment action.
-- [ ] Use the dev-session PR workflow; request and address Copilot review, but do not merge.
+- [x] Run make events-test and record the exact result. Final controller run exited 0 with 267 passing tests.
+- [x] Run make driver-test and record the exact result. Final controller run exited 0 with 765 passed and 2 documented skips.
+- [x] Run make check and record the exact result. Final controller run exited 0 with 765 passed, 2 documented skips, and `all checks passed`.
+- [x] Run git diff --check and inspect git diff origin/main...HEAD. The final diff check is clean; the inspected range contains only the 54 planned source, test, dependency, example, runbook, and dev-session files.
+- [x] Verify every acceptance bullet in spec.md maps to a named test above. Webhook behavior maps to `test_webhook.py`; queue races and migrations to `test_store.py`; mappings to `test_normalize.py`; queue-first/degraded selection to `test_driver.py`, `test_scan_policy.py`, and `test_full_loop.py`; Projects and reactions to their named poller suites; executable operations/examples to `test_operations.py` and `test_examples.py`.
+- [x] Confirm the branch contains five logical Phase commits and no deployment action. Final history has exactly the five required Phase subjects; reports and reviews confirm no service-manager, proxy, GitHub, push, PR, or infrastructure mutation.
+- [x] Use the dev-session PR workflow; request and address Copilot review, but do not merge. PR #275 opened with five Phase commits. Copilot's uppercase-signature finding reproduced as a 401, then passed after case normalization; the empty-research-artifact note was clarified. No merge occurred.
 
 ## Coverage map and self-review
 

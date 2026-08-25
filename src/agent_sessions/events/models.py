@@ -142,6 +142,7 @@ class RepositoryStatus:
     last_scan_success_at: datetime | None
     scan_lease_owner: str | None
     scan_lease_until: datetime | None
+    last_error: str
 
 
 @dataclass(frozen=True)

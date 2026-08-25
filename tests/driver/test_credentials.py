@@ -504,6 +504,8 @@ def test_read_credential_resolver_mints_only_the_scoped_app_read_token(tmp_path:
     ) == "installation-read-token"
     assert minted == [
         {
+            "checks": "read",
+            "statuses": "read",
             "contents": "read",
             "issues": "read",
             "pull_requests": "read",

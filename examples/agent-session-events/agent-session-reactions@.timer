@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule agent-session approval-reaction polling (%i)
+
+[Timer]
+OnCalendar=*-*-* *:*:30
+RandomizedDelaySec=15
+Persistent=true
+Unit=agent-session-reactions@%i.service
+
+[Install]
+WantedBy=timers.target

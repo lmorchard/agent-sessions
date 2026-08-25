@@ -1,0 +1,59 @@
+{
+  "installation": {
+    "action": "created",
+    "installation": {
+      "id": 10,
+      "account": {"login": "octo-org", "id": 7},
+      "repository_selection": "selected"
+    },
+    "repositories": [
+      {"id": 1, "name": "repo", "full_name": "owner/repo", "private": true},
+      {"id": 99, "name": "outside", "full_name": "owner/outside", "private": true}
+    ],
+    "requester": null,
+    "sender": {"login": "octocat", "id": 1}
+  },
+  "installation_repositories": {
+    "action": "added",
+    "installation": {
+      "id": 10,
+      "account": {"login": "octo-org", "id": 7},
+      "repository_selection": "selected"
+    },
+    "repository_selection": "selected",
+    "repositories_added": [
+      {"id": 1, "name": "repo", "full_name": "owner/repo", "private": true}
+    ],
+    "repositories_removed": [
+      {"id": 2, "name": "repo", "full_name": "other/repo", "private": true},
+      {"id": 99, "name": "outside", "full_name": "owner/outside", "private": true}
+    ],
+    "requester": null,
+    "sender": {"login": "octocat", "id": 1}
+  },
+  "installation_target": {
+    "action": "renamed",
+    "account": {"login": "octo-org-renamed", "id": 7},
+    "changes": {"login": {"from": "octo-org"}},
+    "installation": {
+      "id": 10,
+      "account": {"login": "octo-org-renamed", "id": 7},
+      "repository_selection": "selected"
+    },
+    "repository_selection": "selected",
+    "target_type": "Organization",
+    "sender": {"login": "octocat", "id": 1}
+  },
+  "ping": {
+    "zen": "Keep it logically awesome.",
+    "hook_id": 12345678,
+    "hook": {"type": "App", "id": 12345678, "active": true},
+    "sender": {"login": "octocat", "id": 1}
+  },
+  "meta": {
+    "action": "deleted",
+    "hook_id": 12345678,
+    "hook": {"type": "App", "id": 12345678, "active": false},
+    "sender": {"login": "octocat", "id": 1}
+  }
+}

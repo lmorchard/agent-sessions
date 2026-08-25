@@ -41,11 +41,20 @@ def _owner_name(value: Any, name: str) -> str:
     return value
 
 
+def _table_array(value: Any, name: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+        raise ValueError(f"{name} must be an array of tables")
+    return value
+
+
 def load(path: Path) -> EventsConfig:
     with path.open("rb") as handle:
         raw = tomllib.load(handle)
     _expect_keys(raw, _TOP_LEVEL, "configuration")
-    database = Path(raw["database"])
+    database_value = raw["database"]
+    if not isinstance(database_value, str):
+        raise ValueError("database must be an absolute path string")
+    database = Path(database_value)
     if not database.is_absolute():
         raise ValueError("database path must be absolute")
     values = {name: _positive(raw[name], name) for name in _SCALAR if name != "database"}
@@ -59,7 +68,7 @@ def load(path: Path) -> EventsConfig:
     repositories: list[RepositoryConfig] = []
     ids: set[int] = set()
     names: set[tuple[str, str]] = set()
-    for item in raw["repositories"]:
+    for item in _table_array(raw["repositories"], "repositories"):
         _expect_keys(item, _REPOSITORY, "repository", optional={"installation_id"})
         identity = RepositoryIdentity(
             id=_positive(item["id"], "repository id"),
@@ -74,9 +83,12 @@ def load(path: Path) -> EventsConfig:
         names.add(pair)
         repositories.append(RepositoryConfig(identity))
     boards: list[BoardConfig] = []
-    for item in raw["boards"]:
+    for item in _table_array(raw["boards"], "boards"):
         _expect_keys(item, _BOARD, "board")
-        repository_ids = tuple(_positive(repository_id, "board repository id") for repository_id in item["repository_ids"])
+        raw_repository_ids = item["repository_ids"]
+        if not isinstance(raw_repository_ids, list):
+            raise ValueError("board repository_ids must be an array")
+        repository_ids = tuple(_positive(repository_id, "board repository id") for repository_id in raw_repository_ids)
         if any(repository_id not in ids for repository_id in repository_ids):
             raise ValueError("board references an unknown repository")
         boards.append(BoardConfig(_owner_name(item["owner"], "board owner"), _positive(item["number"], "board number"), repository_ids))

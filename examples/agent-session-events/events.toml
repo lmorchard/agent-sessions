@@ -1,0 +1,26 @@
+# Shared, non-secret event queue configuration.
+# Replace every EXAMPLE_* value and the sentinel numeric ID before use.
+database = "/var/lib/agent-session-events/events.sqlite3"
+busy_timeout_ms = 3000
+claim_limit = 25
+claim_lease_seconds = 300
+retry_base_seconds = 30
+retry_max_seconds = 1800
+max_body_bytes = 1048576
+delivery_retention_days = 14
+invalidation_retention_days = 30
+
+[scan]
+quiet_period_seconds = 300
+interval_seconds = 900
+maximum_age_seconds = 3600
+
+[[repositories]]
+id = 9000000000000000000
+owner = "EXAMPLE_OWNER"
+name = "EXAMPLE_REPOSITORY"
+
+[[boards]]
+owner = "EXAMPLE_OWNER"
+number = 1
+repository_ids = [9000000000000000000]

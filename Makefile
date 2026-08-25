@@ -22,7 +22,7 @@ help:
 	@echo "driver-check     scan the Bash compatibility launcher for merge commands"
 	@echo "driver-test      Python harness and fixture tests (alias of gate-test)"
 	@echo "gate-test        pytest over the Python harness and detector suites"
-	@echo "events-test      real SQLite tests for the event invalidation queue"
+	@echo "events-test      event queue tests, including parsed service/Caddy examples"
 	@echo "park-test        frozen acceptance checks for #5 (park state as a label)"
 	@echo "skill-readonly   assert native agent tools cannot write to the skill directory"
 	@echo "backend-permission-probe  run one live, harmless backend permission probe"

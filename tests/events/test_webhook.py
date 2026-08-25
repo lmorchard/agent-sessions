@@ -138,6 +138,30 @@ async def test_malformed_signature_syntax_returns_bad_request_without_parsing(
 
 
 @pytest.mark.anyio
+async def test_uppercase_signature_digest_is_verified(tmp_path: Path) -> None:
+    from agent_sessions.events.webhook import create_app
+
+    store = store_for(tmp_path)
+    raw = body()
+    signature = headers(raw)["X-Hub-Signature-256"]
+
+    response = await request(
+        create_app(
+            config=config(tmp_path / "events.sqlite3"),
+            store=store,
+            webhook_secret=SECRET,
+        ),
+        raw,
+        **{"X-Hub-Signature-256": "sha256=" + signature[7:].upper()},
+    )
+
+    assert response.status_code == 202
+    assert store.connection.execute(
+        "SELECT count(*) FROM webhook_deliveries"
+    ).fetchone()[0] == 1
+
+
+@pytest.mark.anyio
 async def test_malformed_action_returns_bad_request_without_persistence(tmp_path: Path) -> None:
     from agent_sessions.events.webhook import create_app
 
@@ -307,3 +331,4 @@ repository_ids = [1]
     assert main(["migrate", "--config", str(settings)]) == 0
     assert main(["serve", "--config", str(settings)]) == 0
     assert seen["host"] == "127.0.0.1" and seen["port"] == 8080
+    assert seen["workers"] == 1

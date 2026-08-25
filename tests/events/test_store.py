@@ -33,7 +33,7 @@ def delivery(guid: str = "guid") -> VerifiedDelivery:
 
 def migrated(tmp_path: Path) -> QueueStore:
     path = tmp_path / "events.sqlite3"
-    assert QueueStore.migrate(path, busy_timeout_ms=250) == (1, 2)
+    assert QueueStore.migrate(path, busy_timeout_ms=250) == (1, 2, 3)
     store = QueueStore.open(path, busy_timeout_ms=250)
     store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
     return store
@@ -41,13 +41,26 @@ def migrated(tmp_path: Path) -> QueueStore:
 
 def test_migrate_creates_private_wal_foreign_key_database(tmp_path: Path) -> None:
     path = tmp_path / "events.sqlite3"
-    assert QueueStore.migrate(path, busy_timeout_ms=321) == (1, 2)
+    assert QueueStore.migrate(path, busy_timeout_ms=321) == (1, 2, 3)
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     store = QueueStore.open(path, busy_timeout_ms=321)
     assert store.ready().schema_version == CURRENT_SCHEMA_VERSION
     assert store.connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     assert store.connection.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
     assert store.connection.execute("PRAGMA busy_timeout").fetchone()[0] == 321
+
+
+def test_migrate_creates_a_group_writable_database_in_a_shared_directory(
+    tmp_path: Path,
+) -> None:
+    database_parent = tmp_path / "shared"
+    database_parent.mkdir()
+    database_parent.chmod(0o2770)
+    database = database_parent / "events.sqlite3"
+
+    QueueStore.migrate(database, busy_timeout_ms=100)
+
+    assert stat.S_IMODE(database.stat().st_mode) == 0o660
 
 
 def test_open_refuses_an_ahead_schema(tmp_path: Path) -> None:
@@ -82,7 +95,7 @@ def test_migrates_a_database_at_schema_version_one(tmp_path: Path) -> None:
     connection.execute("INSERT INTO schema_migrations VALUES (1, '2026-08-25T00:00:00Z')")
     connection.commit()
     connection.close()
-    assert QueueStore.migrate(path, busy_timeout_ms=10) == (2,)
+    assert QueueStore.migrate(path, busy_timeout_ms=10) == (2, 3)
     assert QueueStore.open(path, busy_timeout_ms=10).ready().schema_version == CURRENT_SCHEMA_VERSION
 
 
@@ -106,7 +119,7 @@ def test_migrates_legacy_version_one_delivery_fk_and_retains_unconfigured_delive
     connection.execute("INSERT INTO schema_migrations VALUES (1, '2026-08-25T00:00:00Z')")
     connection.commit()
     connection.close()
-    assert QueueStore.migrate(path, busy_timeout_ms=10) == (2,)
+    assert QueueStore.migrate(path, busy_timeout_ms=10) == (2, 3)
     store = QueueStore.open(path, busy_timeout_ms=10)
     ignored = VerifiedDelivery("legacy-ignored", "issues", "edited", 999, b"{}", "ignored_unconfigured", {})
     assert store.enqueue_webhook(ignored, (), now=NOW).duplicate is False
@@ -256,6 +269,86 @@ def test_scan_and_poller_leases_exclude_other_workers_and_record_success_only_wh
     store.finish_poller("reactions", worker_id="poll", succeeded=True, now=NOW)
     poller = store.status(now=NOW).pollers[0]
     assert poller.last_success_at == NOW and poller.lease_owner is None
+
+
+def test_failed_scan_records_its_error_and_a_later_success_clears_it(
+    tmp_path: Path,
+) -> None:
+    store = migrated(tmp_path)
+    first_success = NOW - timedelta(hours=1)
+    assert store.acquire_scan_lease(
+        1,
+        worker_id="success",
+        lease_until=first_success + timedelta(minutes=1),
+        now=first_success,
+    )
+    store.finish_scan(1, worker_id="success", succeeded=True, now=first_success)
+    assert store.acquire_scan_lease(
+        1,
+        worker_id="failed",
+        lease_until=NOW + timedelta(minutes=1),
+        now=NOW,
+    )
+
+    store.finish_scan(
+        1,
+        worker_id="failed",
+        succeeded=False,
+        now=NOW,
+        error="authoritative issue snapshot incomplete",
+    )
+
+    failed_status = store.status(now=NOW)
+    assert failed_status.repositories[0].last_scan_success_at == first_success
+    assert failed_status.repositories[0].last_error == (
+        "authoritative issue snapshot incomplete"
+    )
+    assert "authoritative issue snapshot incomplete" in failed_status.recent_errors
+
+    later = NOW + timedelta(hours=1)
+    assert store.acquire_scan_lease(
+        1,
+        worker_id="recovered",
+        lease_until=later + timedelta(minutes=1),
+        now=later,
+    )
+    store.finish_scan(1, worker_id="recovered", succeeded=True, now=later)
+
+    recovered_status = store.status(now=later)
+    assert recovered_status.repositories[0].last_scan_success_at == later
+    assert recovered_status.repositories[0].last_error == ""
+    assert "authoritative issue snapshot incomplete" not in recovered_status.recent_errors
+
+
+def test_stale_scan_finisher_cannot_record_an_error_for_a_newer_lease(
+    tmp_path: Path,
+) -> None:
+    store = migrated(tmp_path)
+    assert store.acquire_scan_lease(
+        1,
+        worker_id="old",
+        lease_until=NOW + timedelta(seconds=1),
+        now=NOW,
+    )
+    later = NOW + timedelta(seconds=2)
+    assert store.acquire_scan_lease(
+        1,
+        worker_id="new",
+        lease_until=later + timedelta(minutes=1),
+        now=later,
+    )
+
+    store.finish_scan(
+        1,
+        worker_id="old",
+        succeeded=False,
+        now=later,
+        error="stale worker failure",
+    )
+
+    status = store.status(now=later)
+    assert status.repositories[0].scan_lease_owner == "new"
+    assert "stale worker failure" not in status.recent_errors
 
 
 def test_snapshot_replacement_rolls_back_if_its_invalidation_cannot_be_persisted(tmp_path: Path) -> None:

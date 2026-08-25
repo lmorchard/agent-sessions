@@ -87,10 +87,12 @@ TOKEN_VARS = (
 AGENT_TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN")
 
 READ_PERMISSIONS = {
+    "checks": "read",
     "contents": "read",
     "issues": "read",
     "pull_requests": "read",
     "discussions": "read",
+    "statuses": "read",
 }
 
 

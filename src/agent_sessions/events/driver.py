@@ -15,7 +15,7 @@ from .github import (
     LiveTargetResolver,
     fetch_board_items,
 )
-from .models import ClaimedTarget, EventsConfig, RepositoryConfig, ScanPolicy
+from .models import ClaimedTarget, EventsConfig, Invalidation, RepositoryConfig, ScanPolicy
 from .store import QueueStore
 
 
@@ -457,6 +457,31 @@ def select_work(
                 runtime.store.acknowledge(duplicate)
                 acknowledged.append(duplicate)
         break
+
+    if selected is not None and selected_claim is not None:
+        sibling_numbers = sorted(
+            candidate_issues_by_claim.get(selected_claim, set()) - {selected[0]},
+            key=int,
+        )
+        if selected_claim.target_kind == "pull_request" and sibling_numbers:
+            runtime.store.enqueue_synthetic(
+                "claim_resolution",
+                (
+                    f"pull_request:{selected_claim.repository_id}:"
+                    f"{selected_claim.target_key}:{selected_claim.generation}"
+                ),
+                (
+                    Invalidation(
+                        selected_claim.repository_id,
+                        "issue",
+                        number,
+                        "unselected_closing_issue",
+                        {"source_pull_request": selected_claim.target_key},
+                    )
+                    for number in sibling_numbers
+                ),
+                now=now,
+            )
 
     for current_claim in claims:
         if current_claim == selected_claim:
