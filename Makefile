@@ -4,7 +4,7 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help doctor doctor-self check venv clean clean-venvs prune-state evidence board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly backend-permission-probe opencode-policy-contract lint typecheck
+.PHONY: help doctor doctor-self check venv clean clean-venvs prune-state evidence board-audit driver-check driver-test gate-test events-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly backend-permission-probe opencode-policy-contract lint typecheck
 
 help:
 	@echo "check            run every check -- the targets listed below, in one go"
@@ -22,6 +22,7 @@ help:
 	@echo "driver-check     scan the Bash compatibility launcher for merge commands"
 	@echo "driver-test      Python harness and fixture tests (alias of gate-test)"
 	@echo "gate-test        pytest over the Python harness and detector suites"
+	@echo "events-test      real SQLite tests for the event invalidation queue"
 	@echo "park-test        frozen acceptance checks for #5 (park state as a label)"
 	@echo "skill-readonly   assert native agent tools cannot write to the skill directory"
 	@echo "backend-permission-probe  run one live, harmless backend permission probe"
@@ -63,7 +64,10 @@ venv:
 
 .PHONY: venv check-parallel
 
-check-parallel: gate-test skill-readonly docs-check assertion-lint commit-lint lint typecheck
+check-parallel: gate-test events-test skill-readonly docs-check assertion-lint commit-lint lint typecheck
+
+events-test:
+	@uv run --quiet pytest -q tests/events
 
 lint:
 	@uv run ruff check .

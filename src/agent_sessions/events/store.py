@@ -1,0 +1,229 @@
+"""SQLite-backed durable invalidation queue; every operation is local and short."""
+
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from importlib.resources import files
+from pathlib import Path
+from typing import Iterable, Iterator
+
+from .models import (
+    ApprovalWatch,
+    ClaimedTarget,
+    EnqueueResult,
+    IncompatibleSchema,
+    Invalidation,
+    PollerStatus,
+    ProjectItemProjection,
+    PruneResult,
+    QueueStatus,
+    RepositoryIdentity,
+    RepositoryStatus,
+    StoreHealth,
+    VerifiedDelivery,
+)
+
+CURRENT_SCHEMA_VERSION = 2
+
+
+def _stamp(value: datetime) -> str:
+    if value.tzinfo is None:
+        raise ValueError("timestamps must be timezone-aware")
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _time(value: str | None) -> datetime | None:
+    return None if value is None else datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+class QueueStore:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    @staticmethod
+    def _connect(path: Path, busy_timeout_ms: int) -> sqlite3.Connection:
+        connection = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
+        return connection
+
+    @classmethod
+    def open(cls, path: Path, *, busy_timeout_ms: int) -> "QueueStore":
+        connection = cls._connect(path, busy_timeout_ms)
+        try:
+            versions = [row[0] for row in connection.execute("SELECT version FROM schema_migrations")]
+        except sqlite3.Error as error:
+            connection.close()
+            raise IncompatibleSchema("database is not migrated") from error
+        if versions != list(range(1, CURRENT_SCHEMA_VERSION + 1)):
+            connection.close()
+            raise IncompatibleSchema("database schema is incompatible")
+        return cls(connection)
+
+    @classmethod
+    def migrate(cls, path: Path, *, busy_timeout_ms: int) -> tuple[int, ...]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existed = path.exists()
+        if not existed:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+            os.close(fd)
+        os.chmod(path, 0o600)
+        connection = cls._connect(path, busy_timeout_ms)
+        try:
+            connection.execute("BEGIN EXCLUSIVE")
+            connection.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
+            applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
+            expected_prefix = set(range(1, max(applied, default=0) + 1))
+            if applied != expected_prefix or any(version > CURRENT_SCHEMA_VERSION for version in applied):
+                raise IncompatibleSchema("database schema is incompatible")
+            changed: list[int] = []
+            for version in range(1, CURRENT_SCHEMA_VERSION + 1):
+                if version in applied:
+                    continue
+                sql = files("agent_sessions.events.migrations").joinpath(f"{version:03d}_{'queue' if version == 1 else 'pollers'}.sql").read_text()
+                for statement in sql.split(";"):
+                    if statement.strip():
+                        connection.execute(statement)
+                connection.execute("INSERT INTO schema_migrations VALUES (?, ?)", (version, _stamp(datetime.now(UTC))))
+                changed.append(version)
+            connection.commit()
+            return tuple(changed)
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    @contextmanager
+    def _transaction(self, mode: str = "IMMEDIATE") -> Iterator[sqlite3.Connection]:
+        self.connection.execute(f"BEGIN {mode}")
+        try:
+            yield self.connection
+        except Exception:
+            self.connection.rollback()
+            raise
+        else:
+            self.connection.commit()
+
+    def ready(self) -> StoreHealth:
+        try:
+            version = max((row[0] for row in self.connection.execute("SELECT version FROM schema_migrations")), default=None)
+            return StoreHealth(version == CURRENT_SCHEMA_VERSION, version, "" if version == CURRENT_SCHEMA_VERSION else "incompatible schema")
+        except sqlite3.Error as error:
+            return StoreHealth(False, None, str(error))
+
+    def register_repositories(self, repositories: Iterable[RepositoryIdentity]) -> None:
+        with self._transaction() as db:
+            db.executemany(
+                "INSERT INTO repository_state(repository_id,owner,name,installation_id) VALUES(?,?,?,?) ON CONFLICT(repository_id) DO UPDATE SET owner=excluded.owner,name=excluded.name,installation_id=excluded.installation_id",
+                [(item.id, item.owner, item.name, item.installation_id) for item in repositories],
+            )
+
+    def _record_invalidations(self, db: sqlite3.Connection, source_kind: str, source_key: str, invalidations: Iterable[Invalidation], now: datetime) -> int:
+        count = 0
+        stamp = _stamp(now)
+        for item in invalidations:
+            diagnostic = json.dumps({"reason": item.reason, **item.diagnostic}, sort_keys=True)
+            db.execute("INSERT INTO invalidations(source_kind,source_key,repository_id,target_kind,target_key,observed_at,diagnostic_json) VALUES(?,?,?,?,?,?,?)", (source_kind, source_key, item.repository_id, item.target_kind, item.target_key, stamp, diagnostic))
+            db.execute("INSERT INTO dirty_targets(repository_id,target_kind,target_key,generation,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?) ON CONFLICT(repository_id,target_kind,target_key) DO UPDATE SET generation=dirty_targets.generation+1,last_seen_at=excluded.last_seen_at,lease_owner=NULL,lease_until=NULL,retry_count=0,next_attempt_at=NULL,last_error=NULL", (item.repository_id, item.target_kind, item.target_key, 1, stamp, stamp))
+            db.execute("UPDATE repository_state SET last_hint_at=? WHERE repository_id=?", (stamp, item.repository_id))
+            count += 1
+        return count
+
+    def enqueue_webhook(self, delivery: VerifiedDelivery, invalidations: Iterable[Invalidation], *, now: datetime) -> EnqueueResult:
+        with self._transaction() as db:
+            cursor = db.execute("INSERT OR IGNORE INTO webhook_deliveries VALUES(?,?,?,?,?,?,?,?)", (delivery.guid, delivery.event_type, delivery.action, delivery.repository_id, _stamp(now), delivery.disposition, delivery.raw_body, json.dumps(delivery.diagnostic, sort_keys=True)))
+            if cursor.rowcount == 0:
+                return EnqueueResult(True, 0)
+            return EnqueueResult(False, self._record_invalidations(db, "webhook", delivery.guid, invalidations, now))
+
+    def enqueue_synthetic(self, source_kind: str, source_key: str, invalidations: Iterable[Invalidation], *, now: datetime) -> int:
+        with self._transaction() as db:
+            return self._record_invalidations(db, source_kind, source_key, invalidations, now)
+
+    def claim_targets(self, repository_id: int, *, worker_id: str, limit: int, lease_until: datetime, now: datetime) -> tuple[ClaimedTarget, ...]:
+        with self._transaction() as db:
+            rows = db.execute("SELECT repository_id,target_kind,target_key,generation FROM dirty_targets WHERE repository_id=? AND (lease_until IS NULL OR lease_until<=?) AND (next_attempt_at IS NULL OR next_attempt_at<=?) ORDER BY first_seen_at LIMIT ?", (repository_id, _stamp(now), _stamp(now), limit)).fetchall()
+            claims = tuple(ClaimedTarget(row["repository_id"], row["target_kind"], row["target_key"], row["generation"], worker_id) for row in rows)
+            db.executemany("UPDATE dirty_targets SET lease_owner=?,lease_until=? WHERE repository_id=? AND target_kind=? AND target_key=? AND generation=?", [(worker_id, _stamp(lease_until), claim.repository_id, claim.target_kind, claim.target_key, claim.generation) for claim in claims])
+            return claims
+
+    def _claim_update(self, claim: ClaimedTarget, sql: str, values: tuple[object, ...] = ()) -> bool:
+        with self._transaction() as db:
+            cursor = db.execute(sql, values + (claim.repository_id, claim.target_kind, claim.target_key, claim.generation, claim.lease_owner))
+            return cursor.rowcount == 1
+
+    def acknowledge(self, claim: ClaimedTarget) -> bool:
+        return self._claim_update(claim, "DELETE FROM dirty_targets WHERE repository_id=? AND target_kind=? AND target_key=? AND generation=? AND lease_owner=?")
+
+    def retry(self, claim: ClaimedTarget, *, error: str, next_attempt_at: datetime) -> bool:
+        return self._claim_update(claim, "UPDATE dirty_targets SET lease_owner=NULL,lease_until=NULL,retry_count=retry_count+1,next_attempt_at=?,last_error=? WHERE repository_id=? AND target_kind=? AND target_key=? AND generation=? AND lease_owner=?", (_stamp(next_attempt_at), error))
+
+    def release(self, claim: ClaimedTarget) -> bool:
+        return self._claim_update(claim, "UPDATE dirty_targets SET lease_owner=NULL,lease_until=NULL WHERE repository_id=? AND target_kind=? AND target_key=? AND generation=? AND lease_owner=?")
+
+    def acquire_scan_lease(self, repository_id: int, *, worker_id: str, lease_until: datetime, now: datetime) -> bool:
+        with self._transaction() as db:
+            cursor = db.execute("UPDATE repository_state SET scan_lease_owner=?,scan_lease_until=?,last_scan_started_at=? WHERE repository_id=? AND (scan_lease_until IS NULL OR scan_lease_until<=?)", (worker_id, _stamp(lease_until), _stamp(now), repository_id, _stamp(now)))
+            return cursor.rowcount == 1
+
+    def finish_scan(self, repository_id: int, *, worker_id: str, succeeded: bool, now: datetime, error: str = "") -> None:
+        with self._transaction() as db:
+            db.execute("UPDATE repository_state SET scan_lease_owner=NULL,scan_lease_until=NULL,last_scan_success_at=CASE WHEN ? THEN ? ELSE last_scan_success_at END WHERE repository_id=? AND scan_lease_owner=?", (succeeded, _stamp(now), repository_id, worker_id))
+
+    def acquire_poller_lease(self, source_key: str, *, worker_id: str, lease_until: datetime, now: datetime) -> bool:
+        with self._transaction() as db:
+            db.execute("INSERT OR IGNORE INTO poller_state(source_key) VALUES(?)", (source_key,))
+            cursor = db.execute("UPDATE poller_state SET lease_owner=?,lease_until=? WHERE source_key=? AND (lease_until IS NULL OR lease_until<=?)", (worker_id, _stamp(lease_until), source_key, _stamp(now)))
+            return cursor.rowcount == 1
+
+    def finish_poller(self, source_key: str, *, worker_id: str, succeeded: bool, now: datetime, error: str = "") -> None:
+        with self._transaction() as db:
+            db.execute("UPDATE poller_state SET lease_owner=NULL,lease_until=NULL,last_success_at=CASE WHEN ? THEN ? ELSE last_success_at END,last_error=? WHERE source_key=? AND lease_owner=?", (succeeded, _stamp(now), error, source_key, worker_id))
+
+    def upsert_watch(self, watch: ApprovalWatch) -> None:
+        with self._transaction() as db:
+            db.execute("INSERT INTO poll_watches VALUES(?,?,?,?,?,?) ON CONFLICT(repository_id,issue_number,predicate) DO UPDATE SET parked_at=excluded.parked_at", (watch.repository_id, watch.issue_number, watch.predicate, _stamp(watch.parked_at), None if watch.last_value is None else int(watch.last_value), None if watch.last_checked_at is None else _stamp(watch.last_checked_at)))
+
+    def remove_watch(self, repository_id: int, issue_number: int) -> None:
+        with self._transaction() as db:
+            db.execute("DELETE FROM poll_watches WHERE repository_id=? AND issue_number=?", (repository_id, issue_number))
+
+    def list_watches(self, repository_id: int) -> tuple[ApprovalWatch, ...]:
+        return tuple(ApprovalWatch(row["repository_id"], row["issue_number"], row["predicate"], _time(row["parked_at"]), None if row["last_value"] is None else bool(row["last_value"]), _time(row["last_checked_at"])) for row in self.connection.execute("SELECT * FROM poll_watches WHERE repository_id=? ORDER BY issue_number", (repository_id,)))  # type: ignore[arg-type]
+
+    def record_watch_observation(self, watch: ApprovalWatch, *, value: bool, observed_at: datetime) -> bool:
+        with self._transaction() as db:
+            row = db.execute("SELECT last_value FROM poll_watches WHERE repository_id=? AND issue_number=? AND predicate=?", (watch.repository_id, watch.issue_number, watch.predicate)).fetchone()
+            if row is None:
+                return False
+            changed = row[0] is not None and bool(row[0]) != value
+            db.execute("UPDATE poll_watches SET last_value=?,last_checked_at=? WHERE repository_id=? AND issue_number=? AND predicate=?", (int(value), _stamp(observed_at), watch.repository_id, watch.issue_number, watch.predicate))
+            return changed
+
+    def replace_project_snapshot(self, board_key: str, projections: Iterable[ProjectItemProjection], invalidations: Iterable[Invalidation], *, now: datetime) -> None:
+        with self._transaction() as db:
+            db.execute("DELETE FROM project_items WHERE board_key=?", (board_key,))
+            db.executemany("INSERT INTO project_items VALUES(?,?,?,?,?,?,?,?)", [(item.board_key, item.item_node_id, item.repository_id, item.content_kind, item.content_number, item.status, item.priority, _stamp(item.last_seen_at)) for item in projections])
+            self._record_invalidations(db, "project_snapshot", board_key, invalidations, now)
+
+    def status(self, *, now: datetime) -> QueueStatus:
+        backlog, oldest, leased, backed = self.connection.execute("SELECT count(*),min(first_seen_at),sum(lease_until IS NOT NULL AND lease_until>?),sum(next_attempt_at IS NOT NULL AND next_attempt_at>?) FROM dirty_targets", (_stamp(now), _stamp(now))).fetchone()
+        latest = self.connection.execute("SELECT max(received_at) FROM webhook_deliveries").fetchone()[0]
+        repositories = tuple(RepositoryStatus(row["repository_id"], _time(row["last_hint_at"]), _time(row["last_scan_started_at"]), _time(row["last_scan_success_at"]), row["scan_lease_owner"], _time(row["scan_lease_until"])) for row in self.connection.execute("SELECT * FROM repository_state ORDER BY repository_id"))
+        pollers = tuple(PollerStatus(row["source_key"], _time(row["last_success_at"]), row["lease_owner"], _time(row["lease_until"]), row["last_error"] or "") for row in self.connection.execute("SELECT * FROM poller_state ORDER BY source_key"))
+        errors = tuple(row[0] for row in self.connection.execute("SELECT last_error FROM poller_state WHERE last_error <> '' UNION ALL SELECT last_error FROM dirty_targets WHERE last_error IS NOT NULL ORDER BY 1 DESC LIMIT 10"))
+        return QueueStatus(CURRENT_SCHEMA_VERSION, backlog, _time(oldest), leased or 0, backed or 0, _time(latest), repositories, pollers, self.connection.execute("SELECT count(*) FROM poll_watches").fetchone()[0], errors)
+
+    def prune(self, *, deliveries_before: datetime, invalidations_before: datetime) -> PruneResult:
+        with self._transaction() as db:
+            deliveries = db.execute("DELETE FROM webhook_deliveries WHERE received_at < ?", (_stamp(deliveries_before),)).rowcount
+            invalidations = db.execute("DELETE FROM invalidations WHERE observed_at < ?", (_stamp(invalidations_before),)).rowcount
+        busy, log, checkpointed = self.connection.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        return PruneResult(deliveries, invalidations, busy, log, checkpointed)
