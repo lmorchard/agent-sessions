@@ -8,7 +8,9 @@ import json
 import os
 import subprocess
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Callable
 
 import requests
 
@@ -42,6 +44,9 @@ from agent_sessions.driver.labels import (
 # The clock stays `output.now()`, called through the module on purpose: a bound copy
 # could not be frozen, and freezing it is how the suites get deterministic timestamps.
 from agent_sessions.driver.output import die, log, say
+
+if TYPE_CHECKING:
+    from agent_sessions.events.driver import QueueRuntime
 
 PHASE_TIERS = {
     "triage": "low",
@@ -90,6 +95,7 @@ class RunContext:
     no_workspace_isolation: bool
     setup_hook: str
     clean_workspaces: bool
+    events_config_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +107,7 @@ class SelectionResult:
     open_prs: list[dict]
     candidates: list[tuple[str, str]]
     board_item_ids: dict[str, str]
+    issue_snapshot_complete: bool = True
 
 
 @dataclass
@@ -297,6 +304,10 @@ def preflight(argv: list[str] | None = None) -> RunContext:
         "--setup-hook", default=os.environ.get("SETUP_HOOK") or os.environ.get("DRIVER_SETUP_HOOK") or ""
     )
     parser.add_argument("--clean-workspaces", action="store_true")
+    parser.add_argument(
+        "--events-config",
+        default=os.environ.get("EVENTS_CONFIG") or "",
+    )
 
     args = parser.parse_args(argv)
 
@@ -467,6 +478,7 @@ def preflight(argv: list[str] | None = None) -> RunContext:
         no_workspace_isolation=args.no_workspace_isolation,
         setup_hook=args.setup_hook,
         clean_workspaces=args.clean_workspaces,
+        events_config_path=abspath(args.events_config) if args.events_config else None,
     )
 
 
@@ -645,7 +657,11 @@ def run_classify_only(ctx: RunContext) -> int:
     return 0
 
 
-def select_queue(ctx: RunContext) -> SelectionResult:
+def select_queue(
+    ctx: RunContext,
+    *,
+    approval_watch_runtime: QueueRuntime | None = None,
+) -> SelectionResult:
     from agent_sessions.driver import agent_session_driver
 
     say("== select ==")
@@ -655,9 +671,11 @@ def select_queue(ctx: RunContext) -> SelectionResult:
         cmd = ["gh", "issue", "list", "--repo", ctx.repo, "--state", "open", "--limit", "500", "--json", "number,title,body,labels,url,updatedAt"]
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
         open_issues = json.loads(res.stdout)
+        issue_snapshot_complete = len(open_issues) < 500
     except Exception as e:
         log(f"failed to list open issues: {e}")
         open_issues = []
+        issue_snapshot_complete = False
 
     board_nums: set[str] = set()
     board_item_ids: dict[str, str] = {}
@@ -776,11 +794,25 @@ def select_queue(ctx: RunContext) -> SelectionResult:
         say(msg)
 
     ts_str = output.now().strftime("%Y%m%dT%H%M%SZ")
+    confirmed_unparked: set[str] = set()
     for m in sel_res["unpark_actions"]:
         agent_session_driver.park_label_remove(m, ctx.repo)
+        try:
+            if not authoritative_issue_is_parked(ctx, m):
+                confirmed_unparked.add(str(m))
+        except Exception as error:
+            report_approval_watch_failure(error)
 
     for m, reason in sel_res["park_actions"]:
         agent_session_driver.apply_park_state(m, "parked", ts_str, f"parked by loop breaker: {reason}", ctx.repo, ctx.state_dir, ctx.parked_log, quiet=True)
+
+    if approval_watch_runtime is not None and issue_snapshot_complete:
+        repair_approval_watches(
+            ctx,
+            approval_watch_runtime,
+            open_issues,
+            unparked=confirmed_unparked,
+        )
 
     all_candidates = sel_res["candidates"]
 
@@ -813,6 +845,7 @@ def select_queue(ctx: RunContext) -> SelectionResult:
         open_prs=open_prs,
         candidates=locked_candidates,
         board_item_ids=board_item_ids,
+        issue_snapshot_complete=issue_snapshot_complete,
     )
 
 
@@ -1063,10 +1096,10 @@ def invoke_agent(
     run_repo_path: Path,
     open_prs: list[dict],
     board_item_ids: dict[str, str],
+    after_inflight: Callable[[], object] | None = None,
 ) -> InvocationResult:
     from agent_sessions.driver import agent_session_driver
 
-    agent_session_driver.increment_attempts(issue_num, ctx.repo)
     url = f"https://github.com/{ctx.repo}/issues/{issue_num}"
     ts = output.now().strftime("%Y%m%dT%H%M%SZ")
     rundir = ctx.runs_dir / f"{issue_num}-{ts}"
@@ -1117,6 +1150,15 @@ def invoke_agent(
         }),
         encoding="utf-8",
     )
+
+    if after_inflight is not None:
+        try:
+            after_inflight()
+        except Exception:
+            ctx.inflight_file.unlink(missing_ok=True)
+            raise
+
+    agent_session_driver.increment_attempts(issue_num, ctx.repo)
 
     if phase not in PHASE_TIERS:
         die(f"unknown phase: {phase}")
@@ -1188,6 +1230,8 @@ def classify_and_record(
     ctx: RunContext,
     inv: InvocationResult,
     open_prs: list[dict] | None = None,
+    *,
+    approval_watch_runtime: QueueRuntime | None = None,
 ) -> RunOutcome:
     from agent_sessions.driver import agent_session_driver
 
@@ -1340,7 +1384,23 @@ def classify_and_record(
         },
     )
 
-    agent_session_driver.apply_park_state(inv.issue_num, outcome, inv.ts, reason, ctx.repo, ctx.state_dir, ctx.parked_log)
+    park_transition_ts = output.now().strftime("%Y%m%dT%H%M%SZ")
+    agent_session_driver.apply_park_state(
+        inv.issue_num,
+        outcome,
+        park_transition_ts,
+        reason,
+        ctx.repo,
+        ctx.state_dir,
+        ctx.parked_log,
+    )
+    if approval_watch_runtime is not None:
+        maintain_approval_watch_after_outcome(
+            ctx,
+            approval_watch_runtime,
+            inv,
+            outcome,
+        )
 
     # Post finish discussion note
     try:
@@ -1392,6 +1452,226 @@ def report_results(
     say(f"State: {state_dir}")
 
 
+def report_approval_watch_failure(error: Exception) -> None:
+    """Report a best-effort watch update without changing driver outcomes."""
+    from agent_sessions.events.logging import emit
+
+    emit(
+        "driver_approval_watch_degraded",
+        disposition="deferred",
+        message=f"{type(error).__name__}: {error}",
+    )
+
+
+def _approval_watch_time(value: str) -> datetime | None:
+    try:
+        return datetime.strptime(value, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def _latest_park_reason(ctx: RunContext, issue_number: str) -> str:
+    latest_timestamp = ""
+    latest_reason = ""
+    for path, timestamp_field in (
+        (ctx.runs_log, "started"),
+        (ctx.parked_log, "parked_at"),
+    ):
+        if not path.is_file():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(row, dict) or str(row.get("issue")) != issue_number:
+                continue
+            timestamp = str(row.get(timestamp_field, ""))
+            if timestamp >= latest_timestamp:
+                latest_timestamp = timestamp
+                latest_reason = str(row.get("reason", ""))
+    return latest_reason
+
+
+def authoritative_issue_is_parked(ctx: RunContext, issue_number: str) -> bool:
+    """Read the current issue labels after a park-label mutation."""
+    result = subprocess.run(
+        [
+            "gh",
+            "issue",
+            "view",
+            str(issue_number),
+            "--repo",
+            ctx.repo,
+            "--json",
+            "labels",
+        ],
+        capture_output=True,
+        text=True,
+        env=credentials.agent_env(dict(os.environ), ctx.creds),
+    )
+    if result.returncode != 0:
+        raise RuntimeError("could not verify approval label after mutation")
+    issue = json.loads(result.stdout)
+    if not isinstance(issue, dict):
+        raise RuntimeError("GitHub returned malformed issue label data")
+    raw_labels = issue.get("labels")
+    if not isinstance(raw_labels, list):
+        raise RuntimeError("GitHub returned malformed issue label data")
+    labels: set[str] = set()
+    for label in raw_labels:
+        if not isinstance(label, dict) or not isinstance(label.get("name"), str):
+            raise RuntimeError("GitHub returned malformed issue label data")
+        labels.add(label["name"])
+    return PARK_LABEL in labels
+
+
+def repair_approval_watches(
+    ctx: RunContext,
+    runtime: QueueRuntime,
+    open_issues: list[dict],
+    *,
+    unparked: set[str],
+) -> None:
+    """Reconcile watch rows against the authoritative full-scan issue snapshot."""
+    from agent_sessions.driver import agent_session_driver
+    from agent_sessions.events.models import ApprovalWatch
+
+    try:
+        desired: dict[int, datetime | None] = {}
+        for issue in open_issues:
+            if not isinstance(issue, dict):
+                continue
+            number = str(issue.get("number", ""))
+            if not number or number in unparked:
+                continue
+            labels = {
+                str(label.get("name"))
+                for label in issue.get("labels", [])
+                if isinstance(label, dict) and label.get("name")
+            }
+            if PARK_LABEL not in labels:
+                continue
+            if _latest_park_reason(ctx, number).startswith("parked by loop breaker:"):
+                continue
+            park_time = agent_session_driver.get_park_time(number, ctx.state_dir)
+            desired[int(number)] = _approval_watch_time(park_time)
+
+        repository_id = runtime.repository.identity.id
+        existing = {
+            watch.issue_number: watch
+            for watch in runtime.store.list_watches(repository_id)
+        }
+        for issue_number in existing.keys() - desired.keys():
+            runtime.store.remove_watch(repository_id, issue_number)
+        for issue_number, parked_at in desired.items():
+            if parked_at is None:
+                continue
+            watch = existing.get(issue_number)
+            if watch is None or watch.parked_at != parked_at:
+                runtime.store.upsert_watch(
+                    ApprovalWatch(
+                        repository_id,
+                        issue_number,
+                        "human_approval_since_park",
+                        parked_at,
+                    )
+                )
+    except Exception as error:
+        report_approval_watch_failure(error)
+
+
+def maintain_approval_watch_after_outcome(
+    ctx: RunContext,
+    runtime: QueueRuntime,
+    inv: InvocationResult,
+    outcome: str,
+) -> None:
+    """Persist watches only after a fresh read confirms an agent-driven park."""
+    if inv.phase not in ("triage", "refine") or outcome != "parked":
+        return
+
+    from agent_sessions.driver import agent_session_driver
+    from agent_sessions.events.models import ApprovalWatch
+
+    try:
+        is_parked = authoritative_issue_is_parked(ctx, inv.issue_num)
+        park_time = agent_session_driver.get_park_time(inv.issue_num, ctx.state_dir)
+        parked_at = _approval_watch_time(park_time)
+        if not is_parked or parked_at is None:
+            return
+        runtime.store.upsert_watch(
+            ApprovalWatch(
+                runtime.repository.identity.id,
+                int(inv.issue_num),
+                "human_approval_since_park",
+                parked_at,
+            )
+        )
+    except Exception as error:
+        report_approval_watch_failure(error)
+
+
+def load_queue_runtime(ctx: RunContext) -> QueueRuntime | None:
+    """Open configured queue state without importing it in legacy mode."""
+    if ctx.events_config_path is None:
+        return None
+
+    from agent_sessions.events import config as events_config
+    from agent_sessions.events.driver import QueueRuntime
+    from agent_sessions.events.store import QueueStore
+
+    loaded = events_config.load(ctx.events_config_path)
+    owner, name = ctx.repo.split("/", 1)
+    repository = next(
+        (
+            item
+            for item in loaded.repositories
+            if item.identity.owner.lower() == owner.lower()
+            and item.identity.name.lower() == name.lower()
+        ),
+        None,
+    )
+    if repository is None:
+        raise ValueError(f"events configuration does not contain {ctx.repo}")
+    store = QueueStore.open(loaded.database, busy_timeout_ms=loaded.busy_timeout_ms)
+    health = store.ready()
+    if not health.ready:
+        raise RuntimeError(health.error or "queue database is not ready")
+    store.register_repositories(item.identity for item in loaded.repositories)
+    return QueueRuntime(loaded, store, repository)
+
+
+def _queue_degraded(error: Exception) -> None:
+    from agent_sessions.events.logging import emit
+
+    emit(
+        "driver_queue_degraded",
+        disposition="degraded",
+        message=f"{type(error).__name__}: {error}",
+    )
+
+
+def _queue_failure_types():
+    import sqlite3
+
+    from agent_sessions.events.models import (
+        IncompatibleSchema,
+        QueueBusy,
+        QueueUnavailable,
+    )
+
+    return (QueueBusy, QueueUnavailable, IncompatibleSchema, sqlite3.Error)
+
+
 def main(argv: list[str] | None = None) -> int:
     from agent_sessions.driver import agent_session_driver
 
@@ -1400,9 +1680,48 @@ def main(argv: list[str] | None = None) -> int:
     if ctx.classify_only:
         return agent_session_driver.run_classify_only(ctx)
 
-    sel_res = agent_session_driver.select_queue(ctx)
+    queue_runtime: QueueRuntime | None = None
+    queue_selection = None
+    sel_res: SelectionResult | None
+    if ctx.events_config_path is None:
+        sel_res = agent_session_driver.select_queue(ctx)
+    else:
+        try:
+            queue_runtime = load_queue_runtime(ctx)
+        except Exception as error:
+            _queue_degraded(error)
+            sel_res = agent_session_driver.select_queue(ctx)
+        else:
+            from agent_sessions.events.driver import select_work
+
+            try:
+                queue_selection = select_work(
+                    ctx,
+                    queue_runtime,
+                    now=output.now(),
+                    worker_id=f"{os.getpid()}",
+                )
+            except _queue_failure_types() as error:
+                agent_session_driver.release_lock(ctx.repo_path)
+                _queue_degraded(error)
+                queue_runtime = None
+                sel_res = agent_session_driver.select_queue(ctx)
+            else:
+                sel_res = queue_selection.selection
+
+    if sel_res is None:
+        if ctx.dry_run:
+            say("\ndry run -- no claude invocation.")
+            return 0
+        say("\n== report ==")
+        say("nothing eligible; no runs attempted. Reasons are listed above.")
+        return 0
 
     if ctx.dry_run:
+        if queue_runtime is not None and queue_selection is not None:
+            if queue_selection.selected_claim is not None:
+                queue_runtime.store.release(queue_selection.selected_claim)
+                agent_session_driver.release_lock(ctx.repo_path)
         say("\ndry run -- no claude invocation.")
         return 0
 
@@ -1415,7 +1734,9 @@ def main(argv: list[str] | None = None) -> int:
     total_cost = 0.0
     summary_rows: list[RunOutcome] = []
 
-    for num, phase in sel_res.candidates:
+    candidate_index = 0
+    while candidate_index < len(sel_res.candidates):
+        num, phase = sel_res.candidates[candidate_index]
         if attempted >= ctx.max_issues:
             say("\nreached --max-issues; stopping with issues still eligible.")
             break
@@ -1426,8 +1747,49 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         run_repo_path = agent_session_driver.prepare_workspace(ctx, num)
-        inv = agent_session_driver.invoke_agent(ctx, num, phase, run_repo_path, sel_res.open_prs, sel_res.board_item_ids)
-        run_outcome = agent_session_driver.classify_and_record(ctx, inv, sel_res.open_prs)
+        after_inflight = None
+        if (
+            queue_runtime is not None
+            and queue_selection is not None
+            and queue_selection.selected_claim is not None
+        ):
+            selected_claim = queue_selection.selected_claim
+            selected_store = queue_runtime.store
+
+            def acknowledge_selected_claim() -> bool:
+                return selected_store.acknowledge(selected_claim)
+
+            after_inflight = acknowledge_selected_claim
+        try:
+            inv = agent_session_driver.invoke_agent(
+                ctx,
+                num,
+                phase,
+                run_repo_path,
+                sel_res.open_prs,
+                sel_res.board_item_ids,
+                after_inflight=after_inflight,
+            )
+        except _queue_failure_types() as error:
+            if after_inflight is None:
+                raise
+            agent_session_driver.release_lock(ctx.repo_path)
+            _queue_degraded(error)
+            queue_runtime = None
+            queue_selection = None
+            sel_res = agent_session_driver.select_queue(ctx)
+            candidate_index = 0
+            if not sel_res.candidates:
+                say("\n== report ==")
+                say("nothing eligible; no runs attempted. Reasons are listed above.")
+                return 0
+            continue
+        run_outcome = agent_session_driver.classify_and_record(
+            ctx,
+            inv,
+            sel_res.open_prs,
+            approval_watch_runtime=queue_runtime,
+        )
 
         total_cost += run_outcome.cost
         attempted += 1
@@ -1436,6 +1798,7 @@ def main(argv: list[str] | None = None) -> int:
         if run_outcome.outcome in ("failed", "driver-fault", "budget-exhausted"):
             say("\nstopping the loop: outcome means an assumption is wrong, and retrying spends money on it.")
             break
+        candidate_index += 1
 
     agent_session_driver.report_results(summary_rows, attempted, total_cost, ctx.state_dir)
     return 0

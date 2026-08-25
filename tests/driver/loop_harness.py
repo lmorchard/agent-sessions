@@ -97,6 +97,7 @@ def issue(number, *, body="", labels=(), title=None, comments=(), updated_at="20
         "url": f"https://github.com/{REPO}/issues/{number}",
         "comments": list(comments),
         "updatedAt": updated_at,
+        "state": "OPEN",
     }
 
 
@@ -146,6 +147,7 @@ def pr(
         "reviewDecision": "",
         "mergeStateStatus": merge_state_status,
         "mergeable": mergeable,
+        "state": "OPEN",
     }
 
 
@@ -440,10 +442,159 @@ class FakeGitHub:
             return _Result(0, "")
 
         if rest[:2] == ["api", "graphql"]:
-            # The GraphQL query text is not parsed; only the `-F pr=` variable is
-            # read and the response envelope is hand-shaped. A change to which
-            # *fields* the query requests is therefore invisible here — unlike the
-            # `--json` paths above. Noted rather than solved.
+            # Dispatch by the connection named in the query, then serve a complete
+            # final page. Pagination behavior itself is covered by the resolver's
+            # focused multi-page tests.
+            query_arg = next(
+                (value for value in argv if value.startswith("query=")),
+                "",
+            )
+            query = query_arg.removeprefix("query=")
+
+            def graphql_result(payload):
+                return _Result(
+                    0,
+                    json.dumps([payload] if "--slurp" in argv else payload),
+                )
+
+            if "pullRequests(first:100,after:$endCursor" in query:
+                nodes = [
+                    {
+                        "number": pull["number"],
+                        "headRefOid": pull["headRefOid"],
+                        "closingIssuesReferences": {
+                            "nodes": pull["closingIssuesReferences"],
+                            "pageInfo": {
+                                "hasNextPage": False,
+                                "endCursor": None,
+                            },
+                        },
+                    }
+                    for pull in self.prs
+                ]
+                return graphql_result(
+                    {
+                        "data": {
+                            "repository": {
+                                "pullRequests": {
+                                    "nodes": nodes,
+                                    "pageInfo": {
+                                        "hasNextPage": False,
+                                        "endCursor": None,
+                                    },
+                                }
+                            }
+                        }
+                    }
+                )
+
+            if "closingIssuesReferences(first:100,after:$endCursor" in query:
+                number = self._graphql_var(argv, "pr")
+                pull = self.pr_by_number(number)
+                nodes = list(pull["closingIssuesReferences"] if pull else [])
+                return graphql_result(
+                    {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "closingIssuesReferences": {
+                                        "nodes": nodes,
+                                        "pageInfo": {
+                                            "hasNextPage": False,
+                                            "endCursor": None,
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                )
+
+            if "reviewThreads(first:100,after:$endCursor" in query:
+                number = self._graphql_var(argv, "pr")
+                pull = self.pr_by_number(number)
+                nodes = [
+                    {"isResolved": thread["isResolved"]}
+                    for thread in (pull["reviewThreads"] if pull else [])
+                ]
+                return graphql_result(
+                    {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "reviewThreads": {
+                                        "nodes": nodes,
+                                        "pageInfo": {
+                                            "hasNextPage": False,
+                                            "endCursor": None,
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                )
+
+            if "comments(first:100,after:$endCursor" in query:
+                issue_number = self._graphql_var(argv, "issue")
+                found_issue = self.issue_by_number(issue_number)
+                comments = []
+                for index, item in enumerate(
+                    found_issue.get("comments", []) if found_issue else []
+                ):
+                    reactions = item.get("reactions") or {}
+                    reaction_nodes = (
+                        reactions.get("nodes", [])
+                        if isinstance(reactions, dict)
+                        else reactions
+                    )
+                    comments.append(
+                        {
+                            **item,
+                            "id": item.get("id", f"comment-{issue_number}-{index}"),
+                            "reactions": {
+                                "nodes": reaction_nodes,
+                                "pageInfo": {
+                                    "hasNextPage": False,
+                                    "endCursor": None,
+                                },
+                            },
+                        }
+                    )
+                return graphql_result(
+                    {
+                        "data": {
+                            "repository": {
+                                "issue": {
+                                    "comments": {
+                                        "nodes": comments,
+                                        "pageInfo": {
+                                            "hasNextPage": False,
+                                            "endCursor": None,
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                )
+
+            issue_number = self._graphql_var(argv, "issue")
+            if issue_number:
+                found_issue = self.issue_by_number(issue_number)
+                comments = found_issue.get("comments", []) if found_issue else []
+                return _Result(
+                    0,
+                    json.dumps(
+                        {
+                            "data": {
+                                "repository": {
+                                    "issue": {"comments": {"nodes": comments}}
+                                }
+                            }
+                        }
+                    ),
+                )
             number = self._graphql_var(argv, "pr")
             pull = self.pr_by_number(number)
             nodes = [{"isResolved": t["isResolved"]} for t in (pull["reviewThreads"] if pull else [])]
@@ -692,7 +843,7 @@ _DRIVER_ENV = (
     "REPO", "DRIVER_REPO", "SKILL_DIR", "DRIVER_SKILL_DIR", "REPO_PATH", "DRIVER_REPO_PATH",
     "ISSUE", "MAX_ISSUES", "MAX_BUDGET_USD", "MAX_BUDGET", "MAX_PHASE_ATTEMPTS", "RUN_TIMEOUT",
     "TIMEOUT", "STATE_DIR", "BOARD", "DRIVER_BOARD", "BACKEND", "DRIVER_BACKEND", "MODEL",
-    "HIGH_TIER_MODEL", "LOW_TIER_MODEL", "RETRY", "XDG_STATE_HOME",
+    "HIGH_TIER_MODEL", "LOW_TIER_MODEL", "RETRY", "XDG_STATE_HOME", "EVENTS_CONFIG",
     "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
     credentials.READ_TOKEN_VAR, credentials.WRITE_TOKEN_VAR, credentials.LOGIN_VAR,
     credentials.BOT_LOGINS_VAR, credentials.CONFIG_FILE_VAR,
@@ -766,7 +917,9 @@ class LoopHarness:
         ]
         self.capsys.readouterr()  # drop anything an earlier pass printed
         code = agent_session_driver.main(full_argv)
-        out = self.capsys.readouterr().out
+        captured = self.capsys.readouterr()
+        out = captured.out
+        self.last_stderr = captured.err
 
         assert gh.unhandled == [], (
             "the pass issued a command the fake does not model, so the driver took an "
@@ -788,5 +941,3 @@ class LoopHarness:
 
     def run_dir(self, number, ts=FROZEN_TS):
         return self.state_dir / "runs" / f"{number}-{ts}"
-
-

@@ -472,6 +472,7 @@ def test_lifecycle_preflight(tmp_path: Path, monkeypatch):
     assert ctx.repo_path == repo_dir.resolve()
     assert ctx.skill_dir == skill_dir.resolve()
     assert ctx.dry_run is True
+    assert ctx.events_config_path is None
 
 
 def test_lifecycle_selection(tmp_path: Path, monkeypatch):

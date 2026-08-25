@@ -32,15 +32,21 @@ golden with no teeth.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
+import sqlite3
+import subprocess
 import time
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 from loop_harness import (
     DRIVER_LOGIN,
     EMPTY_TREE,
+    FROZEN,
     FROZEN_TS,
     HUMAN_LOGIN,
     LOCK_SHA,
@@ -60,7 +66,26 @@ from loop_harness import (
     spec_body,
 )
 
-from agent_sessions.driver import agent_session_driver, credentials, gate
+from agent_sessions.driver import (
+    agent_runner,
+    agent_session_driver,
+    credentials,
+    gate,
+    lifecycle,
+    locks,
+    output,
+)
+from agent_sessions.events import config as events_config
+from agent_sessions.events import driver as events_driver
+from agent_sessions.events.github import ResolvedTarget
+from agent_sessions.events.models import (
+    ApprovalWatch,
+    Invalidation,
+    QueueUnavailable,
+    RepositoryIdentity,
+)
+from agent_sessions.events.store import CURRENT_SCHEMA_VERSION, QueueStore
+from agent_sessions.events.webhook import create_app
 
 GOLDEN = Path(__file__).parent / "fixtures" / "select_golden.txt"
 
@@ -1252,6 +1277,939 @@ def test_the_inflight_marker_names_the_phase_it_is_marking(loop):
     assert captured, "no inflight marker was written during the pass"
     assert captured["marker"]["phase"], "the marker carries no phase for recovery to read"
     assert captured["marker"]["issue"] == 101
+
+
+@pytest.mark.parametrize("phase", ["execute", "request_review"])
+def test_after_inflight_sees_a_durable_marker_before_execution(loop, phase):
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[pr(201, closes=[101])] if phase == "request_review" else [],
+        board_items=[board_item(101)],
+    )
+    loop.monkeypatch.setattr("subprocess.run", gh.run)
+    loop.monkeypatch.setattr("requests.post", gh.requests_post)
+    ctx = agent_session_driver.preflight(
+        [
+            "--repo",
+            REPO,
+            "--repo-path",
+            str(loop.repo_path),
+            "--skill-dir",
+            str(loop.skill_dir),
+            "--state-dir",
+            str(loop.state_dir),
+        ]
+    )
+    observed: list[dict] = []
+
+    def after_inflight():
+        observed.append(json.loads(ctx.inflight_file.read_text(encoding="utf-8")))
+
+    if phase == "execute":
+        class OrderedAgent(StubAgent):
+            def __call__(self, argv):
+                assert observed, "backend started before after_inflight"
+                return super().__call__(argv)
+
+        loop.monkeypatch.setattr(agent_runner, "run_agent", OrderedAgent())
+    else:
+        real_request_review = lifecycle.run_request_review
+
+        def ordered_request_review(*args, **kwargs):
+            assert observed, "deterministic phase started before after_inflight"
+            return real_request_review(*args, **kwargs)
+
+        loop.monkeypatch.setattr(lifecycle, "run_request_review", ordered_request_review)
+
+    agent_session_driver.invoke_agent(
+        ctx,
+        "101",
+        phase,
+        loop.repo_path,
+        gh.prs,
+        {},
+        after_inflight=after_inflight,
+    )
+
+    assert observed[0]["issue"] == 101
+    assert observed[0]["phase"] == phase
+
+
+def test_after_inflight_failure_removes_marker_and_never_starts_backend(loop):
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent()
+    loop.monkeypatch.setattr("subprocess.run", gh.run)
+    loop.monkeypatch.setattr("requests.post", gh.requests_post)
+    loop.monkeypatch.setattr(agent_runner, "run_agent", agent)
+    ctx = agent_session_driver.preflight(
+        [
+            "--repo",
+            REPO,
+            "--repo-path",
+            str(loop.repo_path),
+            "--skill-dir",
+            str(loop.skill_dir),
+            "--state-dir",
+            str(loop.state_dir),
+        ]
+    )
+
+    with pytest.raises(QueueUnavailable):
+        agent_session_driver.invoke_agent(
+            ctx,
+            "101",
+            "execute",
+            loop.repo_path,
+            [],
+            {},
+            after_inflight=lambda: (_ for _ in ()).throw(QueueUnavailable("gone")),
+        )
+
+    assert not ctx.inflight_file.exists()
+    assert agent.calls == []
+
+
+def _events_config(path: Path, *, busy_timeout_ms: int = 10) -> Path:
+    config_path = path.parent / f"{path.name}.toml"
+    config_path.write_text(
+        f'''database = "{path}"
+busy_timeout_ms = {busy_timeout_ms}
+claim_limit = 25
+claim_lease_seconds = 300
+retry_base_seconds = 30
+retry_max_seconds = 1800
+max_body_bytes = 1048576
+delivery_retention_days = 14
+invalidation_retention_days = 30
+boards = []
+
+[scan]
+quiet_period_seconds = 300
+interval_seconds = 900
+maximum_age_seconds = 3600
+
+[[repositories]]
+id = 1
+owner = "owner"
+name = "repo"
+''',
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def test_main_without_events_configuration_uses_one_legacy_scan_and_never_opens_queue(
+    loop, monkeypatch
+):
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        board_items=[board_item(101)],
+    )
+    calls = 0
+    real_select = agent_session_driver.select_queue
+
+    def counted_select(ctx):
+        nonlocal calls
+        calls += 1
+        return real_select(ctx)
+
+    monkeypatch.setattr(agent_session_driver, "select_queue", counted_select)
+    monkeypatch.setattr(
+        lifecycle,
+        "load_queue_runtime",
+        lambda _ctx: pytest.fail("legacy mode imported/opened the queue"),
+        raising=False,
+    )
+
+    code, _out = loop.run(gh, argv=["--dry-run"])
+
+    assert code == 0
+    assert calls == 1
+
+
+@pytest.mark.parametrize("database_state", ["absent", "locked", "corrupt", "incompatible"])
+def test_configured_database_failure_logs_one_degraded_event_and_uses_legacy_scan(
+    loop, database_state
+):
+    database = loop.tmp_path / f"{database_state}.sqlite3"
+    locker = None
+    if database_state == "corrupt":
+        database.write_bytes(b"not a sqlite database")
+    elif database_state in {"locked", "incompatible"}:
+        QueueStore.migrate(database, busy_timeout_ms=10)
+        store = QueueStore.open(database, busy_timeout_ms=10)
+        store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+        if database_state == "locked":
+            locker = sqlite3.connect(database, isolation_level=None)
+            locker.execute("BEGIN EXCLUSIVE")
+        else:
+            store.connection.execute(
+                "INSERT INTO schema_migrations VALUES (?, ?)",
+                (CURRENT_SCHEMA_VERSION + 1, "2026-08-25T12:00:00Z"),
+            )
+    settings = _events_config(database, busy_timeout_ms=1)
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        board_items=[board_item(101)],
+    )
+
+    try:
+        code, out = loop.run(gh, argv=["--events-config", str(settings), "--dry-run"])
+    finally:
+        if locker is not None:
+            locker.rollback()
+            locker.close()
+
+    assert code == 0
+    assert out.count("== select ==") == 1
+    degraded = [
+        line for line in loop.last_stderr.splitlines() if '"event": "driver_queue_degraded"' in line
+    ]
+    assert len(degraded) == 1
+
+
+@pytest.mark.anyio
+async def test_signed_pr_delivery_reconciles_live_state_and_conditionally_acknowledges_after_inflight(
+    loop, monkeypatch
+):
+    import httpx
+
+    database = loop.tmp_path / "integration.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    receiver_store = QueueStore.open(database, busy_timeout_ms=100)
+    receiver_store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    assert receiver_store.acquire_scan_lease(
+        1,
+        worker_id="seed",
+        lease_until=FROZEN + timedelta(minutes=1),
+        now=FROZEN,
+    )
+    receiver_store.finish_scan(1, worker_id="seed", succeeded=True, now=FROZEN)
+    settings = _events_config(database, busy_timeout_ms=100)
+    loaded_config = events_config.load(settings)
+    secret = b"integration-secret"
+    raw = json.dumps(
+        {
+            "action": "synchronize",
+            "repository": {"id": 1},
+            "pull_request": {"number": 201},
+        },
+        separators=(",", ":"),
+    ).encode()
+    signature = "sha256=" + hmac.new(secret, raw, hashlib.sha256).hexdigest()
+    app = create_app(config=loaded_config, store=receiver_store, webhook_secret=secret)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/github/webhook",
+            content=raw,
+            headers={
+                "X-GitHub-Delivery": "phase-3-integration",
+                "X-GitHub-Event": "pull_request",
+                "X-Hub-Signature-256": signature,
+            },
+        )
+    assert response.status_code == 202
+
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        prs=[pr(201, closes=[101], checks=[("test", "fail")])],
+        board_items=[board_item(101)],
+    )
+    real_resolver = events_driver.LiveTargetResolver
+
+    class RacingResolver:
+        def __init__(self, **kwargs):
+            self.real = real_resolver(**kwargs)
+
+        def resolve(self, repository, current_claim):
+            resolved = self.real.resolve(repository, current_claim)
+            receiver_store.enqueue_synthetic(
+                "test-race",
+                "newer-generation",
+                (Invalidation(1, "pull_request", "201", "newer"),),
+                now=FROZEN + timedelta(seconds=1),
+            )
+            return resolved
+
+    monkeypatch.setattr(events_driver, "LiveTargetResolver", RacingResolver)
+    agent = StubAgent(stream=agent_stream(final="Fixed CI.", cost=0.5))
+
+    code, out = loop.run(
+        gh,
+        agent=agent,
+        argv=["--events-config", str(settings)],
+    )
+
+    assert code == 0
+    assert "Priority 1: Unblock - fix_ci" in out
+    assert len(agent.calls) == 1
+    assert not (loop.state_dir / "inflight.json").exists()
+    row = receiver_store.connection.execute(
+        "SELECT generation,lease_owner FROM dirty_targets WHERE target_kind='pull_request' AND target_key='201'"
+    ).fetchone()
+    assert row["generation"] == 2
+    assert row["lease_owner"] is None
+
+
+def test_selected_ack_database_failure_falls_back_before_starting_one_agent(
+    loop, monkeypatch
+):
+    database = loop.tmp_path / "ack-failure.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    store = QueueStore.open(database, busy_timeout_ms=100)
+    store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    assert store.acquire_scan_lease(
+        1,
+        worker_id="seed",
+        lease_until=FROZEN + timedelta(minutes=1),
+        now=FROZEN,
+    )
+    store.finish_scan(1, worker_id="seed", succeeded=True, now=FROZEN)
+    store.enqueue_synthetic(
+        "test",
+        "ack-failure",
+        (Invalidation(1, "issue", "101", "test"),),
+        now=FROZEN,
+    )
+    settings = _events_config(database, busy_timeout_ms=100)
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent(stream=agent_stream(final="Fallback run."))
+    monkeypatch.setattr(
+        QueueStore,
+        "acknowledge",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            QueueUnavailable("ack unavailable")
+        ),
+    )
+
+    code, out = loop.run(
+        gh,
+        agent=agent,
+        argv=["--events-config", str(settings)],
+    )
+
+    assert code == 0
+    assert out.count("== select ==") == 1
+    assert len(agent.calls) == 1
+    assert not (loop.state_dir / "inflight.json").exists()
+    degraded = [
+        line
+        for line in loop.last_stderr.splitlines()
+        if '"event": "driver_queue_degraded"' in line
+    ]
+    assert len(degraded) == 1
+    row = store.connection.execute(
+        "SELECT lease_owner FROM dirty_targets WHERE target_kind='issue' AND target_key='101'"
+    ).fetchone()
+    assert row["lease_owner"] is not None
+
+
+def test_selected_ack_failure_at_attempt_two_does_not_loop_break_before_backend(
+    loop, monkeypatch
+):
+    database = loop.tmp_path / "ack-attempt.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    store = QueueStore.open(database, busy_timeout_ms=100)
+    store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    assert store.acquire_scan_lease(
+        1,
+        worker_id="seed",
+        lease_until=FROZEN + timedelta(minutes=1),
+        now=FROZEN,
+    )
+    store.finish_scan(1, worker_id="seed", succeeded=True, now=FROZEN)
+    store.enqueue_synthetic(
+        "test",
+        "ack-attempt",
+        (Invalidation(1, "issue", "101", "test"),),
+        now=FROZEN,
+    )
+    settings = _events_config(database, busy_timeout_ms=100)
+    gh = FakeGitHub(
+        issues=[
+            issue(
+                101,
+                body=spec_body("auto-ok"),
+                labels=["P1", "agent-session:attempt-2"],
+            )
+        ],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent(stream=agent_stream(final="Fallback run."))
+    monkeypatch.setattr(
+        QueueStore,
+        "acknowledge",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            QueueUnavailable("ack unavailable")
+        ),
+    )
+
+    code, out = loop.run(
+        gh,
+        agent=agent,
+        argv=["--events-config", str(settings)],
+    )
+
+    assert code == 0
+    assert len(agent.calls) == 1
+    assert "MAX_PHASE_ATTEMPTS" not in out
+    attempt_ops = [operation for operation in gh.label_ops if operation[0] == "attempt"]
+    assert attempt_ops == [("attempt", "101", "3")]
+    assert not loop.rows("parked.jsonl")[-1]["reason"].startswith(
+        "parked by loop breaker:"
+    )
+
+
+@pytest.mark.parametrize("failure_point", ["release", "finish_scan"])
+def test_selection_database_failure_releases_acquired_lock_before_legacy_fallback(
+    loop, monkeypatch, failure_point
+):
+    database = loop.tmp_path / f"selection-{failure_point}.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    store = QueueStore.open(database, busy_timeout_ms=100)
+    store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    settings = _events_config(database, busy_timeout_ms=100)
+    issues = [
+        issue(101, body=spec_body("auto-ok"), labels=["P1"]),
+        issue(102, body=spec_body("auto-ok"), labels=["P1"]),
+    ]
+    gh = FakeGitHub(issues=issues)
+    if failure_point == "release":
+        assert store.acquire_scan_lease(
+            1,
+            worker_id="seed",
+            lease_until=FROZEN + timedelta(minutes=1),
+            now=FROZEN,
+        )
+        store.finish_scan(1, worker_id="seed", succeeded=True, now=FROZEN)
+        store.enqueue_synthetic(
+            "test",
+            "two-claims",
+            (
+                Invalidation(1, "issue", "101", "test"),
+                Invalidation(1, "issue", "102", "test"),
+            ),
+            now=FROZEN,
+        )
+
+        class Resolver:
+            def __init__(self, **_kwargs):
+                pass
+
+            def resolve(self, _repository, current_claim):
+                current_issue = next(
+                    item
+                    for item in issues
+                    if str(item["number"]) == current_claim.target_key
+                )
+                return ResolvedTarget(current_claim, (current_issue,), (), ())
+
+        monkeypatch.setattr(events_driver, "LiveTargetResolver", Resolver)
+        real_release = QueueStore.release
+
+        def failing_release(self, current_claim):
+            if current_claim.target_key == "102":
+                raise QueueUnavailable("release unavailable")
+            return real_release(self, current_claim)
+
+        monkeypatch.setattr(QueueStore, "release", failing_release)
+    else:
+        real_finish = QueueStore.finish_scan
+
+        def failing_finish(self, repository_id, **kwargs):
+            if kwargs["worker_id"] != "seed":
+                raise QueueUnavailable("finish unavailable")
+            return real_finish(self, repository_id, **kwargs)
+
+        monkeypatch.setattr(QueueStore, "finish_scan", failing_finish)
+
+    real_select = agent_session_driver.select_queue
+    fallback_calls = 0
+
+    def fallback_select(ctx):
+        nonlocal fallback_calls
+        fallback_calls += 1
+        assert locks.CURRENT_LOCK_ISSUE is None
+        return real_select(ctx)
+
+    monkeypatch.setattr(agent_session_driver, "select_queue", fallback_select)
+    agent = StubAgent(stream=agent_stream(final="Fallback run."))
+
+    code, _out = loop.run(
+        gh,
+        agent=agent,
+        argv=["--events-config", str(settings)],
+        board=False,
+    )
+
+    assert code == 0
+    assert fallback_calls == 1
+    assert len(agent.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("override_args", "labels"),
+    [
+        (["--issue", "101"], ["P1"]),
+        (
+            ["--retry", "101"],
+            ["P1", agent_session_driver.PARK_LABEL],
+        ),
+    ],
+)
+def test_manual_override_uses_targeted_scan_without_a_dirty_claim(
+    loop, override_args, labels
+):
+    database = loop.tmp_path / f"manual-{override_args[0][2:]}.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    store = QueueStore.open(database, busy_timeout_ms=100)
+    store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    assert store.acquire_scan_lease(
+        1,
+        worker_id="seed",
+        lease_until=FROZEN + timedelta(minutes=1),
+        now=FROZEN,
+    )
+    store.finish_scan(1, worker_id="seed", succeeded=True, now=FROZEN)
+    settings = _events_config(database, busy_timeout_ms=100)
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=labels)],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent(stream=agent_stream(final="Manual run."))
+
+    code, _out = loop.run(
+        gh,
+        agent=agent,
+        argv=["--events-config", str(settings), *override_args],
+    )
+
+    assert code == 0
+    assert len(agent.calls) == 1
+
+
+def test_manual_override_does_not_acknowledge_an_unrelated_dirty_claim(loop):
+    database = loop.tmp_path / "manual-unrelated.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    store = QueueStore.open(database, busy_timeout_ms=100)
+    store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    assert store.acquire_scan_lease(
+        1,
+        worker_id="seed",
+        lease_until=FROZEN + timedelta(minutes=1),
+        now=FROZEN,
+    )
+    store.finish_scan(1, worker_id="seed", succeeded=True, now=FROZEN)
+    store.enqueue_synthetic(
+        "test",
+        "unrelated",
+        (Invalidation(1, "issue", "102", "test"),),
+        now=FROZEN,
+    )
+    settings = _events_config(database, busy_timeout_ms=100)
+    gh = FakeGitHub(
+        issues=[
+            issue(101, body=spec_body("auto-ok"), labels=["P1"]),
+            issue(102, body="Unrelated.", labels=["P1"]),
+        ],
+        board_items=[board_item(101), board_item(102)],
+    )
+    agent = StubAgent(stream=agent_stream(final="Manual run."))
+
+    code, _out = loop.run(
+        gh,
+        agent=agent,
+        argv=["--events-config", str(settings), "--issue", "101"],
+    )
+
+    assert code == 0
+    assert len(agent.calls) == 1
+    row = store.connection.execute(
+        "SELECT generation,lease_owner FROM dirty_targets "
+        "WHERE target_kind='issue' AND target_key='102'"
+    ).fetchone()
+    assert (row["generation"], row["lease_owner"]) == (1, None)
+
+
+def test_agent_driven_park_creates_approval_watch_and_queue_failure_does_not_change_outcome(
+    loop, monkeypatch
+):
+    database = loop.tmp_path / "watch.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    store = QueueStore.open(database, busy_timeout_ms=100)
+    store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    assert store.acquire_scan_lease(
+        1,
+        worker_id="seed",
+        lease_until=FROZEN + timedelta(minutes=1),
+        now=FROZEN,
+    )
+    store.finish_scan(1, worker_id="seed", succeeded=True, now=FROZEN)
+    store.enqueue_synthetic(
+        "test",
+        "park",
+        (Invalidation(1, "issue", "102", "test"),),
+        now=FROZEN,
+    )
+    settings = _events_config(database, busy_timeout_ms=100)
+    gh = FakeGitHub(
+        issues=[issue(102, body="Vague.", labels=["P1"])],
+        board_items=[board_item(102)],
+    )
+    agent = StubAgent(
+        stream=agent_stream(final="Need a human decision."),
+        manifest=[{"kind": "label", "issue": 102, "add": [agent_session_driver.PARK_LABEL]}],
+    )
+
+    code, _out = loop.run(gh, agent=agent, argv=["--events-config", str(settings)])
+
+    assert code == 0
+    watches = store.list_watches(1)
+    assert [(item.issue_number, item.predicate, item.parked_at) for item in watches] == [
+        (102, "human_approval_since_park", FROZEN)
+    ]
+    assert loop.rows("runs.jsonl")[0]["outcome"] == "parked"
+
+    store.remove_watch(1, 102)
+    store.enqueue_synthetic(
+        "test",
+        "park-again",
+        (Invalidation(1, "issue", "102", "test"),),
+        now=FROZEN,
+    )
+    monkeypatch.setattr(
+        QueueStore,
+        "upsert_watch",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(QueueUnavailable("watch unavailable")),
+    )
+    loop.run(gh, agent=agent, argv=["--events-config", str(settings), "--retry", "102"])
+    assert loop.rows("runs.jsonl")[-1]["outcome"] == "parked"
+
+
+def test_agent_driven_watch_uses_actual_park_transition_time(loop, monkeypatch):
+    database = loop.tmp_path / "watch-time.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    store = QueueStore.open(database, busy_timeout_ms=100)
+    store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    settings = _events_config(database, busy_timeout_ms=100)
+    later = FROZEN + timedelta(minutes=10)
+    gh = FakeGitHub(
+        issues=[issue(102, body="Vague.", labels=["P1"])],
+        board_items=[board_item(102)],
+    )
+    agent = StubAgent(
+        stream=agent_stream(final="Need a human decision."),
+        manifest=[
+            {"kind": "label", "issue": 102, "add": [agent_session_driver.PARK_LABEL]}
+        ],
+        side_effect=lambda: monkeypatch.setattr(output, "now", lambda: later),
+    )
+
+    code, _out = loop.run(gh, agent=agent, argv=["--events-config", str(settings)])
+
+    assert code == 0
+    watches = store.list_watches(1)
+    assert watches, (loop.last_stderr, loop.rows("parked.jsonl"))
+    (watch,) = watches
+    assert watch.parked_at == later
+    assert loop.rows("parked.jsonl")[-1]["parked_at"] == "20260810T121000Z"
+
+
+def test_full_scan_repairs_missing_and_stale_approval_watches(loop):
+    database = loop.tmp_path / "repair.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    store = QueueStore.open(database, busy_timeout_ms=100)
+    store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    store.upsert_watch(
+        ApprovalWatch(1, 999, "human_approval_since_park", FROZEN - timedelta(days=1))
+    )
+    settings = _events_config(database, busy_timeout_ms=100)
+    gh = FakeGitHub(
+        issues=[
+            issue(
+                102,
+                body="Vague.",
+                labels=["P1", agent_session_driver.PARK_LABEL],
+            )
+        ],
+        board_items=[board_item(102)],
+    )
+    loop.seed_runs(
+        [
+            {
+                "issue": 102,
+                "repo": REPO,
+                "phase": "triage",
+                "started": FROZEN_TS,
+                "outcome": "parked",
+                "reason": "awaiting decision",
+            }
+        ]
+    )
+
+    code, _out = loop.run(
+        gh,
+        argv=["--events-config", str(settings), "--dry-run"],
+    )
+
+    assert code == 0
+    watches = store.list_watches(1)
+    assert [(item.issue_number, item.predicate) for item in watches] == [
+        (102, "human_approval_since_park")
+    ]
+
+
+def test_failed_full_scan_unpark_preserves_approval_watch(loop):
+    database = loop.tmp_path / "failed-unpark.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    store = QueueStore.open(database, busy_timeout_ms=100)
+    store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    parked_at = FROZEN - timedelta(hours=1)
+    store.upsert_watch(
+        ApprovalWatch(1, 102, "human_approval_since_park", parked_at)
+    )
+    settings = _events_config(database, busy_timeout_ms=100)
+
+    class FailedUnparkGitHub(FakeGitHub):
+        def _python(self, argv):
+            if "unpark" in argv:
+                self.label_calls.append(tuple(argv[2:]))
+                return subprocess.CompletedProcess(
+                    argv, 1, stdout="", stderr="label removal failed"
+                )
+            return super()._python(argv)
+
+    gh = FailedUnparkGitHub(
+        issues=[
+            issue(
+                102,
+                body="Vague.",
+                labels=["P1", agent_session_driver.PARK_LABEL],
+                comments=[
+                    comment(
+                        HUMAN_LOGIN,
+                        "Please continue.",
+                        created_at="2026-08-10T11:30:00Z",
+                    )
+                ],
+            )
+        ],
+        board_items=[board_item(102)],
+    )
+
+    code, _out = loop.run(
+        gh,
+        argv=["--events-config", str(settings), "--dry-run"],
+    )
+
+    assert code == 0
+    assert agent_session_driver.PARK_LABEL in gh.labels_of(102)
+    assert store.list_watches(1) == (
+        ApprovalWatch(1, 102, "human_approval_since_park", parked_at),
+    )
+
+
+@pytest.mark.parametrize(
+    "label_payload",
+    [
+        {},
+        {"labels": None},
+        {"labels": {}},
+        {"labels": "not-a-list"},
+        {"labels": [42]},
+        {"labels": [{}]},
+    ],
+    ids=["missing", "null", "mapping", "string", "scalar-item", "missing-name"],
+)
+def test_malformed_full_scan_unpark_verification_preserves_approval_watch(
+    loop, label_payload
+):
+    database = loop.tmp_path / "malformed-unpark.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    store = QueueStore.open(database, busy_timeout_ms=100)
+    store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    parked_at = FROZEN - timedelta(hours=1)
+    original_watch = ApprovalWatch(
+        1, 102, "human_approval_since_park", parked_at
+    )
+    store.upsert_watch(original_watch)
+    settings = _events_config(database, busy_timeout_ms=100)
+
+    class MalformedUnparkGitHub(FakeGitHub):
+        def _python(self, argv):
+            if "unpark" in argv:
+                self.label_calls.append(tuple(argv[2:]))
+                return subprocess.CompletedProcess(
+                    argv, 1, stdout="", stderr="label removal failed"
+                )
+            return super()._python(argv)
+
+        def _gh(self, argv):
+            if (
+                argv[1:3] == ["issue", "view"]
+                and "--json" in argv
+                and argv[argv.index("--json") + 1] == "labels"
+            ):
+                return subprocess.CompletedProcess(
+                    argv, 0, stdout=json.dumps(label_payload), stderr=""
+                )
+            return super()._gh(argv)
+
+    gh = MalformedUnparkGitHub(
+        issues=[
+            issue(
+                102,
+                body="Vague.",
+                labels=["P1", agent_session_driver.PARK_LABEL],
+                comments=[
+                    comment(
+                        HUMAN_LOGIN,
+                        "Please continue.",
+                        created_at="2026-08-10T11:30:00Z",
+                    )
+                ],
+            )
+        ],
+        board_items=[board_item(102)],
+    )
+
+    code, _out = loop.run(
+        gh,
+        argv=["--events-config", str(settings), "--dry-run"],
+    )
+
+    assert code == 0
+    assert store.list_watches(1) == (original_watch,)
+
+
+def test_failed_full_issue_snapshot_retains_watches_and_last_success(loop):
+    database = loop.tmp_path / "failed-scan.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    store = QueueStore.open(database, busy_timeout_ms=100)
+    store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    previous_success = FROZEN - timedelta(hours=2)
+    assert store.acquire_scan_lease(
+        1,
+        worker_id="seed",
+        lease_until=previous_success + timedelta(minutes=1),
+        now=previous_success,
+    )
+    store.finish_scan(1, worker_id="seed", succeeded=True, now=previous_success)
+    store.upsert_watch(
+        ApprovalWatch(1, 102, "human_approval_since_park", previous_success)
+    )
+    settings = _events_config(database, busy_timeout_ms=100)
+
+    class FailedIssueSnapshotGitHub(FakeGitHub):
+        def _gh(self, argv):
+            if argv[1:3] == ["issue", "list"]:
+                return subprocess.CompletedProcess(
+                    argv,
+                    1,
+                    stdout="",
+                    stderr="HTTP 500: issue snapshot unavailable",
+                )
+            return super()._gh(argv)
+
+    gh = FailedIssueSnapshotGitHub()
+
+    code, out = loop.run(
+        gh,
+        argv=["--events-config", str(settings), "--dry-run"],
+    )
+
+    assert code == 0
+    assert out.count("== select ==") == 1
+    assert [watch.issue_number for watch in store.list_watches(1)] == [102]
+    repository = store.status(now=FROZEN).repositories[0]
+    assert repository.last_scan_success_at == previous_success
+    assert repository.scan_lease_owner is None
+    assert repository.scan_lease_until is None
+
+
+@pytest.mark.parametrize(
+    ("issue_count", "expected_complete"),
+    [(499, True), (500, False)],
+)
+def test_full_issue_snapshot_treats_the_cli_limit_as_ambiguous(
+    loop, issue_count, expected_complete
+):
+    database = loop.tmp_path / f"capped-scan-{issue_count}.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    store = QueueStore.open(database, busy_timeout_ms=100)
+    store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    previous_success = FROZEN - timedelta(hours=2)
+    assert store.acquire_scan_lease(
+        1,
+        worker_id="seed",
+        lease_until=previous_success + timedelta(minutes=1),
+        now=previous_success,
+    )
+    store.finish_scan(1, worker_id="seed", succeeded=True, now=previous_success)
+    stale_watch = ApprovalWatch(
+        1, 999_999, "human_approval_since_park", previous_success
+    )
+    store.upsert_watch(stale_watch)
+    settings = _events_config(database, busy_timeout_ms=100)
+    issues = [issue(number, labels=[]) for number in range(1, issue_count + 1)]
+    if not expected_complete:
+        issues[0] = issue(1, body=spec_body("auto-ok"), labels=["P1"])
+    gh = FakeGitHub(issues=issues)
+    agent = StubAgent(stream=agent_stream(final="Capped snapshot must not run."))
+
+    code, _out = loop.run(
+        gh,
+        agent=agent,
+        argv=["--events-config", str(settings)],
+        board=False,
+    )
+
+    assert code == 0
+    assert len(agent.calls) == 0
+    repository = store.status(now=FROZEN).repositories[0]
+    if expected_complete:
+        assert repository.last_scan_success_at == FROZEN
+        assert store.list_watches(1) == ()
+    else:
+        assert repository.last_scan_success_at == previous_success
+        assert store.list_watches(1) == (stale_watch,)
+        assert locks.CURRENT_LOCK_ISSUE is None
+    assert repository.scan_lease_owner is None
+    assert repository.scan_lease_until is None
+
+
+def test_loop_breaker_park_does_not_create_approval_watch(loop):
+    database = loop.tmp_path / "loop-breaker.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    store = QueueStore.open(database, busy_timeout_ms=100)
+    store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    settings = _events_config(database, busy_timeout_ms=100)
+    gh = FakeGitHub(
+        issues=[
+            issue(
+                103,
+                body=spec_body("auto-ok"),
+                labels=["P1", "agent-session:attempt-3"],
+            )
+        ],
+        board_items=[board_item(103)],
+    )
+
+    code, _out = loop.run(
+        gh,
+        argv=["--events-config", str(settings), "--dry-run"],
+    )
+
+    assert code == 0
+    assert store.list_watches(1) == ()
 
 
 def test_request_review_records_a_reviewer_request_and_spends_nothing(loop):

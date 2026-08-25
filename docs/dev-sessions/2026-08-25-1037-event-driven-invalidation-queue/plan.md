@@ -698,41 +698,61 @@ Approval-watch maintenance:
 
 **TDD and implementation steps:**
 
-- [ ] Add failing scan truth-table tests for never-scanned, hard maximum age with dirty work, immediately eligible dirty work, quiet-period suppression, normal interval, and overlapping scan leases.
-- [ ] Run uv run pytest -q tests/events/test_scan_policy.py and confirm failure.
-- [ ] Implement ScanPolicy, RepositoryScanState, and scan_decision. Re-run the truth table.
-- [ ] Add failing LiveTargetResolver tests for issue, PR closing references, revision-to-current-PR resolution, convergence of several target shapes on one issue, missing objects, and control-plane targets.
-- [ ] Add failing QueueSelection tests for irrelevant acknowledgement, housekeeping acknowledgement, transient retry/backoff, lock-contention release, bounded batch, priority ordering, at-most-one invocation, and non-selected release.
-- [ ] Run uv run pytest -q tests/events/test_driver.py and confirm failure.
-- [ ] Implement github.py and driver.py with no transaction spanning a resolver call.
-- [ ] Add a failing lifecycle test proving after_inflight sees a durable marker and is called before any backend/deterministic phase.
-- [ ] Add a failing regression proving main without events configuration performs the current full scan and makes no queue import/open call.
-- [ ] Add failing degraded-mode cases for absent database, locked database beyond busy timeout, corrupt database, and incompatible schema; assert each uses the legacy full scan.
-- [ ] Implement the minimal lifecycle wiring and approval-watch hooks. Re-run tests/events/test_driver.py and the named lifecycle regressions.
-- [ ] Add an integration test that posts a signed PR delivery through ASGI, claims it, resolves current GitHub fixture state, selects the existing phase, writes inflight, and conditionally acknowledges the claim.
-- [ ] Run make events-test.
-- [ ] Run make driver-test.
-- [ ] Run make lint.
-- [ ] Run make typecheck.
-- [ ] Run make check.
-- [ ] Commit only Phase 3 files with message: Phase 3: reconcile queue hints before full scans
+- [x] Add failing scan truth-table tests for never-scanned, hard maximum age with dirty work, immediately eligible dirty work, quiet-period suppression, normal interval, and overlapping scan leases.
+- [x] Run uv run pytest -q tests/events/test_scan_policy.py and confirm failure. Initial RED: collection failed because `agent_sessions.events.driver` did not exist.
+- [x] Implement ScanPolicy, RepositoryScanState, and scan_decision. Focused truth table: 6 passed.
+- [x] Add failing LiveTargetResolver tests for issue, PR closing references, revision-to-current-PR resolution, convergence of several target shapes on one issue, missing objects, and control-plane targets. Added current thread, reaction, and board-state cases as well.
+- [x] Add failing QueueSelection tests for irrelevant acknowledgement, housekeeping acknowledgement, transient retry/backoff, lock-contention release, bounded batch, priority ordering, at-most-one invocation, and non-selected release. A multi-closing-issue regression also caught and fixed release of the selected claim.
+- [x] Run uv run pytest -q tests/events/test_driver.py and confirm failure. Initial RED was the missing `QueueRuntime`; focused live-state RED later showed three expected failures, and the multi-closing-issue RED exposed the selected-lease bug.
+- [x] Implement github.py and driver.py with no transaction spanning a resolver call. The final focused events suite passed 16 driver tests plus 6 scan-policy tests.
+- [x] Add a failing lifecycle test proving after_inflight sees a durable marker and is called before any backend/deterministic phase. Initial focused lifecycle RED had 8 failures for the absent config/callback seams.
+- [x] Add a failing regression proving main without events configuration performs the current full scan and makes no queue import/open call.
+- [x] Add failing degraded-mode cases for absent database, locked database beyond busy timeout, corrupt database, and incompatible schema; assert each uses the legacy full scan.
+- [x] Implement the minimal lifecycle wiring and approval-watch hooks. The focused lifecycle/full-loop regression set passed, including callback-error fallback and watch repair.
+- [x] Add an integration test that posts a signed PR delivery through ASGI, claims it, resolves current GitHub fixture state, selects the existing phase, writes inflight, and conditionally acknowledges the claim. The test also proves a concurrent generation survives.
+- [x] Run make events-test. Final run exited 0.
+- [x] Run make driver-test. Final run exited 0 with the existing two skips.
+- [x] Run make lint. Final output: `All checks passed!`
+- [x] Run make typecheck. Final output: `Success: no issues found in 98 source files`.
+- [x] Run make check. Final run exited 0; the existing gate-test availability check remained explicitly skipped.
+- [x] Commit only Phase 3 files with message: Phase 3: reconcile queue hints before full scans
+
+### Review fix round 1
+
+- [x] Restrict permanent claim disposition to authoritative absence. HTTP 401/500, transport failures, a missing `gh` executable, malformed/incomplete pagination, and board-read failures now retry; confirmed object 404s remain acknowledgeable.
+- [x] Distinguish a complete full issue snapshot from legacy empty selection. An incomplete snapshot finishes the repository lease as failed, preserves the last-success clock and watches, and does not repair from partial data.
+- [x] Release any selected Git-ref lock before every queue-error fallback. Regressions cover post-lock non-selected release and scan-completion failures and observe one legacy fallback with no stranded ref.
+- [x] Move attempt advancement after successful selected-claim acknowledgement. An acknowledgement failure at attempt 2 falls back and invokes once at attempt 3 instead of triggering the loop breaker before a backend starts.
+- [x] Remove approval watches only after a fresh label read confirms unpark. Failed targeted and full-scan label removal retain the watch; verification failures remain outcome-isolated.
+- [x] Timestamp new watches from the persisted park transition after classification, not invocation start. The distinct-clock regression observes `12:10` for a run begun at `12:00`.
+- [x] Route explicit `--issue` and `--retry` through a leased full snapshot before dirty claims. Both work without a matching claim, and an unrelated dirty generation remains untouched.
+- [x] Paginate review threads, parked issue comments/reactions, open-PR discovery, and nested closing references. Multi-page regressions prove later unresolved threads, reactions, and PRs affect current routing inputs.
+- [x] Review-fix verification: focused events/scan and driver/full-loop suites passed; `make events-test`, `make driver-test`, `make lint`, `make typecheck`, `make check`, and `git diff --check` exited 0. `make check`: 743 passed, 2 skipped.
+
+### Review fix round 2
+
+- [x] Treat a successful 500-row issue-list response as ambiguous rather than complete. The 499-row boundary advances the scan clock and repairs stale watches; the 500-row boundary finishes failed, preserves prior success/watch state, starts no agent, and releases the candidate Git lock.
+- [x] Require a well-formed authoritative labels list before confirming unpark. Missing/null/mapping/string labels and malformed list entries preserve approval watches in targeted and full-scan paths; failures remain isolated from routing outcomes.
+- [x] Replace direct `gh pr view` closing associations with the complete GraphQL closing-reference connection. Direct PR and revision claims include later-page issues; missing pageInfo and page-fetch failure retry without acknowledgement.
+- [x] Round-two TDD: scan-cap RED was 1 pass/1 failure and GREEN was 4 passes with adjacent scan cases; each malformed-label table produced 5 failures/1 existing pass and then targeted/full GREEN totals of 8 and 7; direct-PR pagination produced 4 failures then 4 passes.
+- [x] Round-two verification: focused events/scan and driver/full-loop suites exited 0; `make events-test`, `make driver-test`, `make lint`, `make typecheck`, `make check`, and `git diff --check` exited 0. `make check`: 751 passed, 2 skipped.
 
 **Verification — automated:**
 
-- [ ] A driver without events configuration follows the legacy full-scan call path.
-- [ ] An unavailable/incompatible configured database logs degraded mode and follows the same legacy path.
-- [ ] PR and revision targets resolve current closing issues rather than trusting payload associations.
-- [ ] At most one agent session starts, and selected acknowledgement occurs after inflight durability.
-- [ ] A concurrent generation survives selected-target acknowledgement.
-- [ ] Full scans obey hard deadline, quiet period, interval, and repository scan lease rules.
-- [ ] Existing make driver-test routing and recovery behavior passes.
-- [ ] make lint, make typecheck, and make check pass.
+- [x] A driver without events configuration follows the legacy full-scan call path. The regression counts one call and makes queue loading fail the test if reached.
+- [x] An unavailable/incompatible configured database logs degraded mode and follows the same legacy path. Absent, locked, corrupt, and ahead-schema databases each emit exactly one degraded event.
+- [x] PR and revision targets resolve current closing issues rather than trusting payload associations.
+- [x] At most one agent session starts, and selected acknowledgement occurs after inflight durability. Direct execute/request-review ordering and main-loop callback-error fallback are covered.
+- [x] A concurrent generation survives selected-target acknowledgement. The signed ASGI integration leaves generation 2 dirty and unleased.
+- [x] Full scans obey hard deadline, quiet period, interval, and repository scan lease rules.
+- [x] Existing make driver-test routing and recovery behavior passes.
+- [x] make lint, make typecheck, and make check pass.
 
 **Verification — manual:**
 
-- [ ] Review the lifecycle diff for changes outside the optional selection wrapper, inflight callback, and approval-watch hooks.
-- [ ] Confirm every router/reconciler decision is fed freshly fetched GitHub state.
-- [ ] Confirm the existing Git-ref lock remains the last exclusion check before a candidate is returned.
+- [x] Review the lifecycle diff for changes outside the optional selection wrapper, inflight callback, and approval-watch hooks. No adjacent legacy selection logic was refactored.
+- [x] Confirm every router/reconciler decision is fed freshly fetched GitHub state. Issue/PR associations, labels, comments/reactions, board state, threads, CI, reviews, and merge state all come from targeted reads; queue payloads contribute identity only.
+- [x] Confirm the existing Git-ref lock remains the last exclusion check before a candidate is returned.
 
 ---
 

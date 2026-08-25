@@ -36,6 +36,7 @@ class ClaimedTarget:
     target_key: str
     generation: int
     lease_owner: str
+    retry_count: int = 0
 
 
 @dataclass(frozen=True)

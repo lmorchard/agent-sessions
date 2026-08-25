@@ -187,8 +187,8 @@ class QueueStore:
 
     def claim_targets(self, repository_id: int, *, worker_id: str, limit: int, lease_until: datetime, now: datetime) -> tuple[ClaimedTarget, ...]:
         with self._transaction() as db:
-            rows = db.execute("SELECT repository_id,target_kind,target_key,generation FROM dirty_targets WHERE repository_id=? AND (lease_until IS NULL OR lease_until<=?) AND (next_attempt_at IS NULL OR next_attempt_at<=?) ORDER BY first_seen_at LIMIT ?", (repository_id, _stamp(now), _stamp(now), limit)).fetchall()
-            claims = tuple(ClaimedTarget(row["repository_id"], row["target_kind"], row["target_key"], row["generation"], worker_id) for row in rows)
+            rows = db.execute("SELECT repository_id,target_kind,target_key,generation,retry_count FROM dirty_targets WHERE repository_id=? AND (lease_until IS NULL OR lease_until<=?) AND (next_attempt_at IS NULL OR next_attempt_at<=?) ORDER BY first_seen_at LIMIT ?", (repository_id, _stamp(now), _stamp(now), limit)).fetchall()
+            claims = tuple(ClaimedTarget(row["repository_id"], row["target_kind"], row["target_key"], row["generation"], worker_id, row["retry_count"]) for row in rows)
             db.executemany("UPDATE dirty_targets SET lease_owner=?,lease_until=? WHERE repository_id=? AND target_kind=? AND target_key=? AND generation=?", [(worker_id, _stamp(lease_until), claim.repository_id, claim.target_kind, claim.target_key, claim.generation) for claim in claims])
             return claims
 
