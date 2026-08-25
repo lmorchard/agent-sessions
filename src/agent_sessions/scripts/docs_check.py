@@ -169,13 +169,46 @@ def check_tables() -> None:
 
 # --- check 3: derivable counts ---------------------------------------------
 
+#: The suite `make gate-test` runs, spelled as globs for issue #50's reason: a
+#: hand-maintained file census drifts the moment someone adds a test. These must stay
+#: equal to the recipe's own arguments, and `tests/scripts/test_docs_check.py` derives
+#: them from `make -n gate-test` rather than restating them -- because that equality is
+#: exactly what broke. #257/#258 moved the detector suites to `tests/scripts/`, the
+#: recipe followed, and this probe's second argument did not.
+GATE_TEST_GLOBS = ("tests/driver/test_*.py", "tests/scripts/test_*.py")
+
+
+def gate_test_files() -> list[str]:
+    """The globs above, expanded to real repo-relative paths.
+
+    Expanded here rather than passed through, because nothing downstream will do it:
+    `subprocess.run` with an argument *list* never invokes a shell, and pytest treats
+    a surviving `*` as a literal filename and exits 4. That is the second half of the
+    skip issue #249 is about -- the first half was the dead `scripts/` path -- and
+    either one alone leaves the check permanently skipping.
+    """
+    return sorted(str(p.relative_to(ROOT)) for g in GATE_TEST_GLOBS for p in ROOT.glob(g))
+
+
 def live_bash_assertions() -> int | None:
+    paths = gate_test_files()
+    if not paths:
+        return None
     try:
         env = dict(os.environ)
         env["AGENT_SESSIONS_GATE_TEST_WIRING_INNER_RUN"] = "1"
-        r = subprocess.run(["uv", "run", "pytest", "--collect-only", "-q", "tests/driver/test_*.py", "scripts/test_*.py"],
-                           capture_output=True, text=True, cwd=ROOT, timeout=10, env=env)
-        if r.returncode not in (0, 5):
+        # Not `not in (0, 5)`. Exit 5 is "collected nothing", which reaches the same
+        # `return None` two lines down anyway once the count regex finds no `file: N`
+        # lines -- so the allowance only made an empty argv skip as quietly as a broken
+        # one. The empty case is now caught above, by its own name.
+        #
+        # The timeout is generous on purpose. This runs in parallel with `make
+        # gate-test` under `make check`, and a probe that times out under load returns
+        # `None`, which is the silent skip this whole check exists to avoid. It is here
+        # to catch a hang, not to police a slow machine.
+        r = subprocess.run(["uv", "run", "pytest", "--collect-only", "-q", *paths],
+                           capture_output=True, text=True, cwd=ROOT, timeout=120, env=env)
+        if r.returncode != 0:
             return None
         counts = re.findall(r":\s*(\d+)$", r.stdout, re.MULTILINE)
         if counts:
