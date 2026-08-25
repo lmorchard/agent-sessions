@@ -211,6 +211,17 @@ table's own column and not in a sentence above it.)*
     wording; it is that the skip is now a *test failure* in `tests/scripts/test_docs_check.py`, so
     the thing that reads it is `make check` rather than a person.
 
+    **The obvious fix would have reintroduced it intermittently, and instance 9 is what said
+    so.** Expanding the globs with `Path.glob` picks up the transient
+    `test_zz_gate_wiring_probe_*.py` that the wiring suite's C2 writes into
+    `tests/scripts/` and then deletes — and `make check` runs `gate-test` and `docs-check` in
+    parallel, so the filename handed to pytest can vanish between the two. Reproduced by
+    creating such a file and watching `Path.glob` return it. The wiring suite already filters
+    that literal in two places; a third copy is the name-list shape instance 9 was resolved by
+    abandoning. So the probe asks `git ls-files` instead: *tracked* is what "part of the
+    committed suite" means, it excludes a future transient without being told its name, and it
+    makes the count describe the committed suite rather than the reader's scratch files.
+
 **Instance 9 is the one to sit with.** The eight before it are checks that reported a wrong *value*; this
 is a detector reporting a correct value about an empty set. It was found by an unattended run
 establishing a baseline, which described its own green result as *"my green baseline for that target

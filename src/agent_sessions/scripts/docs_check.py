@@ -179,15 +179,52 @@ GATE_TEST_GLOBS = ("tests/driver/test_*.py", "tests/scripts/test_*.py")
 
 
 def gate_test_files() -> list[str]:
-    """The globs above, expanded to real repo-relative paths.
+    """The globs above, expanded to the **tracked** files they match.
 
     Expanded here rather than passed through, because nothing downstream will do it:
     `subprocess.run` with an argument *list* never invokes a shell, and pytest treats
     a surviving `*` as a literal filename and exits 4. That is the second half of the
     skip issue #249 is about -- the first half was the dead `scripts/` path -- and
     either one alone leaves the check permanently skipping.
+
+    **Expanded by `git ls-files` rather than `Path.glob`, and that is the load-bearing
+    part.** `tests/scripts/test_gate_test_wiring.py`'s C2 writes a real, temporary
+    `test_zz_gate_wiring_probe_*.py` into `tests/scripts/` and deletes it again, and
+    `make check` runs `gate-test` and `docs-check` **in parallel**. A `Path.glob` here
+    picks that file up, C2 removes it, and the filename this probe then hands to pytest
+    no longer exists -- exit 4, `None`, and issue #249's skip is back intermittently on
+    a green-looking gate. Verified by creating such a file and watching `Path.glob`
+    return it.
+
+    Asking git rather than the filesystem is a marker, not a name list. `findings.md`
+    defect class 2 instance 9 is the same shape resolved the same way: the wiring suite
+    already filters the string `test_zz_gate_wiring_probe` in two places, and a third
+    copy of that literal is one more place for it to stop matching. *Tracked by git* is
+    what "part of the committed suite" actually means, and it excludes any future
+    transient without being told about it.
+
+    It also makes the number mean something. This count is the referent for a
+    documentation claim, so it should describe the committed suite -- not the suite plus
+    whatever scratch file the reader happens to have uncommitted.
+
+    Note the deliberate divergence from the recipe: `make gate-test` shell-globs and so
+    *does* collect the probe, which is precisely what C2 needs. The two agree on the
+    globs, which is what `test_the_probe_globs_match_the_gate_test_recipe` grades; they
+    differ on whether an untracked file counts, which only this caller cares about.
+
+    Returns `[]` when git cannot answer -- deleted-but-staged paths are filtered by the
+    `is_file()` check, and a non-repo or missing git yields the same empty list as no
+    matches. Both reach `live_bash_assertions()`'s explicit empty case and surface as a
+    skip, which is the honest answer: this probe cannot measure a suite it cannot find.
     """
-    return sorted(str(p.relative_to(ROOT)) for g in GATE_TEST_GLOBS for p in ROOT.glob(g))
+    try:
+        r = subprocess.run(["git", "ls-files", "-z", "--", *GATE_TEST_GLOBS],
+                           capture_output=True, text=True, cwd=ROOT, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if r.returncode != 0:
+        return []
+    return sorted(p for p in r.stdout.split("\0") if p and (ROOT / p).is_file())
 
 
 def live_bash_assertions() -> int | None:
