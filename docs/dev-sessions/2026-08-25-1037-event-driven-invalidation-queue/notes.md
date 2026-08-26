@@ -241,6 +241,9 @@
   and only the same two sandbox set-group-ID failures. Excluding only those two environment cases,
   all remaining 301 event tests passed. Ruff passed, mypy found no issues in 104 source files, and
   `git diff --check` passed.
-- The planned commit subject is `Review: finish credential and shutdown boundaries`. No plan
-  checkbox, deployment, service-manager action, Caddy reload, GitHub mutation, push, merge, or
-  owner-review reply changed in this round. Final whole-branch re-review remains pending.
+- The fix is commit `7352a2e` (`Review: finish credential and shutdown boundaries`). On that head,
+  the controller's event, driver, documentation, lint, and typecheck matrix exited 0. The driver
+  suite passed 776 tests with 2 documented skips; docs-check, Ruff, and mypy were green.
+- A fresh scoped re-review approved both the App-alias stripping and page-by-page GraphQL
+  pagination with no new findings. Owner-review replies, push, deployment, service-manager actions,
+  Caddy reload, GitHub mutation, merge, and infrastructure changes remain unperformed.
