@@ -953,10 +953,10 @@ doctor does not probe by writing a label or project item. Capability it cannot p
 
 **Verification — manual:**
 
-- [ ] Review docs/events.md as a cold operator and verify every command names prerequisites and expected outcome.
-- [ ] Review examples for placeholders that cannot accidentally point at a real service or repository.
-- [ ] Confirm no deployment, GitHub App mutation, Caddy reload, systemctl action, or infrastructure write was performed.
-- [ ] Confirm dependency, shipping src, lifecycle, and credential changes remain needs-review regardless of test results.
+- [x] Review docs/events.md as a cold operator and verify every command names prerequisites and expected outcome.
+- [x] Review examples for placeholders that cannot accidentally point at a real service or repository.
+- [x] Confirm no deployment, GitHub App mutation, Caddy reload, systemctl action, or infrastructure write was performed.
+- [x] Confirm dependency, shipping src, lifecycle, and credential changes remain needs-review regardless of test results.
 
 ### Review fix round 1
 
@@ -1088,33 +1088,33 @@ The CLI omits the Projects task when `config.boards` is empty. The reaction task
 
 **TDD and implementation steps:**
 
-- [ ] Add failing configuration tests proving `[polling]` is required, both interval keys are required positive integers, and unknown polling keys fail closed.
-- [ ] Run `uv run pytest -q tests/events/test_config.py` and confirm the new cases fail because `PollingPolicy` and `[polling]` parsing do not exist.
-- [ ] Add `PollingPolicy`, parse the strict table, and update existing configuration fixtures with explicit 60-second values.
-- [ ] Run `uv run pytest -q tests/events/test_config.py` and confirm the configuration suite passes.
-- [ ] Add failing daemon tests proving both loops run immediately, wait their own fixed interval after completion, never overlap themselves, open and close a distinct real `QueueStore` per pass, continue after a `PollRunResult` with errors, report an escaped exception through `ready()`, omit Projects when no boards exist, and finish an in-flight bounded pass during lifespan shutdown.
-- [ ] Run `uv run pytest -q tests/events/test_daemon.py tests/events/test_webhook.py` and confirm failures identify the missing runtime and readiness integration.
-- [ ] Implement `QueueStore.close`, `ScheduledPoll`, `DaemonRuntime`, and the optional webhook runtime protocol. Keep every GitHub call outside the webhook request task and every poll pass outside the receiver's SQLite connection.
-- [ ] Add the 60-second subprocess timeout and its focused timeout-to-transient-error regression.
-- [ ] Run `uv run pytest -q tests/events/test_daemon.py tests/events/test_webhook.py` and confirm the runtime and receiver cases pass.
-- [ ] Add failing credential/CLI/doctor tests proving `serve`, both one-shot pollers, repository probes, and Project probes use one resolved read token; prove guarded environments fail if event code inspects `DRIVER_GH_WRITE_TOKEN`, `DRIVER_GH_BOARD_TOKEN`, or any App private-key variable.
-- [ ] Run `uv run pytest -q tests/driver/test_credentials.py tests/events/test_poll_projects.py tests/events/test_poll_reactions.py tests/events/test_operations.py` and confirm the new assertions fail on the board resolver and direct App-mint path.
-- [ ] Narrow `resolve_read_credential`, wire the shared token through `serve` and both one-shot commands, and replace doctor's board resolver with the already-resolved read token. Preserve `resolve()` and `board_env()` for driver writes.
-- [ ] Run the focused credential, CLI, doctor, daemon, and webhook suites and confirm they pass.
-- [ ] Run `make events-test`, `make driver-test`, `make lint`, and `make typecheck`.
-- [ ] Commit the named Task 6 files with message `Review: combine event polling with webhook service`.
+- [x] Add failing configuration tests proving `[polling]` is required, both interval keys are required positive integers, and unknown polling keys fail closed.
+- [x] Run `uv run pytest -q tests/events/test_config.py` and confirm the new cases fail because `PollingPolicy` and `[polling]` parsing do not exist.
+- [x] Add `PollingPolicy`, parse the strict table, and update existing configuration fixtures with explicit 60-second values.
+- [x] Run `uv run pytest -q tests/events/test_config.py` and confirm the configuration suite passes.
+- [x] Add failing daemon tests proving both loops run immediately, wait their own fixed interval after completion, never overlap themselves, open and close a distinct real `QueueStore` per pass, continue after a `PollRunResult` with errors, report an escaped exception through `ready()`, omit Projects when no boards exist, and finish an in-flight bounded pass during lifespan shutdown.
+- [x] Run `uv run pytest -q tests/events/test_daemon.py tests/events/test_webhook.py` and confirm failures identify the missing runtime and readiness integration.
+- [x] Implement `QueueStore.close`, `ScheduledPoll`, `DaemonRuntime`, and the optional webhook runtime protocol. Keep every GitHub call outside the webhook request task and every poll pass outside the receiver's SQLite connection.
+- [x] Add the 60-second subprocess timeout and its focused timeout-to-transient-error regression.
+- [x] Run `uv run pytest -q tests/events/test_daemon.py tests/events/test_webhook.py` and confirm the runtime and receiver cases pass.
+- [x] Add failing credential/CLI/doctor tests proving `serve`, both one-shot pollers, repository probes, and Project probes use one resolved read token; prove guarded environments fail if event code inspects `DRIVER_GH_WRITE_TOKEN`, `DRIVER_GH_BOARD_TOKEN`, or any App private-key variable.
+- [x] Run `uv run pytest -q tests/driver/test_credentials.py tests/events/test_poll_projects.py tests/events/test_poll_reactions.py tests/events/test_operations.py` and confirm the new assertions fail on the board resolver and direct App-mint path.
+- [x] Narrow `resolve_read_credential`, wire the shared token through `serve` and both one-shot commands, and replace doctor's board resolver with the already-resolved read token. Preserve `resolve()` and `board_env()` for driver writes.
+- [x] Run the focused credential, CLI, doctor, daemon, and webhook suites and confirm they pass.
+- [x] Run `make events-test`, `make driver-test`, `make lint`, and `make typecheck`.
+- [x] Commit the named Task 6 files with message `Review: combine event polling with webhook service`.
 
 **Verification — automated:**
 
-- [ ] `uv run pytest -q tests/events/test_daemon.py tests/events/test_webhook.py` passes.
-- [ ] `uv run pytest -q tests/driver/test_credentials.py tests/events/test_poll_projects.py tests/events/test_poll_reactions.py tests/events/test_operations.py` passes.
-- [ ] `make events-test`, `make driver-test`, `make lint`, and `make typecheck` pass.
+- [x] `uv run pytest -q tests/events/test_daemon.py tests/events/test_webhook.py` passes.
+- [x] `uv run pytest -q tests/driver/test_credentials.py tests/events/test_poll_projects.py tests/events/test_poll_reactions.py tests/events/test_operations.py` passes.
+- [x] `make events-test`, `make driver-test`, `make lint`, and `make typecheck` pass.
 
 **Verification — manual:**
 
-- [ ] Confirm the event daemon receives no repository-write or Project-write credential.
-- [ ] Confirm no background GitHub work runs in the webhook handler or shares its SQLite connection.
-- [ ] Confirm normal poll failures remain visible in `queue-status` without making webhook ingress unready.
+- [x] Confirm the event daemon receives no repository-write or Project-write credential.
+- [x] Confirm no background GitHub work runs in the webhook handler or shares its SQLite connection.
+- [x] Confirm normal poll failures remain visible in `queue-status` without making webhook ingress unready.
 
 ## Task 7: Explicit GraphQL operations and review clarity fixes
 
@@ -1157,30 +1157,30 @@ The transaction context uses `_rollback_quietly()` and one outer exception bound
 
 **TDD and implementation steps:**
 
-- [ ] Add failing tests requiring every event query to carry the exact named operation and requiring the strong fake to reject an unknown or anonymous event operation instead of matching a field substring.
-- [ ] Run the focused event-driver integration tests and confirm the anonymous query documents fail.
-- [ ] Add `GraphQLOperation`, `GraphQLQuery`, named documents, and exact enum dispatch in `loop_harness.py`. Retain pre-existing historical driver-query handling outside this PR's event operations.
-- [ ] Run the focused GraphQL resolver and full-loop tests and confirm they pass.
-- [ ] Add or tighten transaction tests so begin failure, statement failure, application exception, commit failure, and rollback failure each assert the original exception or translated queue exception.
-- [ ] Run `uv run pytest -q tests/events/test_store.py` before refactoring and record the current behavior as the green characterization baseline.
-- [ ] Replace the nested transaction exception blocks with `_rollback_quietly()` and one guarded path; this is a behavior-preserving refactor, so no artificial red test is required.
-- [ ] Run `uv run pytest -q tests/events/test_store.py` and confirm every characterization remains green.
-- [ ] Replace “legacy mode” with “full-scan mode” in the lifecycle docstring and affected test diagnostic.
-- [ ] Run the focused GraphQL, store, and full-scan tests.
-- [ ] Run `make events-test`, `make driver-test`, `make lint`, and `make typecheck`.
-- [ ] Commit the named Task 7 files with message `Review: make event operations explicit`.
+- [x] Add failing tests requiring every event query to carry the exact named operation and requiring the strong fake to reject an unknown or anonymous event operation instead of matching a field substring.
+- [x] Run the focused event-driver integration tests and confirm the anonymous query documents fail.
+- [x] Add `GraphQLOperation`, `GraphQLQuery`, named documents, and exact enum dispatch in `loop_harness.py`. Retain pre-existing historical driver-query handling outside this PR's event operations.
+- [x] Run the focused GraphQL resolver and full-loop tests and confirm they pass.
+- [x] Add or tighten transaction tests so begin failure, statement failure, application exception, commit failure, and rollback failure each assert the original exception or translated queue exception.
+- [x] Run `uv run pytest -q tests/events/test_store.py` before refactoring and record the current behavior as the green characterization baseline.
+- [x] Replace the nested transaction exception blocks with `_rollback_quietly()` and one guarded path; this is a behavior-preserving refactor, so no artificial red test is required.
+- [x] Run `uv run pytest -q tests/events/test_store.py` and confirm every characterization remains green.
+- [x] Replace “legacy mode” with “full-scan mode” in the lifecycle docstring and affected test diagnostic.
+- [x] Run the focused GraphQL, store, and full-scan tests.
+- [x] Run `make events-test`, `make driver-test`, `make lint`, and `make typecheck`.
+- [x] Commit the named Task 7 files with message `Review: make event operations explicit`.
 
 **Verification — automated:**
 
-- [ ] No event query dispatch in `tests/driver/loop_harness.py` searches for connection-field substrings.
-- [ ] Transaction exception translation and rollback tests pass.
-- [ ] `make events-test`, `make driver-test`, `make lint`, and `make typecheck` pass.
+- [x] No event query dispatch in `tests/driver/loop_harness.py` searches for connection-field substrings.
+- [x] Transaction exception translation and rollback tests pass.
+- [x] `make events-test`, `make driver-test`, `make lint`, and `make typecheck` pass.
 
 **Verification — manual:**
 
-- [ ] Confirm the typed operation list covers only GraphQL documents introduced by this issue.
-- [ ] Confirm the transaction refactor does not convert `sqlite3.IntegrityError` into `QueueUnavailable`.
-- [ ] Confirm “full-scan mode” describes a supported configuration rather than a deprecated compatibility path.
+- [x] Confirm the typed operation list covers only GraphQL documents introduced by this issue.
+- [x] Confirm the transaction refactor does not convert `sqlite3.IntegrityError` into `QueueUnavailable`.
+- [x] Confirm “full-scan mode” describes a supported configuration rather than a deprecated compatibility path.
 
 ## Task 8: Two-service examples and general operator documentation
 
@@ -1219,37 +1219,37 @@ The driver unit joins the same readers and database groups, loads `/etc/agent-se
 
 **TDD and implementation steps:**
 
-- [ ] Replace the example tests with failing structural assertions for exactly one event service, no event poller timers, one event identity, a shared readers group/file, private webhook and write files, one-worker Uvicorn startup, webhook-only Caddy routing, and the driver's separate one-shot timer boundary.
-- [ ] Run `uv run pytest -q tests/events/test_examples.py` and confirm failures name the obsolete files and credential layout.
-- [ ] Add the combined service, update the driver/configuration/permission examples, and delete the five obsolete event unit files.
-- [ ] Run `uv run pytest -q tests/events/test_examples.py` and confirm the parsed artifacts pass.
-- [ ] Rewrite `docs/events.md` around the two-service data flow and ordered setup sequence. Remove personal names, separate-poller deployment paths, direct App minting for the daemon, and claims that read credentials must remain isolated from each other.
-- [ ] Update `docs/usage.md` and `README.md` only where the old topology or credential purpose is stated.
-- [ ] Run the Simple English skill from `~/.claude/skills/simple-english` over the rewritten `docs/events.md`; apply its procedural rules without changing code, commands, identifiers, paths, or output samples.
-- [ ] Run the Simple English self-check and record its result in `notes.md`.
-- [ ] Run `make events-test`, `make driver-test`, `make docs-check`, `make lint`, `make typecheck`, and `make check`.
-- [ ] Inspect `git diff --check` and the complete `origin/main...HEAD` diff; confirm no deployment, GitHub App mutation, service-manager action, Caddy reload, merge, or infrastructure write occurred.
-- [ ] Commit the named Task 8 files with message `Review: simplify event service operations`.
+- [x] Add structural assertions for exactly one event service, no event poller timers, one event identity, a shared readers group/file, private webhook and write files, one-worker Uvicorn startup, webhook-only Caddy routing, and the driver's separate one-shot timer boundary.
+- [ ] Run `uv run pytest -q tests/events/test_examples.py` and confirm failures name the obsolete files and credential layout. Behavioral RED remains unproven: the command could not start because the sandbox denied access to the uv cache, which was not a test result.
+- [x] Add the combined service, update the driver/configuration/permission examples, and delete the five obsolete event unit files.
+- [x] Run `uv run pytest -q tests/events/test_examples.py` and confirm the parsed artifacts pass.
+- [x] Rewrite `docs/events.md` around the two-service data flow and ordered setup sequence. Remove personal names, separate-poller deployment paths, direct App minting for the daemon, and claims that read credentials must remain isolated from each other.
+- [x] Update `docs/usage.md` and `README.md` only where the old topology or credential purpose is stated.
+- [x] Run the Simple English skill from `~/.claude/skills/simple-english` over the rewritten `docs/events.md`; apply its procedural rules without changing code, commands, identifiers, paths, or output samples.
+- [x] Run the Simple English self-check and record its result in `notes.md`.
+- [x] Run `make events-test`, `make driver-test`, `make docs-check`, `make lint`, `make typecheck`, and `make check`.
+- [x] Inspect `git diff --check` and the complete `origin/main...HEAD` diff; confirm no deployment, GitHub App mutation, service-manager action, Caddy reload, merge, or infrastructure write occurred.
+- [x] Commit the named Task 8 files with message `Review: simplify event service operations`.
 
 **Verification — automated:**
 
-- [ ] `uv run pytest -q tests/events/test_examples.py` passes.
-- [ ] `make events-test`, `make driver-test`, `make docs-check`, `make lint`, `make typecheck`, and `make check` pass.
-- [ ] `git diff --check` passes.
+- [x] `uv run pytest -q tests/events/test_examples.py` passes.
+- [x] `make events-test`, `make driver-test`, `make docs-check`, `make lint`, `make typecheck`, and `make check` pass.
+- [x] `git diff --check` passes.
 
 **Verification — manual:**
 
-- [ ] Read `docs/events.md` cold and confirm the first page explains why two services remain.
-- [ ] Confirm every setup command states its prerequisite and expected outcome.
-- [ ] Confirm the examples contain placeholders only and cannot accidentally target a real repository or service.
-- [ ] Confirm no documentation names a specific operator as the required reviewer.
+- [x] Read `docs/events.md` cold and confirm the first page explains why two services remain.
+- [x] Confirm every setup command states its prerequisite and expected outcome.
+- [x] Confirm the examples contain placeholders only and cannot accidentally target a real repository or service.
+- [x] Confirm no documentation names a specific operator as the required reviewer.
 
 ## Review-revision acceptance and PR response
 
-- [ ] Re-run `make events-test` and record the fresh result in `notes.md`.
-- [ ] Re-run `make driver-test` and record the fresh result in `notes.md`.
-- [ ] Re-run `make check` and record the fresh result in `notes.md`.
-- [ ] Run `git diff --check` and inspect the full branch diff.
+- [x] Re-run `make events-test` and record the fresh result in `notes.md`.
+- [x] Re-run `make driver-test` and record the fresh result in `notes.md`.
+- [x] Re-run `make check` and record the fresh result in `notes.md`.
+- [x] Run `git diff --check` and inspect the full branch diff.
 - [ ] Reply to each owner-review thread with the specific code or documentation change and fresh verification evidence.
 - [ ] Push the reviewed commits to PR #275. Do not deploy or merge.
 

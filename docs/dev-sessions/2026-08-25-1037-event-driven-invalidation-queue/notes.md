@@ -187,3 +187,36 @@
 - The Simple English pass used pragmatic mode and the term `configuration`. The three longest prose sentences contain 20, 18, and 17 words.
 - The mechanical scan found no contractions, banned modals, perfect tenses, progressive clauses, semicolons, Latin abbreviations, or alternate validation verbs in prose.
 - No deployment, service-manager action, Caddy reload, GitHub mutation, push, merge, or review reply occurred.
+
+### Whole-branch fix and controller verification
+
+- The whole-branch investigation validated all nine Important findings. The fixes establish the
+  shared read credential as the system default with explicit mutation boundaries, resolve the PAT
+  owner for reaction filtering, and keep plain installation targets diagnostic-only. They also
+  strengthen runtime schema validation, preserve revision siblings through acknowledgement,
+  reject duplicate boards, bound shutdown between calls, and emit safe structured webhook logs.
+- The operator fixes require JSON webhook bodies, name all five retired preview units, and use
+  `full-scan mode` for the supported fallback. This plan reconciliation resolves the third Minor
+  finding without manufacturing evidence for the unproven Task 8 behavioral RED.
+- The credential changes are commit `b39ad26` (`Review: enforce event credential boundaries`). The
+  runtime changes are `07c93de` (`Review: close event runtime gaps`). The operations guidance is
+  `39c2ca3` (`Review: finish event operations guidance`).
+- Verification round 1 found ten direct driver regressions plus the nested gate's propagated
+  failure. Seven discussion-manager fakes rejected an unnecessary `env=None`; three workspace
+  integration lock fakes did not model the new read and write environments. Commit `23ccb2a`
+  (`Review: preserve credential boundary compatibility`) omits the keyword only when no explicit
+  environment exists and makes the integration doubles assert the credential split across lock
+  acquisition, attempt tracking, and release. The focused GREEN run passed 11 tests, and the full
+  driver suite passed 770 with 2 documented skips.
+- On head `23ccb2a`, the controller ran
+  `make events-test driver-test docs-check lint typecheck`; it exited 0. The driver suite passed 770
+  tests with 2 documented skips. Docs-check passed with its explicit nested `make gate-test`
+  assertion-count skip. Ruff passed, and mypy found no issues in 104 source files.
+- The controller also ran `make check`; it exited 0 with 770 passed, 2 documented skips, and
+  `all checks passed`.
+- The Task 8 behavioral RED command remains unchecked. Its sandbox-denied uv-cache attempt never
+  started pytest and therefore proves no behavior. Owner-review replies and the reviewed-commit
+  push also remain unchecked. No deployment, service-manager action, Caddy reload, GitHub mutation,
+  merge, or infrastructure write occurred during this fix pass.
+- These results support evidence reconciliation. They do not constitute the final whole-branch
+  re-review.
