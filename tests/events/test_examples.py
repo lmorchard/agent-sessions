@@ -18,7 +18,7 @@ class CasePreservingConfigParser(configparser.ConfigParser):
 
 
 def _unit(name: str) -> configparser.ConfigParser:
-    parser = CasePreservingConfigParser(interpolation=None)
+    parser = CasePreservingConfigParser(interpolation=None, strict=False)
     with (EXAMPLES / name).open(encoding="utf-8") as handle:
         parser.read_file(handle)
     return parser
@@ -26,6 +26,14 @@ def _unit(name: str) -> configparser.ConfigParser:
 
 def _exec_start(unit: configparser.ConfigParser) -> list[str]:
     return shlex.split(unit["Service"]["ExecStart"])
+
+
+def _environment_files(name: str) -> list[str]:
+    return [
+        line.partition("=")[2]
+        for line in (EXAMPLES / name).read_text(encoding="utf-8").splitlines()
+        if line.startswith("EnvironmentFile=")
+    ]
 
 
 @dataclass
@@ -68,6 +76,10 @@ def test_example_toml_is_strict_valid_and_contains_only_placeholders() -> None:
         (9_000_000_000_000_000_000, "EXAMPLE_OWNER", "EXAMPLE_REPOSITORY")
     ]
     assert loaded.boards[0].repository_ids == (9_000_000_000_000_000_000,)
+    assert raw["polling"] == {
+        "projects_interval_seconds": 60,
+        "reactions_interval_seconds": 60,
+    }
     assert not {
         key
         for key in raw
@@ -75,11 +87,18 @@ def test_example_toml_is_strict_valid_and_contains_only_placeholders() -> None:
     }
 
 
-def test_webhook_service_runs_the_loopback_receiver_with_one_worker() -> None:
-    unit = _unit("agent-session-events-webhook.service")
+def test_event_service_runs_the_loopback_receiver_and_pollers() -> None:
+    unit = _unit("agent-session-events.service")
     command = _exec_start(unit)
 
     assert unit["Service"]["Type"] == "simple"
+    assert (unit["Service"]["User"], unit["Service"]["Group"]) == (
+        "agent-session-events",
+        "agent-session-events",
+    )
+    assert unit["Service"]["SupplementaryGroups"] == (
+        "agent-session-events-db agent-session-readers"
+    )
     assert command == [
         "/usr/local/bin/agent-session-events",
         "serve",
@@ -87,81 +106,26 @@ def test_webhook_service_runs_the_loopback_receiver_with_one_worker() -> None:
         "/etc/agent-session-events/events.toml",
     ]
     assert "--workers" not in command
-    assert unit["Service"]["EnvironmentFile"] == "/etc/agent-session-events/webhook.env"
-
-
-def test_pollers_are_one_shot_and_timers_own_their_cadence() -> None:
-    projects = _unit("agent-session-projects.service")
-    reactions = _unit("agent-session-reactions@.service")
-    projects_timer = _unit("agent-session-projects.timer")
-    reactions_timer = _unit("agent-session-reactions@.timer")
-
-    assert projects["Service"]["Type"] == "oneshot"
-    assert reactions["Service"]["Type"] == "oneshot"
-    assert _exec_start(projects)[1:] == [
-        "poll-projects",
-        "--config",
-        "/etc/agent-session-events/events.toml",
+    assert _environment_files("agent-session-events.service") == [
+        "/etc/agent-session/read.env"
     ]
-    assert _exec_start(reactions)[1:] == [
-        "poll-reactions",
-        "--config",
-        "/etc/agent-session-events/events.toml",
-    ]
-    assert "Restart" not in projects["Service"]
-    assert "Restart" not in reactions["Service"]
-    assert projects_timer["Timer"]["Unit"] == "agent-session-projects.service"
-    assert reactions_timer["Timer"]["Unit"] == "agent-session-reactions@%i.service"
-    assert "OnCalendar" in projects_timer["Timer"]
-    assert "OnCalendar" in reactions_timer["Timer"]
+    assert unit["Service"]["Environment"] == (
+        "AGENT_SESSION_WEBHOOK_SECRET_FILE=/etc/agent-session-events/webhook.secret"
+    )
 
 
-def test_services_load_only_their_scoped_environment_file() -> None:
-    expected = {
-        "agent-session-events-webhook.service": "/etc/agent-session-events/webhook.env",
-        "agent-session-projects.service": "/etc/agent-session-events/projects.env",
-        "agent-session-reactions@.service": "/etc/agent-session-events/reactions-%i.env",
-        "agent-session-driver@.service": "/etc/agent-session-driver/%i.env",
+def test_examples_have_no_separate_poller_units_or_timers() -> None:
+    obsolete = {
+        "agent-session-events-webhook.service",
+        "agent-session-projects.service",
+        "agent-session-projects.timer",
+        "agent-session-reactions@.service",
+        "agent-session-reactions@.timer",
     }
-
-    for name, environment_file in expected.items():
-        service = _unit(name)["Service"]
-        assert service["EnvironmentFile"] == environment_file
-        assert all(key == "EnvironmentFile" for key in service if key.startswith("EnvironmentFile"))
+    assert not obsolete & {path.name for path in EXAMPLES.iterdir()}
 
 
-def test_services_use_distinct_identities_and_only_share_the_database_group() -> None:
-    identities = {
-        "agent-session-events-webhook.service": (
-            "agent-session-events-webhook",
-            "agent-session-events-webhook",
-        ),
-        "agent-session-projects.service": (
-            "agent-session-events-projects",
-            "agent-session-events-projects",
-        ),
-        "agent-session-reactions@.service": (
-            "agent-session-events-reactions",
-            "agent-session-events-reactions",
-        ),
-        "agent-session-driver@.service": (
-            "agent-session-driver",
-            "agent-session-driver",
-        ),
-    }
-
-    assert len({user for user, _ in identities.values()}) == len(identities)
-    for name, identity in identities.items():
-        service = _unit(name)["Service"]
-        assert (service["User"], service["Group"]) == identity
-        assert service["SupplementaryGroups"] == "agent-session-events-db"
-        assert service["UMask"] == "0007"
-        assert "/var/lib/agent-session-events" in shlex.split(
-            service["ReadWritePaths"]
-        )
-
-
-def test_permission_manifest_limits_the_shared_group_to_database_paths() -> None:
+def test_permission_manifest_defines_shared_read_and_private_write_boundaries() -> None:
     raw = tomllib.loads(
         (EXAMPLES / "permissions.toml").read_text(encoding="utf-8")
     )
@@ -181,15 +145,17 @@ def test_permission_manifest_limits_the_shared_group_to_database_paths() -> None
         "group": "agent-session-events-db",
         "mode": "0660",
     }
-    credential_owners = {
-        "webhook-environment": "agent-session-events-webhook",
-        "webhook-secret": "agent-session-events-webhook",
-        "projects-environment": "agent-session-events-projects",
-        "reactions-environment": "agent-session-events-reactions",
-        "reactions-app-key": "agent-session-events-reactions",
-        "driver-environment": "agent-session-driver",
+    assert entries["read-environment"] == {
+        "role": "read-environment",
+        "path": "/etc/agent-session/read.env",
+        "owner": "root",
+        "group": "agent-session-readers",
+        "mode": "0640",
     }
-    for role, owner in credential_owners.items():
+    for role, owner in {
+        "webhook-secret": "agent-session-events",
+        "driver-environment": "agent-session-driver",
+    }.items():
         item = entries[role]
         assert item["owner"] == owner
         assert item["group"] == owner
@@ -214,7 +180,13 @@ def test_driver_service_adds_events_config_to_existing_instance_configuration() 
         "--events-config",
         "/etc/agent-session-events/events.toml",
     ]
-    assert unit["Service"]["EnvironmentFile"] == "/etc/agent-session-driver/%i.env"
+    assert unit["Service"]["SupplementaryGroups"] == (
+        "agent-session-events-db agent-session-readers"
+    )
+    assert _environment_files("agent-session-driver@.service") == [
+        "/etc/agent-session/read.env",
+        "/etc/agent-session-driver/%i.env",
+    ]
     assert set(shlex.split(unit["Service"]["ReadWritePaths"])) == {
         "/var/lib/agent-session-events",
         "/srv/agent-session-repositories/%i",

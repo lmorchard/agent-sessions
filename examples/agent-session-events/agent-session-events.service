@@ -1,0 +1,22 @@
+[Unit]
+Description=Agent-session event daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent-session-events
+Group=agent-session-events
+SupplementaryGroups=agent-session-events-db agent-session-readers
+UMask=0007
+EnvironmentFile=/etc/agent-session/read.env
+Environment=AGENT_SESSION_WEBHOOK_SECRET_FILE=/etc/agent-session-events/webhook.secret
+ExecStart=/usr/local/bin/agent-session-events serve --config /etc/agent-session-events/events.toml
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/agent-session-events
+
+[Install]
+WantedBy=multi-user.target

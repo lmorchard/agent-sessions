@@ -177,11 +177,12 @@ make help        # what else there is
 `eligible-for-auto-merge`, which is a *finding it reports*, not an action it takes. A human
 still clicks merge. Every PR this system has produced was merged by hand.
 
-**The system runs under its own GitHub account, not yours.** Two tokens on a machine user: the
-agent gets a read-only one and cannot write to GitHub at all; it records the writes it wants —
-comments, labels, the branch push, the PR — and the driver validates that record and performs them
-with the write token. There is no entry in that vocabulary that merges, so "nothing merges by
-machine" is a property of what the agent can express rather than an instruction it is following.
+**The system runs under its own GitHub account, not yours.** The agent gets a read-only credential
+and cannot write to GitHub at all. In an event-queue deployment, the event daemon and repository
+drivers share that read credential. The driver alone holds mutation credentials. It records the
+writes it wants — comments, labels, the branch push, the PR — and the driver validates that record
+and performs them. There is no entry in that vocabulary that merges, so "nothing merges by machine"
+is a property of what the agent can express rather than an instruction it is following.
 
 There is no fallback to your `gh` login. Both tokens are checked against a live `gh api user`
 before anything is spent, and the driver refuses to start if either belongs to somebody else. See

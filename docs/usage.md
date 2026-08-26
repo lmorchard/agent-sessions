@@ -214,15 +214,17 @@ project board — `gh project create` applies no template, so a board made from 
 ### The driver's own GitHub account
 
 **The driver does not use your credentials, for reads or for writes.** It runs under a machine
-user you create for it, with two fine-grained PATs on that one account:
+user you create for it, with one system read credential and driver-only mutation credentials:
 
 | Variable | Where it lives | What it is |
 |---|---|---|
 | `DRIVER_GH_LOGIN` | `.env` | the account both tokens must belong to |
-| `AGENT_GH_READ_TOKEN` | `.env` | read-only PAT — Metadata, Contents, Issues, Pull requests, Actions, Checks |
+| `AGENT_GH_READ_TOKEN` | `.env`, or `/etc/agent-session/read.env` for the event-service topology | read-only credential — Metadata, Contents, Issues, Pull requests, Actions, Checks |
 | `DRIVER_GH_WRITE_TOKEN` | `.env` | write PAT — Contents, Issues, Pull requests |
 
-The agent gets the read token and cannot write to GitHub at all. It records the writes it wants —
+The agent gets the read token and cannot write to GitHub at all. In the event-service topology, the
+event daemon and all repository drivers read this same credential from `/etc/agent-session/read.env`.
+It records the writes it wants —
 comments, labels, the branch push, the PR — into `writes.jsonl` in the run directory, and the driver
 validates that file and performs them with the write token after the run ends.
 

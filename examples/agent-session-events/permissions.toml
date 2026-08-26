@@ -29,38 +29,17 @@ group = "agent-session-events-db"
 mode = "0660"
 
 [[paths]]
-role = "webhook-environment"
-path = "/etc/agent-session-events/webhook.env"
-owner = "agent-session-events-webhook"
-group = "agent-session-events-webhook"
-mode = "0600"
+role = "read-environment"
+path = "/etc/agent-session/read.env"
+owner = "root"
+group = "agent-session-readers"
+mode = "0640"
 
 [[paths]]
 role = "webhook-secret"
 path = "/etc/agent-session-events/webhook.secret"
-owner = "agent-session-events-webhook"
-group = "agent-session-events-webhook"
-mode = "0600"
-
-[[paths]]
-role = "projects-environment"
-path = "/etc/agent-session-events/projects.env"
-owner = "agent-session-events-projects"
-group = "agent-session-events-projects"
-mode = "0600"
-
-[[paths]]
-role = "reactions-environment"
-path = "/etc/agent-session-events/reactions-primary.env"
-owner = "agent-session-events-reactions"
-group = "agent-session-events-reactions"
-mode = "0600"
-
-[[paths]]
-role = "reactions-app-key"
-path = "/etc/agent-session-events/reactions-app-private-key.pem"
-owner = "agent-session-events-reactions"
-group = "agent-session-events-reactions"
+owner = "agent-session-events"
+group = "agent-session-events"
 mode = "0600"
 
 [[paths]]
