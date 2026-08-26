@@ -15,6 +15,13 @@ group = "root"
 mode = "0755"
 
 [[paths]]
+role = "read-environment-directory"
+path = "/etc/agent-session"
+owner = "root"
+group = "root"
+mode = "0755"
+
+[[paths]]
 role = "database-directory"
 path = "/var/lib/agent-session-events"
 owner = "agent-session-driver"

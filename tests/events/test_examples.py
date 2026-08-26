@@ -145,6 +145,13 @@ def test_permission_manifest_defines_shared_read_and_private_write_boundaries() 
         "group": "agent-session-events-db",
         "mode": "0660",
     }
+    assert entries["read-environment-directory"] == {
+        "role": "read-environment-directory",
+        "path": "/etc/agent-session",
+        "owner": "root",
+        "group": "root",
+        "mode": "0755",
+    }
     assert entries["read-environment"] == {
         "role": "read-environment",
         "path": "/etc/agent-session/read.env",

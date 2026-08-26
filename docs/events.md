@@ -24,8 +24,9 @@ repository-write and Project-mutation credentials. This boundary keeps GitHub re
 file while keeping mutations private to the driver.
 
 This guide describes deployment preparation and operation. It does not perform a deployment. The
-files in [`examples/agent-session-events/`](../examples/agent-session-events/) contain placeholders only. Review
-all service-manager, Caddy, GitHub, and infrastructure changes before you apply them.
+files in [`examples/agent-session-events/`](../examples/agent-session-events/) contain placeholders only.
+
+Before you apply changes, review the service-manager, Caddy, GitHub, and infrastructure changes.
 
 ## Components and setup
 
@@ -36,11 +37,15 @@ all service-manager, Caddy, GitHub, and infrastructure changes before you apply 
 | Caddy or another edge proxy | One long-lived proxy process. | It publishes only `POST /github/webhook`. |
 
 Drivers omit `--events-config` in legacy full-scan mode. Queue mode uses the shared event
-configuration and event daemon. Add an edge proxy for public GitHub webhooks.
+configuration and event daemon.
 
-All queue-aware components use one local SQLite database on one host. Do not put this database on
-network storage. If you omit webhooks, Projects boards, or reaction watches, the daemon continues
-with the remaining inputs. Changes from an omitted input wait for a full scan.
+For public GitHub webhooks, add an edge proxy.
+
+All queue-aware components use one local SQLite database on one host. If you omit webhooks, Projects
+boards, or reaction watches, the daemon continues with the remaining inputs. Changes from an omitted
+input wait for a full scan.
+
+Do not put the database on network storage.
 
 1. Install a build that contains `agent-session-driver` and `agent-session-events`.
 2. Create the event identity, driver identity, database group, and readers group.
@@ -97,19 +102,28 @@ AGENT_GH_READ_TOKEN=<read-only-token>
 AGENT_GH_READ_TOKEN_CMD=<command-that-prints-one-read-only-token>
 ```
 
+Use a long-lived, genuinely read-only PAT. The daemon runs `AGENT_GH_READ_TOKEN_CMD` only at
+startup. Use this command only to retrieve that PAT. Do not mint an expiring App token.
+
 Use one form, not both. A `*_CMD` value contains direct command arguments. Do not use pipes,
 redirection, or shell expansion. The command writes only the token to standard output.
 
+Make sure that the PAT can read every configured repository and Projects V2 board. For private
+repositories or boards, grant that access to the token owner.
+
 Set `/etc/agent-session-events/webhook.secret` to `agent-session-events:agent-session-events` with
 mode `0600`. The event service receives this path through
-`AGENT_SESSION_WEBHOOK_SECRET_FILE` in its unit. Set each
+`AGENT_SESSION_WEBHOOK_SECRET_FILE` in its unit.
+
+Set each
 `/etc/agent-session-driver/<repository-instance>.env` file to
 `agent-session-driver:agent-session-driver` with mode `0600`.
 
 The private driver file holds repository, workspace, runtime, and mutation values. It can include
 `DRIVER_GH_WRITE_TOKEN` or `DRIVER_GH_WRITE_TOKEN_CMD`, plus `DRIVER_GH_BOARD_TOKEN` or
-`DRIVER_GH_BOARD_TOKEN_CMD` for driver Project changes. Do not put
-`AGENT_GH_READ_TOKEN` or `AGENT_GH_READ_TOKEN_CMD` in this file.
+`DRIVER_GH_BOARD_TOKEN_CMD` for driver Project changes.
+
+Do not put `AGENT_GH_READ_TOKEN` or `AGENT_GH_READ_TOKEN_CMD` in this file.
 
 The `agent-session-events.service` unit loads `/etc/agent-session/read.env` and declares the
 webhook-secret path. The `agent-session-driver@.service` unit loads `/etc/agent-session/read.env`
@@ -147,8 +161,9 @@ agent-session-events migrate --config /etc/agent-session-events/events.toml
 Expected result: the command lists applied migration versions or reports `already current`. A
 nonzero exit keeps services stopped for diagnosis.
 
-Run the read-only diagnosis with the event identity and both required inputs. Then run it with the
-driver identity and its private instance input:
+Run the read-only diagnosis with the event identity and both required inputs.
+
+Then run the diagnosis with the driver identity and its private instance input:
 
 ```sh
 agent-session-events doctor --config /etc/agent-session-events/events.toml
@@ -166,8 +181,11 @@ agent-session-events queue-status --config /etc/agent-session-events/events.toml
 Expected result: the command prints backlog, leases, backoff, clocks, watches, schema, and recent
 errors. New clocks show `never` or `unknown`.
 
-Start the event daemon through the approved host procedure. Then start existing repository driver
-timers. The daemon owns polling cadence. Use the one-pass commands only for diagnosis:
+Start the event daemon through the approved host procedure.
+
+Then start existing repository driver timers. The daemon owns polling cadence.
+
+Use the one-pass commands only for diagnosis:
 
 ```sh
 agent-session-events poll-projects --config /etc/agent-session-events/events.toml
@@ -228,7 +246,7 @@ Before you copy, replace, or inspect database files, stop the event daemon and r
 | unavailable database | Make sure that the path, owners, modes, and local file system are correct. If the file is missing, restore the complete backup set. |
 | busy database | Find the process with a long transaction. Wait for it or stop it. Do not remove WAL files or lock artifacts. Run `doctor` again. |
 | incompatible schema | Keep services stopped. Back up the database set. Run `migrate` from the matching binary. Then run `doctor` again. Never change schema metadata by hand. |
-| corrupt database | Keep a database, WAL, and shared-memory copy for diagnosis. Restore a verified backup, or rebuild from GitHub with a reviewed procedure. |
+| corrupt database | Keep a database, WAL, and shared-memory copy for diagnosis. If a verified backup is available, restore it. If no verified backup is available, use a reviewed procedure to rebuild from GitHub. |
 
 `doctor` detects these states but does not repair them. Full scans remain authoritative after
 recovery. The driver removes a dirty row only after it processes and acknowledges that generation.

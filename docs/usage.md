@@ -228,6 +228,10 @@ It records the writes it wants —
 comments, labels, the branch push, the PR — into `writes.jsonl` in the run directory, and the driver
 validates that file and performs them with the write token after the run ends.
 
+The event daemon cannot use GitHub App authentication. It resolves `AGENT_GH_READ_TOKEN_CMD` only
+at startup. Use a long-lived, genuinely read-only PAT. Use the command form only to retrieve that
+PAT, not to mint an expiring App token. The App route described later remains a driver-only option.
+
 **All three are required and there is no fallback.** The driver refuses to start if any is missing,
 if the two tokens are identical, or if either token turns out to belong to somebody other than
 `DRIVER_GH_LOGIN` — checked against a live `gh api user`, once per token, before anything is spent.
