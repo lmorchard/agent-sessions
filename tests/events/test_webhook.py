@@ -315,9 +315,12 @@ async def test_signed_asgi_delivery_can_be_claimed_from_second_connection(tmp_pa
 
 
 def test_serve_uses_a_private_secret_file_and_accepts_config_after_subcommand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from contextlib import asynccontextmanager
+
     import uvicorn
 
-    from agent_sessions.events.cli import main
+    from agent_sessions.events import cli
+    from agent_sessions.events.pollers import PollRunResult
 
     database = tmp_path / "events.sqlite3"
     settings = tmp_path / "events.toml"
@@ -354,13 +357,57 @@ repository_ids = [1]
     monkeypatch.setenv("AGENT_SESSION_WEBHOOK_SECRET_FILE", str(secret))
     seen: dict[str, Any] = {}
     monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: seen.update(app=app, **kwargs))
-    monkeypatch.setattr("agent_sessions.events.cli.credentials.resolve_read_credential", lambda: "read-token")
+    resolved: list[str] = []
+    received_tokens: list[tuple[str, str]] = []
+
+    class CapturedRuntime:
+        instance: "CapturedRuntime | None" = None
+
+        def __init__(self, _store_factory, polls, _result_logger) -> None:
+            self.polls = polls
+            CapturedRuntime.instance = self
+
+        @asynccontextmanager
+        async def lifespan(self, _app):
+            yield
+
+        def ready(self) -> bool:
+            return True
+
+    def resolve_read_credential() -> str:
+        resolved.append("read-token")
+        return "read-token"
+
+    def projects(_config, _store, token, *, worker_id, now) -> PollRunResult:
+        received_tokens.append(("projects", token))
+        return PollRunResult()
+
+    def reactions(_config, _store, token, _bot_logins, *, worker_id, now) -> PollRunResult:
+        received_tokens.append(("reactions", token))
+        return PollRunResult()
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("serve inspected a board, write, or App credential resolver")
+
+    monkeypatch.setattr(cli, "DaemonRuntime", CapturedRuntime)
+    monkeypatch.setattr(cli.credentials, "resolve_read_credential", resolve_read_credential)
+    monkeypatch.setattr(cli.credentials, "resolve_board_credential", forbidden)
+    monkeypatch.setattr(cli.credentials, "resolve", forbidden)
+    monkeypatch.setattr(cli.credentials, "generate_app_jwt", forbidden)
+    monkeypatch.setattr(cli.credentials, "fetch_app_installation_token", forbidden)
+    monkeypatch.setattr(cli.pollers, "poll_projects_once", projects)
+    monkeypatch.setattr(cli.pollers, "poll_reactions_once", reactions)
     secret.chmod(0o644)
     with pytest.raises(SystemExit) as rejected:
-        main(["serve", "--config", str(settings)])
+        cli.main(["serve", "--config", str(settings)])
     assert rejected.value.code == 2
     secret.chmod(0o600)
-    assert main(["migrate", "--config", str(settings)]) == 0
-    assert main(["serve", "--config", str(settings)]) == 0
+    assert cli.main(["migrate", "--config", str(settings)]) == 0
+    assert cli.main(["serve", "--config", str(settings)]) == 0
     assert seen["host"] == "127.0.0.1" and seen["port"] == 8080
     assert seen["workers"] == 1
+    assert resolved == ["read-token"]
+    assert CapturedRuntime.instance is not None
+    for poll in CapturedRuntime.instance.polls:
+        poll.run(object(), NOW)
+    assert received_tokens == [("projects", "read-token"), ("reactions", "read-token")]

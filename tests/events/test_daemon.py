@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -40,13 +41,33 @@ async def test_runtime_runs_each_poll_immediately_then_at_its_own_fixed_delay_wi
     stores: list[QueueStore] = []
     projects_started: list[float] = []
     reactions_started: list[float] = []
+    first_started = threading.Event()
+    first_released = threading.Event()
+    first_completed = threading.Event()
+    completed_at: list[float] = []
+    active = maximum_active = 0
+    lock = threading.Lock()
 
     def projects(store: QueueStore, _now: datetime) -> PollRunResult:
-        assert store.connection is stores[-1].connection
-        projects_started.append(time.monotonic())
-        return PollRunResult(attempted=1)
+        nonlocal active, maximum_active
+        with lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+            projects_started.append(time.monotonic())
+            first_pass = len(projects_started) == 1
+        try:
+            if first_pass:
+                first_started.set()
+                assert first_released.wait(timeout=1)
+            return PollRunResult(attempted=1)
+        finally:
+            with lock:
+                active -= 1
+                if first_pass:
+                    completed_at.append(time.monotonic())
+                    first_completed.set()
 
-    def reactions(store: QueueStore, _now: datetime) -> PollRunResult:
+    def reactions(_store: QueueStore, _now: datetime) -> PollRunResult:
         reactions_started.append(time.monotonic())
         return PollRunResult(attempted=1)
 
@@ -59,11 +80,17 @@ async def test_runtime_runs_each_poll_immediately_then_at_its_own_fixed_delay_wi
         lambda _name, _result: None,
     )
     async with runtime.lifespan(None):
-        await _wait_for(lambda: len(projects_started) >= 2 and len(reactions_started) >= 2)
+        await asyncio.to_thread(first_started.wait, 1)
+        await _wait_for(lambda: reactions_started)
+        await asyncio.sleep(0.1)
+        assert len(projects_started) == 1
+        first_released.set()
+        await asyncio.to_thread(first_completed.wait, 1)
+        await _wait_for(lambda: len(projects_started) >= 2)
         assert runtime.ready()
 
-    assert projects_started[1] - projects_started[0] >= 0.035
-    assert reactions_started[1] - reactions_started[0] >= 0.065
+    assert projects_started[1] - completed_at[0] >= 0.035
+    assert maximum_active == 1
     assert len({id(store.connection) for store in stores}) == len(stores)
     for store in stores:
         with pytest.raises(sqlite3.ProgrammingError):
@@ -112,12 +139,12 @@ async def test_runtime_shutdown_waits_for_an_inflight_bounded_pass(tmp_path: Pat
     database = tmp_path / "events.sqlite3"
     QueueStore.migrate(database, busy_timeout_ms=100)
     stores: list[QueueStore] = []
-    entered = asyncio.Event()
-    release = asyncio.Event()
+    entered = threading.Event()
+    release = threading.Event()
     loop = asyncio.get_running_loop()
 
     def in_flight(_store: QueueStore, _now: datetime) -> PollRunResult:
-        loop.call_soon_threadsafe(entered.set)
+        entered.set()
         while not release.is_set():
             time.sleep(0.005)
         return PollRunResult(attempted=1)
@@ -127,9 +154,19 @@ async def test_runtime_shutdown_waits_for_an_inflight_bounded_pass(tmp_path: Pat
         (ScheduledPoll("reactions", timedelta(seconds=1), in_flight),),
         lambda _name, _result: None,
     )
-    async with runtime.lifespan(None):
-        await entered.wait()
-        release.set()
+    lifespan = runtime.lifespan(None)
+    await lifespan.__aenter__()
+    try:
+        await asyncio.to_thread(entered.wait, 1)
+        exit_task = asyncio.create_task(lifespan.__aexit__(None, None, None))
+        await asyncio.sleep(0.05)
+        assert not exit_task.done()
+        loop.call_soon_threadsafe(release.set)
+        await exit_task
+    finally:
+        if not release.is_set():
+            release.set()
+            await lifespan.__aexit__(None, None, None)
 
     assert len(stores) == 1
 

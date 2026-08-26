@@ -152,26 +152,33 @@ name = "repo"
 
 
 @pytest.mark.parametrize(
-    ("change", "message"),
+    ("case", "message"),
     [
-        ("", "missing configuration key: polling"),
-        ("projects_interval_seconds = 0", "projects_interval_seconds"),
-        ("reactions_interval_seconds = false", "reactions_interval_seconds"),
-        ("unknown = 1", "unknown polling key"),
+        ("table", "missing configuration key: polling"),
+        ("projects", "missing polling key: projects_interval_seconds"),
+        ("reactions", "missing polling key: reactions_interval_seconds"),
+        ("zero", "projects_interval_seconds"),
+        ("boolean", "reactions_interval_seconds"),
+        ("unknown", "unknown polling key"),
     ],
 )
 def test_requires_strict_positive_polling_configuration(
-    tmp_path: Path, change: str, message: str
+    tmp_path: Path, case: str, message: str
 ) -> None:
-    if not change:
+    if case == "table":
         text = VALID.replace(
             "\n[polling]\nprojects_interval_seconds = 60\nreactions_interval_seconds = 60\n",
             "\n",
         )
-    elif change.startswith("unknown"):
-        text = VALID.replace("reactions_interval_seconds = 60", "reactions_interval_seconds = 60\n" + change)
+    elif case == "projects":
+        text = VALID.replace("projects_interval_seconds = 60\n", "")
+    elif case == "reactions":
+        text = VALID.replace("reactions_interval_seconds = 60\n", "")
+    elif case == "unknown":
+        text = VALID.replace("reactions_interval_seconds = 60", "reactions_interval_seconds = 60\nunknown = 1")
     else:
-        key = change.split(" = ")[0]
-        text = VALID.replace(next(line for line in VALID.splitlines() if line.startswith(key)), change)
+        key = "projects" if case == "zero" else "reactions"
+        value = "0" if case == "zero" else "false"
+        text = VALID.replace(f"{key}_interval_seconds = 60", f"{key}_interval_seconds = {value}")
     with pytest.raises(ValueError, match=message):
         config.load(write_config(tmp_path / "events.toml", text))
