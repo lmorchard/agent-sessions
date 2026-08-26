@@ -15,6 +15,7 @@ from agent_sessions.events.models import (
     Invalidation,
     ProjectItemProjection,
     QueueBusy,
+    QueueUnavailable,
     RepositoryIdentity,
     VerifiedDelivery,
 )
@@ -167,6 +168,103 @@ def test_locked_database_translates_to_queue_busy_without_committing(tmp_path: P
 
     assert isinstance(raised.value.__cause__, sqlite3.OperationalError)
     assert store.connection.execute("SELECT count(*) FROM webhook_deliveries").fetchone()[0] == 0
+
+
+class TransactionConnection:
+    """A SQLite boundary double that injects failures at transaction edges."""
+
+    def __init__(self, failures: dict[str, Exception]) -> None:
+        self.failures = failures
+        self.calls: list[str] = []
+
+    def execute(self, statement: str, *_args: object) -> None:
+        self.calls.append(statement)
+        if (failure := self.failures.get(statement)) is not None:
+            raise failure
+
+    def commit(self) -> None:
+        self.execute("COMMIT")
+
+    def rollback(self) -> None:
+        self.execute("ROLLBACK")
+
+
+def test_transaction_translates_begin_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = migrated(tmp_path)
+    original = sqlite3.OperationalError("database is locked")
+    connection = TransactionConnection({"BEGIN IMMEDIATE": original})
+    monkeypatch.setattr(store, "connection", connection)
+
+    with pytest.raises(QueueBusy) as raised:
+        with store._transaction():
+            pass
+
+    assert raised.value.__cause__ is original
+    assert connection.calls == ["BEGIN IMMEDIATE"]
+
+
+def test_transaction_preserves_statement_integrity_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = migrated(tmp_path)
+    original = sqlite3.IntegrityError("constraint failed")
+    connection = TransactionConnection({"STATEMENT": original})
+    monkeypatch.setattr(store, "connection", connection)
+
+    with pytest.raises(sqlite3.IntegrityError) as raised:
+        with store._transaction() as database:
+            database.execute("STATEMENT")
+
+    assert raised.value is original
+    assert connection.calls == ["BEGIN IMMEDIATE", "STATEMENT", "ROLLBACK"]
+
+
+def test_transaction_preserves_application_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = migrated(tmp_path)
+    connection = TransactionConnection({})
+    monkeypatch.setattr(store, "connection", connection)
+    original = RuntimeError("application failed")
+
+    with pytest.raises(RuntimeError) as raised:
+        with store._transaction():
+            raise original
+
+    assert raised.value is original
+    assert connection.calls == ["BEGIN IMMEDIATE", "ROLLBACK"]
+
+
+def test_transaction_translates_commit_failure_after_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = migrated(tmp_path)
+    original = sqlite3.OperationalError("disk I/O error")
+    connection = TransactionConnection({"COMMIT": original})
+    monkeypatch.setattr(store, "connection", connection)
+
+    with pytest.raises(QueueUnavailable) as raised:
+        with store._transaction():
+            pass
+
+    assert raised.value.__cause__ is original
+    assert connection.calls == ["BEGIN IMMEDIATE", "COMMIT", "ROLLBACK"]
+
+
+def test_transaction_rollback_failure_does_not_mask_application_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = migrated(tmp_path)
+    connection = TransactionConnection({"ROLLBACK": sqlite3.OperationalError("rollback failed")})
+    monkeypatch.setattr(store, "connection", connection)
+    original = RuntimeError("application failed")
+
+    with pytest.raises(RuntimeError) as raised:
+        with store._transaction():
+            raise original
+
+    assert raised.value is original
+    assert connection.calls == ["BEGIN IMMEDIATE", "ROLLBACK"]
 
 
 def test_ignored_unconfigured_webhook_delivery_is_retained_without_a_dirty_target(tmp_path: Path) -> None:

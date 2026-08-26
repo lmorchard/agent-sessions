@@ -10,6 +10,7 @@ import pytest
 
 from agent_sessions.driver.credentials import Credentials
 from agent_sessions.events import driver as events_driver
+from agent_sessions.events import github
 from agent_sessions.events.driver import QueueRuntime, select_work
 from agent_sessions.events.github import (
     GitHubPermanentError,
@@ -135,6 +136,27 @@ def closing_reference_pages(*numbers: int) -> list[dict]:
 
 def claim(kind: str, key: str, *, generation: int = 1) -> ClaimedTarget:
     return ClaimedTarget(1, kind, key, generation, "worker")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("query_name", "operation"),
+    [
+        ("_UNRESOLVED_THREADS_QUERY", "UnresolvedThreads"),
+        ("_ISSUE_REACTIONS_QUERY", "IssueReactions"),
+        ("_COMMENT_REACTIONS_QUERY", "CommentReactions"),
+        ("_OPEN_PR_DISCOVERY_QUERY", "OpenPullRequestDiscovery"),
+        ("_CLOSING_ISSUES_QUERY", "ClosingIssues"),
+        ("_PROJECT_ITEMS_QUERY", "ProjectItems"),
+    ],
+)
+def test_event_graphql_queries_have_exact_named_operations(
+    query_name: str, operation: str
+) -> None:
+    """An event query without this identity cannot be safely fake-dispatched."""
+    query = getattr(github, query_name)
+
+    assert query.operation.value == operation
+    assert query.document.lstrip().startswith(f"query {operation}(")
 
 
 def test_issue_target_fetches_current_issue_and_current_closing_prs() -> None:

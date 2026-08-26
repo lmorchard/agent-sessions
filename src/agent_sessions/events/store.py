@@ -149,33 +149,24 @@ class QueueStore:
 
     @contextmanager
     def _transaction(self, mode: str = "IMMEDIATE") -> Iterator[sqlite3.Connection]:
+        started = False
         try:
             self.connection.execute(f"BEGIN {mode}")
-        except sqlite3.Error as error:
-            _raise_queue_error(error)
-        try:
+            started = True
             yield self.connection
-        except sqlite3.Error as error:
-            try:
-                self.connection.rollback()
-            except sqlite3.Error:
-                pass
-            _raise_queue_error(error)
-        except Exception:
-            try:
-                self.connection.rollback()
-            except sqlite3.Error:
-                pass
-            raise
-        else:
-            try:
-                self.connection.commit()
-            except sqlite3.Error as error:
-                try:
-                    self.connection.rollback()
-                except sqlite3.Error:
-                    pass
+            self.connection.commit()
+        except Exception as error:
+            if started:
+                self._rollback_quietly()
+            if isinstance(error, sqlite3.Error):
                 _raise_queue_error(error)
+            raise
+
+    def _rollback_quietly(self) -> None:
+        try:
+            self.connection.rollback()
+        except sqlite3.Error:
+            pass
 
     def ready(self) -> StoreHealth:
         try:

@@ -1621,7 +1621,7 @@ def maintain_approval_watch_after_outcome(
 
 
 def load_queue_runtime(ctx: RunContext) -> QueueRuntime | None:
-    """Open configured queue state without importing it in legacy mode."""
+    """Open configured queue state without importing it in full-scan mode."""
     if ctx.events_config_path is None:
         return None
 

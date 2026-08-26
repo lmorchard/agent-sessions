@@ -1424,7 +1424,7 @@ def test_main_without_events_configuration_uses_one_legacy_scan_and_never_opens_
     monkeypatch.setattr(
         lifecycle,
         "load_queue_runtime",
-        lambda _ctx: pytest.fail("legacy mode imported/opened the queue"),
+        lambda _ctx: pytest.fail("full-scan mode imported/opened the queue"),
         raising=False,
     )
 
@@ -1432,6 +1432,25 @@ def test_main_without_events_configuration_uses_one_legacy_scan_and_never_opens_
 
     assert code == 0
     assert calls == 1
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        "query($owner:String!,$repo:String!,$endCursor:String){repository(owner:$owner,name:$repo){pullRequests(first:100,after:$endCursor){nodes{number}}}}",
+        "query UnknownEvent($endCursor:String){viewer{login}}",
+    ],
+    ids=["anonymous-event-query", "unknown-event-operation"],
+)
+def test_strong_fake_rejects_unnamed_or_unknown_event_operations(document: str) -> None:
+    """A new event query cannot accidentally reuse another operation's fixture."""
+    gh = FakeGitHub()
+    command = ["gh", "api", "graphql", "-f", f"query={document}"]
+
+    result = gh.run(command)
+
+    assert result.returncode != 0
+    assert gh.unhandled == [command]
 
 
 @pytest.mark.parametrize("database_state", ["absent", "locked", "corrupt", "incompatible"])

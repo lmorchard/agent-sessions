@@ -7,6 +7,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any, Callable, cast
 
 from agent_sessions.driver import credentials
@@ -38,6 +39,23 @@ class _GitHubNotFound(GitHubError):
     pass
 
 
+class GraphQLOperation(StrEnum):
+    """The event queries that the strong GitHub fake dispatches exactly."""
+
+    OPEN_PULL_REQUEST_DISCOVERY = "OpenPullRequestDiscovery"
+    CLOSING_ISSUES = "ClosingIssues"
+    UNRESOLVED_THREADS = "UnresolvedThreads"
+    ISSUE_REACTIONS = "IssueReactions"
+    COMMENT_REACTIONS = "CommentReactions"
+    PROJECT_ITEMS = "ProjectItems"
+
+
+@dataclass(frozen=True)
+class GraphQLQuery:
+    operation: GraphQLOperation
+    document: str
+
+
 @dataclass(frozen=True)
 class ResolvedTarget:
     claim: ClaimedTarget
@@ -54,8 +72,8 @@ _PR_FIELDS = (
     "mergeStateStatus,mergeable,reviewDecision,reviewRequests,reviews,"
     "statusCheckRollup,commits,comments"
 )
-_UNRESOLVED_THREADS_QUERY = """
-query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
+_UNRESOLVED_THREADS_QUERY = GraphQLQuery(GraphQLOperation.UNRESOLVED_THREADS, """
+query UnresolvedThreads($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$pr){
       reviewThreads(first:100,after:$endCursor){
@@ -65,9 +83,9 @@ query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
     }
   }
 }
-"""
-_ISSUE_REACTIONS_QUERY = """
-query($owner:String!,$repo:String!,$issue:Int!,$endCursor:String){
+""")
+_ISSUE_REACTIONS_QUERY = GraphQLQuery(GraphQLOperation.ISSUE_REACTIONS, """
+query IssueReactions($owner:String!,$repo:String!,$issue:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     issue(number:$issue){
       comments(first:100,after:$endCursor){
@@ -85,9 +103,9 @@ query($owner:String!,$repo:String!,$issue:Int!,$endCursor:String){
     }
   }
 }
-"""
-_COMMENT_REACTIONS_QUERY = """
-query($comment:ID!,$endCursor:String){
+""")
+_COMMENT_REACTIONS_QUERY = GraphQLQuery(GraphQLOperation.COMMENT_REACTIONS, """
+query CommentReactions($comment:ID!,$endCursor:String){
   node(id:$comment){
     ... on IssueComment {
       reactions(first:100,after:$endCursor){
@@ -97,9 +115,9 @@ query($comment:ID!,$endCursor:String){
     }
   }
 }
-"""
-_OPEN_PR_DISCOVERY_QUERY = """
-query($owner:String!,$repo:String!,$endCursor:String){
+""")
+_OPEN_PR_DISCOVERY_QUERY = GraphQLQuery(GraphQLOperation.OPEN_PULL_REQUEST_DISCOVERY, """
+query OpenPullRequestDiscovery($owner:String!,$repo:String!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequests(first:100,after:$endCursor,states:OPEN){
       nodes {
@@ -114,9 +132,9 @@ query($owner:String!,$repo:String!,$endCursor:String){
     }
   }
 }
-"""
-_CLOSING_ISSUES_QUERY = """
-query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
+""")
+_CLOSING_ISSUES_QUERY = GraphQLQuery(GraphQLOperation.CLOSING_ISSUES, """
+query ClosingIssues($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$pr){
       closingIssuesReferences(first:100,after:$endCursor){
@@ -126,9 +144,9 @@ query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
     }
   }
 }
-"""
-_PROJECT_ITEMS_QUERY = """
-query($owner:String!,$number:Int!,$endCursor:String){
+""")
+_PROJECT_ITEMS_QUERY = GraphQLQuery(GraphQLOperation.PROJECT_ITEMS, """
+query ProjectItems($owner:String!,$number:Int!,$endCursor:String){
   user(login:$owner){
     projectV2(number:$number){
       id
@@ -164,7 +182,7 @@ query($owner:String!,$number:Int!,$endCursor:String){
   }
   rateLimit { limit cost remaining resetAt }
 }
-"""
+""")
 _SUPPORTED_PROJECT_ITEM_TYPES = frozenset({"ISSUE", "PULL_REQUEST"})
 _UNSUPPORTED_PROJECT_ITEM_TYPES = frozenset({"DRAFT_ISSUE", "REDACTED"})
 
@@ -242,7 +260,7 @@ class LiveTargetResolver:
 
     def _graphql_pages(
         self,
-        query: str,
+        query: GraphQLQuery,
         *,
         subject: str,
         variables: tuple[tuple[str, str], ...],
@@ -255,7 +273,7 @@ class LiveTargetResolver:
             "--paginate",
             "--slurp",
             "-f",
-            f"query={query}",
+            f"query={query.document}",
         ]
         for key, variable_value in variables:
             command.extend(["-F", f"{key}={variable_value}"])

@@ -42,6 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent_sessions.driver import agent_runner, agent_session_driver, credentials, locks, output
+from agent_sessions.events.github import GraphQLOperation
 
 REPO = "owner/repo"
 BOARD = "owner/9"
@@ -390,6 +391,13 @@ class FakeGitHub:
                 return argv[i + 1].split("=", 1)[1]
         return ""
 
+    @staticmethod
+    def _event_graphql_operation(query: str) -> GraphQLOperation | None:
+        match = re.match(r"\s*query\s+([A-Za-z_]\w*)\s*(?:\(|\{)", query)
+        if match is None:
+            return None
+        return GraphQLOperation(match.group(1))
+
     # -- gh ---------------------------------------------------------------
 
     def _gh(self, argv):
@@ -442,14 +450,19 @@ class FakeGitHub:
             return _Result(0, "")
 
         if rest[:2] == ["api", "graphql"]:
-            # Dispatch by the connection named in the query, then serve a complete
-            # final page. Pagination behavior itself is covered by the resolver's
-            # focused multi-page tests.
             query_arg = next(
                 (value for value in argv if value.startswith("query=")),
                 "",
             )
             query = query_arg.removeprefix("query=")
+            try:
+                operation = self._event_graphql_operation(query)
+            except ValueError:
+                self.unhandled.append(argv)
+                return _Result(1, "", "fake: unhandled event GraphQL operation")
+            if operation is None and "$endCursor" in query:
+                self.unhandled.append(argv)
+                return _Result(1, "", "fake: unnamed event GraphQL operation")
 
             def graphql_result(payload):
                 return _Result(
@@ -457,7 +470,7 @@ class FakeGitHub:
                     json.dumps([payload] if "--slurp" in argv else payload),
                 )
 
-            if "pullRequests(first:100,after:$endCursor" in query:
+            if operation is GraphQLOperation.OPEN_PULL_REQUEST_DISCOVERY:
                 nodes = [
                     {
                         "number": pull["number"],
@@ -488,7 +501,7 @@ class FakeGitHub:
                     }
                 )
 
-            if "closingIssuesReferences(first:100,after:$endCursor" in query:
+            if operation is GraphQLOperation.CLOSING_ISSUES:
                 number = self._graphql_var(argv, "pr")
                 pull = self.pr_by_number(number)
                 nodes = list(pull["closingIssuesReferences"] if pull else [])
@@ -510,7 +523,7 @@ class FakeGitHub:
                     }
                 )
 
-            if "reviewThreads(first:100,after:$endCursor" in query:
+            if operation is GraphQLOperation.UNRESOLVED_THREADS:
                 number = self._graphql_var(argv, "pr")
                 pull = self.pr_by_number(number)
                 nodes = [
@@ -535,7 +548,7 @@ class FakeGitHub:
                     }
                 )
 
-            if "comments(first:100,after:$endCursor" in query:
+            if operation is GraphQLOperation.ISSUE_REACTIONS:
                 issue_number = self._graphql_var(argv, "issue")
                 found_issue = self.issue_by_number(issue_number)
                 comments = []
@@ -575,6 +588,44 @@ class FakeGitHub:
                                     }
                                 }
                             }
+                        }
+                    }
+                )
+
+            if operation is GraphQLOperation.COMMENT_REACTIONS:
+                return graphql_result(
+                    {
+                        "data": {
+                            "node": {
+                                "reactions": {
+                                    "nodes": [],
+                                    "pageInfo": {
+                                        "hasNextPage": False,
+                                        "endCursor": None,
+                                    },
+                                }
+                            }
+                        }
+                    }
+                )
+
+            if operation is GraphQLOperation.PROJECT_ITEMS:
+                return graphql_result(
+                    {
+                        "data": {
+                            "user": {
+                                "projectV2": {
+                                    "id": "PVT_kwHNVLfOAXqLIg",
+                                    "items": {
+                                        "nodes": [],
+                                        "pageInfo": {
+                                            "hasNextPage": False,
+                                            "endCursor": None,
+                                        },
+                                    },
+                                }
+                            },
+                            "rateLimit": {"limit": 5000, "cost": 1, "remaining": 4999, "resetAt": "2026-08-10T12:00:00Z"},
                         }
                     }
                 )
