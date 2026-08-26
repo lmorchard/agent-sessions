@@ -21,7 +21,7 @@
 - Dirty-target acknowledgement is conditional on the claimed generation. A newer generation must survive.
 - The existing distributed Git-ref issue lock remains the final work-exclusion mechanism.
 - The existing inflight marker remains durable before agent invocation. A selected queue claim is acknowledged only after that marker is durable.
-- The receiver receives only the webhook secret. The Projects poller receives only a board-readable token. The reaction poller receives only an installation read token.
+- The event daemon receives the webhook secret and the same read-only credential used by driver reconciliation and agent subprocesses. Only the driver receives repository-write or Project-write credentials.
 - Secrets come from protected files or service credentials, never the shared TOML file or command arguments.
 - No service is deployed by this work. Examples and deploy-ready commands stop before Caddy, systemd, GitHub App, homelab, staging, or production changes.
 - Each phase is one independently testable commit. Stage named files only; never use a blanket git add.
@@ -39,9 +39,10 @@ The implementation uses focused modules under src/agent_sessions/events:
 - github.py — narrow live GitHub reads for target resolution and pollers.
 - driver.py — queue-first claim reconciliation and pure scan-scheduling decisions.
 - pollers.py — one-pass Projects and reaction pollers.
+- daemon.py — in-process fixed-delay scheduling, per-pass store lifetime, background-task readiness, and graceful shutdown.
 - operations.py — doctor, queue status, migrate, and prune command implementations.
 - logging.py — one-line structured JSON event logging with an explicit safe-field allowlist.
-- cli.py — argparse composition and Uvicorn startup only.
+- cli.py — argparse composition, shared credential wiring, daemon construction, and Uvicorn startup.
 
 The shared model names are fixed here so later phases do not invent aliases:
 
@@ -1017,3 +1018,246 @@ doctor does not probe by writing a label or project item. Capability it cannot p
 - Every non-trivial interface used by a later phase is defined in an earlier phase or in Shared file structure and interfaces.
 - No phase changes gate.py, router policy, write-manifest kinds, automatic merge behavior, or deployment state.
 - No unresolved design question or placeholder remains. Manual review boxes stay unchecked until Les reviews the corresponding artifact.
+
+---
+
+## Review revision — combined event daemon and system-wide reads
+
+The owner review on PR #275 supersedes the service topology completed in Tasks 4 and 5. The immutable queue, webhook behavior, one-pass pollers, and queue-first driver remain valid. Tasks 6–8 replace only the process scheduling, read-credential wiring, fragile GraphQL test dispatch, review nits, service examples, and affected documentation. Checked boxes above remain historical evidence; unchecked boxes below are the current resume point.
+
+## Task 6: Combined event daemon and shared read credential
+
+This slice makes `serve` the complete read-only event process. It starts the existing one-pass pollers on in-process fixed-delay loops, gives every event read the same credential already used by the driver and agent, and keeps webhook work independent from polling failures.
+
+**Files:**
+
+- Create: `src/agent_sessions/events/daemon.py` — background poll-loop lifecycle and readiness.
+- Create: `tests/events/test_daemon.py` — deterministic runtime scheduling, failure, connection, and shutdown tests.
+- Modify: `src/agent_sessions/events/models.py` — add polling configuration.
+- Modify: `src/agent_sessions/events/config.py` — parse the strict `[polling]` table.
+- Modify: `src/agent_sessions/events/store.py` — add an explicit connection close boundary.
+- Modify: `src/agent_sessions/events/webhook.py` — attach the daemon lifespan and include task health in readiness.
+- Modify: `src/agent_sessions/events/cli.py` — resolve one read credential and build both scheduled poll passes.
+- Modify: `src/agent_sessions/events/operations.py` — probe repositories and Projects with the same read token.
+- Modify: `src/agent_sessions/driver/credentials.py` — make the event-facing read resolver accept only the literal or command-backed PAT while preserving `resolve()` App minting for the driver.
+- Modify: `src/agent_sessions/events/github.py` — bound each `gh` read used by an in-flight poll pass.
+- Test: `tests/events/test_config.py`
+- Test: `tests/events/test_webhook.py`
+- Test: `tests/events/test_operations.py`
+- Test: `tests/events/test_poll_projects.py`
+- Test: `tests/events/test_poll_reactions.py`
+- Test: `tests/driver/test_credentials.py`
+
+**Interfaces:**
+
+- Produces `PollingPolicy(projects_interval: timedelta, reactions_interval: timedelta)` and `EventsConfig.polling: PollingPolicy`.
+- Produces `ScheduledPoll(name: str, interval: timedelta, run: PollPass)` where `PollPass = Callable[[QueueStore, datetime], PollRunResult]`.
+- Produces `DaemonRuntime(store_factory: Callable[[], QueueStore], polls: tuple[ScheduledPoll, ...], result_logger: Callable[[str, PollRunResult], None])` with `lifespan(app)`, `ready() -> bool`, and no public scheduling methods.
+- Produces `QueueStore.close() -> None` for the per-pass connection boundary.
+- Changes `create_app(..., runtime: BackgroundRuntime | None = None) -> FastAPI`; tests that exercise the receiver alone may omit the runtime.
+- Keeps `credentials.resolve()` unchanged for driver-side PAT or App resolution. `resolve_read_credential()` resolves only `AGENT_GH_READ_TOKEN` or `AGENT_GH_READ_TOKEN_CMD` and never inspects App or board-write variables.
+
+```python
+@dataclass(frozen=True)
+class ScheduledPoll:
+    name: str
+    interval: timedelta
+    run: PollPass
+
+
+class DaemonRuntime:
+    async def _run(self, poll: ScheduledPoll) -> None:
+        while not self._stopping.is_set():
+            store = self._store_factory()
+            try:
+                result = await asyncio.to_thread(poll.run, store, datetime.now(UTC))
+                self._result_logger(poll.name, result)
+            finally:
+                store.close()
+            try:
+                await asyncio.wait_for(
+                    self._stopping.wait(), poll.interval.total_seconds()
+                )
+            except TimeoutError:
+                pass
+```
+
+Expected source failures remain values in `PollRunResult.errors`, so the loop logs them and continues. An exception escaping a scheduled pass ends only that task; `ready()` then returns false. Lifespan shutdown sets the stopping event and gathers every task. `GitHubResolver._read` passes `timeout=60` to `subprocess.run` and translates `subprocess.TimeoutExpired` into `GitHubTransientError`, which bounds an in-flight poll during shutdown.
+
+The CLI omits the Projects task when `config.boards` is empty. The reaction task always starts; with no active watches its one-pass function performs no GitHub request. Both scheduled closures receive the single startup-resolved read PAT, open a new store per pass through `DaemonRuntime`, and retain the existing source leases.
+
+**TDD and implementation steps:**
+
+- [ ] Add failing configuration tests proving `[polling]` is required, both interval keys are required positive integers, and unknown polling keys fail closed.
+- [ ] Run `uv run pytest -q tests/events/test_config.py` and confirm the new cases fail because `PollingPolicy` and `[polling]` parsing do not exist.
+- [ ] Add `PollingPolicy`, parse the strict table, and update existing configuration fixtures with explicit 60-second values.
+- [ ] Run `uv run pytest -q tests/events/test_config.py` and confirm the configuration suite passes.
+- [ ] Add failing daemon tests proving both loops run immediately, wait their own fixed interval after completion, never overlap themselves, open and close a distinct real `QueueStore` per pass, continue after a `PollRunResult` with errors, report an escaped exception through `ready()`, omit Projects when no boards exist, and finish an in-flight bounded pass during lifespan shutdown.
+- [ ] Run `uv run pytest -q tests/events/test_daemon.py tests/events/test_webhook.py` and confirm failures identify the missing runtime and readiness integration.
+- [ ] Implement `QueueStore.close`, `ScheduledPoll`, `DaemonRuntime`, and the optional webhook runtime protocol. Keep every GitHub call outside the webhook request task and every poll pass outside the receiver's SQLite connection.
+- [ ] Add the 60-second subprocess timeout and its focused timeout-to-transient-error regression.
+- [ ] Run `uv run pytest -q tests/events/test_daemon.py tests/events/test_webhook.py` and confirm the runtime and receiver cases pass.
+- [ ] Add failing credential/CLI/doctor tests proving `serve`, both one-shot pollers, repository probes, and Project probes use one resolved read token; prove guarded environments fail if event code inspects `DRIVER_GH_WRITE_TOKEN`, `DRIVER_GH_BOARD_TOKEN`, or any App private-key variable.
+- [ ] Run `uv run pytest -q tests/driver/test_credentials.py tests/events/test_poll_projects.py tests/events/test_poll_reactions.py tests/events/test_operations.py` and confirm the new assertions fail on the board resolver and direct App-mint path.
+- [ ] Narrow `resolve_read_credential`, wire the shared token through `serve` and both one-shot commands, and replace doctor's board resolver with the already-resolved read token. Preserve `resolve()` and `board_env()` for driver writes.
+- [ ] Run the focused credential, CLI, doctor, daemon, and webhook suites and confirm they pass.
+- [ ] Run `make events-test`, `make driver-test`, `make lint`, and `make typecheck`.
+- [ ] Commit the named Task 6 files with message `Review: combine event polling with webhook service`.
+
+**Verification — automated:**
+
+- [ ] `uv run pytest -q tests/events/test_daemon.py tests/events/test_webhook.py` passes.
+- [ ] `uv run pytest -q tests/driver/test_credentials.py tests/events/test_poll_projects.py tests/events/test_poll_reactions.py tests/events/test_operations.py` passes.
+- [ ] `make events-test`, `make driver-test`, `make lint`, and `make typecheck` pass.
+
+**Verification — manual:**
+
+- [ ] Confirm the event daemon receives no repository-write or Project-write credential.
+- [ ] Confirm no background GitHub work runs in the webhook handler or shares its SQLite connection.
+- [ ] Confirm normal poll failures remain visible in `queue-status` without making webhook ingress unready.
+
+## Task 7: Explicit GraphQL operations and review clarity fixes
+
+This slice addresses the three focused code-quality comments without broadening into unrelated driver refactors: new event GraphQL queries gain stable identities, transaction rollback follows one path, and the supported non-queue path gets an accurate name.
+
+**Files:**
+
+- Modify: `src/agent_sessions/events/github.py` — typed named GraphQL documents.
+- Modify: `tests/driver/loop_harness.py` — exact operation parsing and dispatch for event queries.
+- Modify: `tests/events/test_driver.py` — operation-name regression through the strong fake if needed by the existing integration fixture.
+- Modify: `src/agent_sessions/events/store.py` — one transaction exception path and quiet rollback helper.
+- Modify: `tests/events/test_store.py` — begin, body, commit, rollback, translation, and application-exception regressions.
+- Modify: `src/agent_sessions/driver/lifecycle.py` — replace “legacy mode” with “full-scan mode.”
+- Modify: `tests/driver/test_full_loop.py` — use the same supported-mode name in test diagnostics.
+
+**Interfaces:**
+
+- Produces `GraphQLOperation(StrEnum)` with `UNRESOLVED_THREADS`, `ISSUE_REACTIONS`, `COMMENT_REACTIONS`, `OPEN_PULL_REQUEST_DISCOVERY`, `CLOSING_ISSUES`, and `PROJECT_ITEMS` members.
+- Produces `GraphQLQuery(operation: GraphQLOperation, document: str)`; `_graphql_pages` accepts this type rather than a bare string.
+- Every document begins with the corresponding GraphQL operation name, for example `query OpenPullRequestDiscovery(...)`.
+- The strong fake extracts the operation with one anchored parser and converts it to `GraphQLOperation`; missing and unknown names remain unhandled test failures.
+
+```python
+class GraphQLOperation(StrEnum):
+    OPEN_PULL_REQUEST_DISCOVERY = "OpenPullRequestDiscovery"
+    CLOSING_ISSUES = "ClosingIssues"
+    UNRESOLVED_THREADS = "UnresolvedThreads"
+    ISSUE_REACTIONS = "IssueReactions"
+    COMMENT_REACTIONS = "CommentReactions"
+    PROJECT_ITEMS = "ProjectItems"
+
+
+@dataclass(frozen=True)
+class GraphQLQuery:
+    operation: GraphQLOperation
+    document: str
+```
+
+The transaction context uses `_rollback_quietly()` and one outer exception boundary. SQLite exceptions still pass through `_raise_queue_error`; non-SQLite exceptions roll back and propagate unchanged. A commit failure rolls back. A rollback failure never masks the original failure.
+
+**TDD and implementation steps:**
+
+- [ ] Add failing tests requiring every event query to carry the exact named operation and requiring the strong fake to reject an unknown or anonymous event operation instead of matching a field substring.
+- [ ] Run the focused event-driver integration tests and confirm the anonymous query documents fail.
+- [ ] Add `GraphQLOperation`, `GraphQLQuery`, named documents, and exact enum dispatch in `loop_harness.py`. Retain pre-existing historical driver-query handling outside this PR's event operations.
+- [ ] Run the focused GraphQL resolver and full-loop tests and confirm they pass.
+- [ ] Add or tighten transaction tests so begin failure, statement failure, application exception, commit failure, and rollback failure each assert the original exception or translated queue exception.
+- [ ] Run `uv run pytest -q tests/events/test_store.py` before refactoring and record the current behavior as the green characterization baseline.
+- [ ] Replace the nested transaction exception blocks with `_rollback_quietly()` and one guarded path; this is a behavior-preserving refactor, so no artificial red test is required.
+- [ ] Run `uv run pytest -q tests/events/test_store.py` and confirm every characterization remains green.
+- [ ] Replace “legacy mode” with “full-scan mode” in the lifecycle docstring and affected test diagnostic.
+- [ ] Run the focused GraphQL, store, and full-scan tests.
+- [ ] Run `make events-test`, `make driver-test`, `make lint`, and `make typecheck`.
+- [ ] Commit the named Task 7 files with message `Review: make event operations explicit`.
+
+**Verification — automated:**
+
+- [ ] No event query dispatch in `tests/driver/loop_harness.py` searches for connection-field substrings.
+- [ ] Transaction exception translation and rollback tests pass.
+- [ ] `make events-test`, `make driver-test`, `make lint`, and `make typecheck` pass.
+
+**Verification — manual:**
+
+- [ ] Confirm the typed operation list covers only GraphQL documents introduced by this issue.
+- [ ] Confirm the transaction refactor does not convert `sqlite3.IntegrityError` into `QueueUnavailable`.
+- [ ] Confirm “full-scan mode” describes a supported configuration rather than a deprecated compatibility path.
+
+## Task 8: Two-service examples and general operator documentation
+
+This slice makes the deploy-ready artifacts describe the approved topology: one read-only event daemon and separate write-capable repository drivers. It removes the obsolete poller units and rewrites the runbook for a general operator.
+
+**Files:**
+
+- Create: `examples/agent-session-events/agent-session-events.service` — combined event daemon.
+- Delete: `examples/agent-session-events/agent-session-events-webhook.service`
+- Delete: `examples/agent-session-events/agent-session-projects.service`
+- Delete: `examples/agent-session-events/agent-session-projects.timer`
+- Delete: `examples/agent-session-events/agent-session-reactions@.service`
+- Delete: `examples/agent-session-events/agent-session-reactions@.timer`
+- Modify: `examples/agent-session-events/agent-session-driver@.service` — load the shared read environment in addition to the private driver environment.
+- Modify: `examples/agent-session-events/events.toml` — add the explicit polling intervals.
+- Modify: `examples/agent-session-events/permissions.toml` — one event identity, one readers group, shared read environment, private webhook and driver-write files.
+- Modify: `tests/events/test_examples.py` — structural assertions for the two-service boundary and absence of poller timers.
+- Modify: `docs/events.md` — general setup, use, diagnosis, migration, and recovery guide.
+- Modify: `docs/usage.md` — distinguish the system read credential from driver-only mutation credentials.
+- Modify: `README.md` — retain only the short runbook link and accurate process summary.
+- Modify: `docs/dev-sessions/2026-08-25-1037-event-driven-invalidation-queue/notes.md` — record the reviewed design change and verification evidence.
+
+**Service contract:**
+
+```ini
+[Service]
+User=agent-session-events
+Group=agent-session-events
+SupplementaryGroups=agent-session-events-db agent-session-readers
+EnvironmentFile=/etc/agent-session/read.env
+Environment=AGENT_SESSION_WEBHOOK_SECRET_FILE=/etc/agent-session-events/webhook.secret
+ExecStart=/usr/local/bin/agent-session-events serve --config /etc/agent-session-events/events.toml
+```
+
+The driver unit joins the same readers and database groups, loads `/etc/agent-session/read.env` plus its private instance environment, and remains `Type=oneshot`. `/etc/agent-session/read.env` is owned by `root:agent-session-readers` with mode `0640`; it contains only `AGENT_GH_READ_TOKEN` or `AGENT_GH_READ_TOKEN_CMD`. The webhook secret remains `0600` under the event user. Each driver instance environment remains `0600` under the driver user and contains write/runtime values, never a second read token.
+
+**TDD and implementation steps:**
+
+- [ ] Replace the example tests with failing structural assertions for exactly one event service, no event poller timers, one event identity, a shared readers group/file, private webhook and write files, one-worker Uvicorn startup, webhook-only Caddy routing, and the driver's separate one-shot timer boundary.
+- [ ] Run `uv run pytest -q tests/events/test_examples.py` and confirm failures name the obsolete files and credential layout.
+- [ ] Add the combined service, update the driver/configuration/permission examples, and delete the five obsolete event unit files.
+- [ ] Run `uv run pytest -q tests/events/test_examples.py` and confirm the parsed artifacts pass.
+- [ ] Rewrite `docs/events.md` around the two-service data flow and ordered setup sequence. Remove personal names, separate-poller deployment paths, direct App minting for the daemon, and claims that read credentials must remain isolated from each other.
+- [ ] Update `docs/usage.md` and `README.md` only where the old topology or credential purpose is stated.
+- [ ] Run the Simple English skill from `~/.claude/skills/simple-english` over the rewritten `docs/events.md`; apply its procedural rules without changing code, commands, identifiers, paths, or output samples.
+- [ ] Run the Simple English self-check and record its result in `notes.md`.
+- [ ] Run `make events-test`, `make driver-test`, `make docs-check`, `make lint`, `make typecheck`, and `make check`.
+- [ ] Inspect `git diff --check` and the complete `origin/main...HEAD` diff; confirm no deployment, GitHub App mutation, service-manager action, Caddy reload, merge, or infrastructure write occurred.
+- [ ] Commit the named Task 8 files with message `Review: simplify event service operations`.
+
+**Verification — automated:**
+
+- [ ] `uv run pytest -q tests/events/test_examples.py` passes.
+- [ ] `make events-test`, `make driver-test`, `make docs-check`, `make lint`, `make typecheck`, and `make check` pass.
+- [ ] `git diff --check` passes.
+
+**Verification — manual:**
+
+- [ ] Read `docs/events.md` cold and confirm the first page explains why two services remain.
+- [ ] Confirm every setup command states its prerequisite and expected outcome.
+- [ ] Confirm the examples contain placeholders only and cannot accidentally target a real repository or service.
+- [ ] Confirm no documentation names a specific operator as the required reviewer.
+
+## Review-revision acceptance and PR response
+
+- [ ] Re-run `make events-test` and record the fresh result in `notes.md`.
+- [ ] Re-run `make driver-test` and record the fresh result in `notes.md`.
+- [ ] Re-run `make check` and record the fresh result in `notes.md`.
+- [ ] Run `git diff --check` and inspect the full branch diff.
+- [ ] Reply to each owner-review thread with the specific code or documentation change and fresh verification evidence.
+- [ ] Push the reviewed commits to PR #275. Do not deploy or merge.
+
+## Review-revision coverage and self-review
+
+- Combined daemon scheduling, connection lifetime, failure isolation, readiness, and shutdown: Task 6.
+- System-wide read credential and driver-only mutation credentials: Task 6.
+- Typed named GraphQL operations, exact fake dispatch, transaction clarity, and full-scan terminology: Task 7.
+- Two-service examples, shared credential file, general runbook, and Simple English verification: Task 8.
+- The immutable queue, normalization, one-pass poller semantics, queue-first reconciliation, scan fallback, source leases, and write manifest remain unchanged from Tasks 1–5.
+- No task adds Docker, a remote broker, App-token refresh, an event-to-agent invocation path, a GitHub write surface, deployment action, or merge action.

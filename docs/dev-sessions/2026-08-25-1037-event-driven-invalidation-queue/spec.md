@@ -8,7 +8,7 @@ The driver is a one-shot process. Each run queries live issues, Projects V2 item
 
 The reconciler already separates pure event decisions from polling. It defines plain event and decision records, parses a narrow webhook-shaped payload, synthesizes equivalent events from polled state, and exposes a proof-oriented webhook runner (`src/agent_sessions/driver/reconciler.py:19`, `src/agent_sessions/driver/reconciler.py:153`, `src/agent_sessions/driver/reconciler.py:206`, `src/agent_sessions/driver/reconciler.py:260`). No production webhook host or persistent webhook path calls it.
 
-GitHub App credentials can mint scoped installation tokens (`src/agent_sessions/driver/credentials.py:158`, `src/agent_sessions/driver/credentials.py:216`). Board access uses a distinct credential path. Preserve that credential split.
+GitHub App credentials can mint scoped installation tokens (`src/agent_sessions/driver/credentials.py:158`, `src/agent_sessions/driver/credentials.py:216`). The agent and driver already share one logical repository-read credential. Extend that read identity to every event source. Keep driver-only repository and Project mutation credentials separate.
 
 ## Inventory conclusion
 
@@ -35,13 +35,13 @@ Cover both gaps with narrow scheduled pollers. Full scans remain the catch-all f
 ## Desired end state
 
 ```text
-FastAPI webhook receiver ─┐
-                          ├── invalidations ──> SQLite ──> one-shot drivers
-Projects V2 poller ───────┤                         │       hints first
-Approval reaction poller ─┘                         └────── full-scan fallback
+GitHub webhooks ──────────┐
+Projects V2 poll loop ────┼── event daemon ──> SQLite ──> one-shot drivers
+Approval reaction loop ───┘                       │       hints first
+                                                 └────── full-scan fallback
 ```
 
-All processes run on one host and share a SQLite database on local disk. The receiver only verifies and enqueues. Projects and reaction pollers run as separate one-shot commands on independent systemd timers. Per-repository drivers run on their own timers and may overlap.
+All processes run on one host and share a SQLite database on local disk. One long-running event daemon verifies and enqueues webhooks and runs the Projects and reaction pollers from in-process timers. Per-repository drivers remain separate one-shot processes on their own timers and may overlap. The event daemon never invokes an agent or writes to GitHub.
 
 GitHub remains authoritative. Every claimed hint causes a fresh GitHub query before the router decides what to do. The event payload supplies identity and diagnostic context, never current labels, review status, check conclusions, project fields, or eligibility.
 
@@ -50,7 +50,7 @@ The event system is additive:
 - With no events database configured, the driver preserves today's pull/query behavior.
 - With a healthy database, the driver reconciles dirty targets before scheduled scans.
 - Missed events are recovered by quiet-period and hard-deadline full scans.
-- If a configured database is unavailable or incompatible, the driver logs degraded mode and performs its legacy full scan. Receivers and pollers fail readiness instead of claiming persistence.
+- If a configured database is unavailable or incompatible, the driver logs degraded mode and performs its full scan. The event daemon fails readiness instead of claiming persistence.
 
 ## Process and API design
 
@@ -84,7 +84,7 @@ The webhook endpoint must:
 
 Duplicate GUIDs return success without new invalidations. Bad signatures return `401`; malformed input returns `400`; oversized bodies return `413`; transient database failures return `503`. In-process receiver writes are serialized. SQLite arbitrates receiver writes against short poller and driver transactions.
 
-The receiver holds only its webhook secret. It performs no GitHub API calls and holds no installation token, board token, or App private key. Caddy exposes only the webhook route; health endpoints may remain loopback-only.
+The event daemon holds the webhook secret and the same read-only GitHub credential used by driver reconciliation and agent subprocesses. It holds no repository-write or Project-write credential. Caddy exposes only the webhook route; health endpoints may remain loopback-only.
 
 ## SQLite contract
 
@@ -148,20 +148,22 @@ Use a repository scan lease to prevent overlapping full scans. A hard maximum sc
 
 `poll-reactions` queries only active approval watches. The driver creates or refreshes a watch when it parks an issue awaiting approval and removes it when that state ends. A conditional watch update emits one invalidation when the approval predicate changes. Full scans repair missing and stale watches.
 
-Each poll command claims a source-specific lease, performs no long SQLite transaction, exits after one pass, and returns nonzero without changing observations on failure. Systemd timers set polling cadence; the application contains no resident scheduler.
+The event daemon starts one task for each enabled poller. Each task runs immediately, performs one pass through the existing synchronous poller outside the event loop, then waits its configured fixed interval. A task never overlaps itself or catches up missed intervals. Each pass opens its own SQLite connection and retains the source-specific lease, so a duplicate daemon cannot run the same source concurrently. No GitHub request runs inside a SQLite transaction.
+
+A normal source failure is stored and logged, then retried after the interval. It does not stop webhook ingestion or make the daemon unready. An unexpected background-task exit does make `/readyz` fail. Shutdown stops new passes and allows bounded in-flight GitHub requests to finish. The one-shot `poll-projects` and `poll-reactions` commands remain for manual diagnosis and return nonzero without changing observations on failure.
 
 ## Configuration, credentials, and operations
 
-Parse a small shared TOML file with `tomllib`. It contains the SQLite path, repository ID/name allowlist, configured Projects V2 boards, payload and retention limits, and scan policy. It does not duplicate driver repository paths, workspaces, backend, model, or budget settings. Secrets come from protected files or service credentials, never TOML or command arguments.
+Parse a small shared TOML file with `tomllib`. It contains the SQLite path, repository ID/name allowlist, configured Projects V2 boards, payload and retention limits, scan policy, and a strict `[polling]` table with positive `projects_interval_seconds` and `reactions_interval_seconds` values. It does not duplicate driver repository paths, workspaces, backend, model, or budget settings. Secrets come from protected files or service credentials, never TOML or command arguments.
 
-Give each unit only the credential it needs:
+Use one system-wide read credential:
 
-- `serve`: webhook secret
-- `poll-projects`: board-readable credential
-- `poll-reactions`: installation read credential
-- driver: existing scoped driver credentials
+- `serve`, `poll-projects`, and `poll-reactions` use `AGENT_GH_READ_TOKEN` or `AGENT_GH_READ_TOKEN_CMD`.
+- driver reconciliation and the agent subprocess use the same logical read credential.
+- `DRIVER_GH_WRITE_TOKEN` remains driver-only for repository mutations.
+- `DRIVER_GH_BOARD_TOKEN` remains driver-only for Projects V2 mutations and is never loaded by an event poller.
 
-The GitHub App configuration needs read access to Issues, Pull requests, Checks, Commit statuses, and the existing Contents surface. The Projects poller uses the separate user/board credential because the configured board is user-owned. The App does not need Actions permission because v1 does not subscribe to workflow events. Changing the App configuration remains a reviewed deployment step.
+The event daemon requires a long-lived, genuinely read-only PAT. A command-backed value may retrieve that PAT from protected storage, but it is not an App-token refresh mechanism. Direct GitHub App token minting remains available to the driver and is not added to the long-running daemon. `doctor` resolves the shared read credential once and proves that it can read every configured repository and Project. It never substitutes the Project-write credential for a failed read probe.
 
 `doctor` validates configuration, database mode and integrity, schema compatibility, repository identity, board access, and credential capability without writing GitHub state. `queue-status` reports backlog state and age, leases/backoff, latest webhook and poll success, scan age, watches, and recent errors. `migrate` applies explicit versioned migrations while services are stopped. Processes refuse to write an incompatible schema. `prune` removes expired raw deliveries and invalidation history and checkpoints WAL; it never age-prunes dirty targets, watches, snapshots, or scan state.
 
@@ -174,7 +176,7 @@ Emit structured logs to stdout/stderr for journald. Include delivery GUID, event
 - Preserve the existing inflight-before-invocation boundary (`src/agent_sessions/driver/lifecycle.py:1099`).
 - Preserve Git-ref issue locks as the final distributed work lock (`src/agent_sessions/driver/locks.py:30`).
 - Extend the current CLI/environment configuration style without changing unrelated driver settings (`src/agent_sessions/driver/lifecycle.py:256`).
-- Reuse scoped credential resolution rather than introducing a second App authentication implementation (`src/agent_sessions/driver/credentials.py:158`).
+- Reuse the existing literal and command-backed read credential resolution without introducing resident App-token refresh logic (`src/agent_sessions/driver/credentials.py:158`).
 
 ## Verification and acceptance
 
@@ -183,6 +185,8 @@ Add `make events-test`; include it in `make check`. Use real temporary SQLite da
 `make events-test` must verify:
 
 - signature validation over exact request bytes, body limits, malformed input, duplicate GUIDs, readiness, disabled documentation routes, and commit-before-`202` behavior;
+- immediate fixed-delay poll scheduling, no self-overlap, independent SQLite connections, transient source failure recovery, unexpected task-death readiness, and graceful shutdown;
+- one shared read credential across both event pollers, with no event access to repository-write or Project-write credentials;
 - generation races, conditional acknowledgement, simultaneous driver claims, lease expiry, retry backoff, full-scan exclusion, and database-unavailable degradation;
 - every selected event-to-target mapping, one-to-many check events, revision resolution, and ignored unknown/unconfigured deliveries;
 - silent Projects baseline, add/remove and Status/Priority diffs, complete pagination, and snapshot preservation on failure;
@@ -191,9 +195,11 @@ Add `make events-test`; include it in `make check`. Use real temporary SQLite da
 - an ASGI-to-SQLite-to-driver-claim integration path for both a signed webhook and a synthetic poll observation;
 - fresh schema creation, forward migration, inspection, and pruning behavior.
 
-`make driver-test` must retain the existing routing and recovery behavior. Add a regression proving that a driver without an events database performs today's full scan. `make check` must pass before review.
+Every GraphQL document added by this issue has a named operation and an explicit operation type. The strong GitHub fake dispatches those requests by exact operation name rather than matching selected fields in the query text. Transaction tests preserve rollback and exception translation while allowing the transaction context manager to use one guarded path.
 
-The new event test harness does not exist at filing time. Dependency changes and all shipping `src/**` edits are also risk-gated. This issue is therefore `needs-review` regardless of test results.
+`make driver-test` must retain the existing routing and recovery behavior. A driver without an events database performs the supported full-scan path without importing or opening the event queue. `make check` must pass before review.
+
+Dependency changes and all shipping `src/**` edits are risk-gated. This issue remains `needs-review` regardless of test results.
 
 ## Delivery slices
 
@@ -202,6 +208,7 @@ The new event test harness does not exist at filing time. Dependency changes and
 3. Optional queue-first driver integration and scan scheduling.
 4. Projects V2 and approval-reaction pollers.
 5. Service examples and an operator runbook.
+6. Review revision: combine the event processes, unify all read paths, and simplify the operator topology.
 
 Each slice must remain independently testable. The implementation stops at deploy-ready artifacts and commands.
 
@@ -210,7 +217,7 @@ Each slice must remain independently testable. The implementation stops at deplo
 - No authoritative event-driven workflow decisions.
 - No immediate driver or agent invocation from webhook arrival.
 - No JSONL queue, Redis, hosted broker, remote database, or REST queue service.
-- No combined receiver/poller/driver daemon.
+- No combined event/driver daemon. The event daemon and write-capable repository driver remain separate.
 - No automatic merge or expansion of the write manifest.
 - No broad webhook subscription beyond the listed set.
 - No general Projects V2 mirror beyond membership, Status, and Priority.
@@ -223,6 +230,6 @@ Each slice must remain independently testable. The implementation stops at deplo
 
 - **JSONL queue:** append-only files fit provenance but cannot cleanly provide atomic deduplication, coalescing, claims, leases, or concurrent consumers.
 - **Queue REST API in v1:** HTTP changes transport, not driver statefulness, and adds authentication, availability, retry, and versioning costs. Keep `QueueStore` narrow so a private queue service can replace direct SQLite if drivers later leave the host or need an OS-level data boundary.
-- **Pollers inside the receiver:** a long-lived public ingress process should not hold board or installation credentials or couple acknowledgement latency to GitHub API work.
+- **Separate poller services:** rejected after review because they multiply service identities, secret files, timers, and operational paths without protecting a write capability. The combined event daemon holds only the webhook secret and the system read credential. Background GitHub work remains outside the webhook request path.
+- **Docker bundle:** rejected because it packages the same service topology instead of simplifying it and introduces a deployment mechanism this issue does not otherwise need.
 - **Remote broker or database:** the selected same-host topology does not justify another service.
-
