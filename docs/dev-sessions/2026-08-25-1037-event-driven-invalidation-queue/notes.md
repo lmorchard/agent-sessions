@@ -168,3 +168,22 @@
 - The runbook now puts the daemon's one-time `_CMD` behavior in its own descriptive paragraph. The PAT instructions now form a procedural paragraph. It also puts daemon-owned polling cadence in a descriptive paragraph and gives the busy-database alternatives explicit conditions.
 - The changed passages follow the pragmatic Simple English audit. The task report no longer says that the first rewrite separated every passage.
 - `make docs-check` exited 0 with its pre-existing explicit `make gate-test` assertion-count skip. `git diff --check` passed. No broad suite ran for this prose-only correction.
+
+### Whole-branch review revision
+
+- The system read credential is now the default for driver and event reads. Each repository or Projects mutation supplies its private credential at the mutation boundary.
+- The event daemon resolves the owner of the shared PAT once at startup. Reaction polling uses that login and does not read private driver configuration.
+- Plain installation webhooks can omit `repositories`. Installation claims are diagnostic-only and do not call the App-token-only `/installation/repositories` endpoint.
+- Runtime open and readiness use the same complete schema-shape comparison as `doctor`. This comparison includes columns, foreign keys, and indexes.
+- A revision claim now creates durable issue targets for every unselected actionable sibling. Acknowledgement of the source claim does not erase that work.
+- Configuration loading rejects duplicate board owner and number pairs. The owner comparison is case-insensitive.
+- Daemon shutdown supplies a thread-safe stop signal to each pass. Pollers and GitHub reads inspect it before each new source or subprocess.
+- Webhook outcomes now use the allowlisted JSON emitter. Records include safe delivery fields, HTTP status, invalidation count, and elapsed time.
+- The runbook now requires JSON webhook bodies and names all five retired preview units. Current documentation uses the term `full-scan mode`.
+- Group 1 is commit `b39ad26`. Its 316-test focus, Ruff, mypy, and diff checks passed.
+- Group 2 is commit `07c93de`. A 300-test event focus, Ruff, mypy, and diff checks passed.
+- Two unchanged set-group-ID tests fail in this sandbox. The file system removes the set-group-ID bit, so the group-shared path precondition is absent.
+- The seven example tests passed. `make docs-check` passed with its documented nested gate-count skip.
+- The Simple English pass used pragmatic mode and the term `configuration`. The three longest prose sentences contain 20, 18, and 17 words.
+- The mechanical scan found no contractions, banned modals, perfect tenses, progressive clauses, semicolons, Latin abbreviations, or alternate validation verbs in prose.
+- No deployment, service-manager action, Caddy reload, GitHub mutation, push, merge, or review reply occurred.

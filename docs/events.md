@@ -36,7 +36,7 @@ Before you apply changes, review the service-manager, Caddy, GitHub, and infrast
 | repository driver | One timer-owned `agent-session-driver` process for each repository. | It reconciles fresh GitHub state, runs at most one agent phase, and performs full scans. |
 | Caddy or another edge proxy | One long-lived proxy process. | It publishes only `POST /github/webhook`. |
 
-Drivers omit `--events-config` in legacy full-scan mode. Queue mode uses the shared event
+Drivers omit `--events-config` in full-scan mode. Queue mode uses the shared event
 configuration and event daemon.
 
 For public GitHub webhooks, add an edge proxy.
@@ -53,7 +53,8 @@ Do not put the database on network storage.
 4. Replace every `EXAMPLE_*` value and sentinel ID in `events.toml`.
 5. Create the shared read environment, webhook secret, and private driver environment.
 6. Add the shared read environment and private driver environment to each driver instance.
-7. If GitHub sends webhooks, register the endpoint and secret with the approved procedure.
+7. If GitHub sends webhooks, register the endpoint, secret, JSON content type, and events with the
+   approved procedure.
 8. Keep every queue process stopped during migration.
 9. Run `migrate`, `doctor`, and `queue-status` before service startup.
 10. Start the event daemon before existing repository driver timers.
@@ -137,6 +138,15 @@ The example Caddyfile routes only `/github/webhook` to `127.0.0.1:8080`. It does
 
 ## GitHub inputs
 
+Set the webhook content type to `application/json` in the GitHub user interface. If you use the
+API, set `content_type` to `json`. Do not select `application/x-www-form-urlencoded`.
+
+That format sends JSON in a form field, which this receiver does not decode.
+
+Set the webhook endpoint to the public URL that maps to `POST /github/webhook`. Set the same secret
+that the event daemon reads from `AGENT_SESSION_WEBHOOK_SECRET_FILE`. After you save the webhook,
+make sure that the ping delivery returns HTTP 202 from the raw-JSON receiver.
+
 Configure the webhook endpoint for these events:
 
 - `issues` and `issue_comment`
@@ -148,6 +158,17 @@ Projects and reactions have no usable webhook input for this queue. The daemon p
 Projects V2 boards and active approval watches with the shared read credential.
 
 ## Migration, status, and recovery
+
+If the host used the preview topology, stop these retired units through the approved host procedure:
+
+- `agent-session-events-webhook.service`
+- `agent-session-projects.service`
+- `agent-session-projects.timer`
+- `agent-session-reactions@.service`
+- `agent-session-reactions@.timer`
+
+Before you start the combined event service, disable those retired units through the approved host
+procedure.
 
 Before migration, stop the event daemon and repository drivers through the approved host procedure.
 Make sure that no process has the database open. Back up the database, `-wal`, and `-shm` files as
