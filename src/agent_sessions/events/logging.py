@@ -6,7 +6,17 @@ import json
 import sys
 from typing import Any
 
-_SAFE = {"delivery_guid", "event_type", "action", "repository_id", "disposition", "elapsed_ms", "message"}
+_SAFE = {
+    "delivery_guid",
+    "event_type",
+    "action",
+    "repository_id",
+    "disposition",
+    "elapsed_ms",
+    "http_status",
+    "invalidation_count",
+    "message",
+}
 
 
 def emit(event: str, **fields: Any) -> None:

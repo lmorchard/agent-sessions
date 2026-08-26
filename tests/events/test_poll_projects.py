@@ -665,6 +665,33 @@ def test_project_source_lease_excludes_a_second_pass(tmp_path: Path) -> None:
     assert called is False
 
 
+def test_shutdown_stops_project_polling_before_the_next_board(tmp_path: Path) -> None:
+    store = migrated(tmp_path)
+    stopping = False
+    fetched: list[str] = []
+    boards = (BOARD, BoardConfig("owner", 10, (2,)))
+
+    def fetcher(board: BoardConfig, _token: str) -> CompleteProjectSnapshot:
+        nonlocal stopping
+        fetched.append(board.key)
+        stopping = True
+        return CompleteProjectSnapshot(board.key, (), NOW)
+
+    outcome = poll_projects_once(
+        config(tmp_path / "events.sqlite3", boards=boards),
+        store,
+        "read-token",
+        worker_id="projects",
+        now=NOW,
+        fetcher=fetcher,
+        stop_requested=lambda: stopping,
+        clock=lambda: NOW,
+    )
+
+    assert outcome.attempted == 1
+    assert fetched == ["owner/9"]
+
+
 def test_project_worker_losing_its_lease_cannot_replace_the_snapshot(
     tmp_path: Path,
 ) -> None:

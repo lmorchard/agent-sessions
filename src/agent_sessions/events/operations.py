@@ -19,7 +19,7 @@ from agent_sessions.driver import credentials
 
 from . import config
 from .models import EventsConfig, QueueStatus
-from .store import CURRENT_SCHEMA_VERSION, QueueStore, migration_scripts
+from .store import CURRENT_SCHEMA_VERSION, QueueStore, schema_shape_is_current
 
 ProbeStatus = Literal["pass", "fail", "warn", "skip"]
 CredentialResolver = Callable[[Mapping[str, str]], str]
@@ -173,85 +173,6 @@ def _database_path_probe(
 def _query_one(connection: sqlite3.Connection, statement: str) -> Any:
     row = connection.execute(statement).fetchone()
     return None if row is None else row[0]
-
-
-def _schema_shape_is_current(connection: sqlite3.Connection) -> bool:
-    expected = sqlite3.connect(":memory:")
-    try:
-        for script in migration_scripts():
-            expected.executescript(script)
-        expected_tables = {
-            row[0]
-            for row in expected.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-            )
-        }
-        expected_shapes = {
-            table: tuple(
-                tuple(row)
-                for row in expected.execute(f'PRAGMA table_info("{table}")')
-            )
-            for table in expected_tables
-        }
-        expected_foreign_keys = {
-            table: tuple(
-                tuple(row)
-                for row in expected.execute(f'PRAGMA foreign_key_list("{table}")')
-            )
-            for table in expected_tables
-        }
-
-        def indexes(db: sqlite3.Connection, table: str) -> frozenset[tuple[object, ...]]:
-            result: set[tuple[object, ...]] = set()
-            for row in db.execute(f'PRAGMA index_list("{table}")'):
-                name = row[1]
-                origin = row[3]
-                columns = tuple(
-                    (item[2], item[3], item[4], item[5])
-                    for item in db.execute(f'PRAGMA index_xinfo("{name}")')
-                )
-                result.add(
-                    (
-                        name if origin == "c" else None,
-                        row[2],
-                        origin,
-                        row[4],
-                        columns,
-                    )
-                )
-            return frozenset(result)
-
-        expected_indexes = {
-            table: indexes(expected, table) for table in expected_tables
-        }
-    finally:
-        expected.close()
-
-    tables = {
-        row[0]
-        for row in connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-        )
-    }
-    if not expected_tables <= tables:
-        return False
-    for table, expected_columns in expected_shapes.items():
-        columns = tuple(
-            tuple(row)
-            for row in connection.execute(f'PRAGMA table_info("{table}")')
-        )
-        if columns != expected_columns:
-            return False
-        foreign_keys = tuple(
-            tuple(row)
-            for row in connection.execute(f'PRAGMA foreign_key_list("{table}")')
-        )
-        if foreign_keys != expected_foreign_keys[table]:
-            return False
-        if indexes(connection, table) != expected_indexes[table]:
-            return False
-    return True
 
 
 def _sqlite_probes(loaded: EventsConfig) -> tuple[list[DoctorProbe], QueueStatus | None]:
@@ -435,7 +356,7 @@ def _sqlite_probes(loaded: EventsConfig) -> tuple[list[DoctorProbe], QueueStatus
             ]
             schema_ready = versions == list(
                 range(1, CURRENT_SCHEMA_VERSION + 1)
-            ) and _schema_shape_is_current(connection)
+            ) and schema_shape_is_current(connection)
             probes.append(
                 DoctorProbe(
                     "sqlite-schema",

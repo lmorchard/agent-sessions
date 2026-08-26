@@ -75,6 +75,36 @@ def test_open_refuses_an_ahead_schema(tmp_path: Path) -> None:
         QueueStore.open(path, busy_timeout_ms=10)
 
 
+def test_open_refuses_schema_shape_damage_with_current_migration_versions(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "events.sqlite3"
+    QueueStore.migrate(path, busy_timeout_ms=10)
+    connection = sqlite3.connect(path)
+    connection.execute("DROP INDEX dirty_claim_idx")
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(IncompatibleSchema):
+        QueueStore.open(path, busy_timeout_ms=10)
+
+
+def test_ready_detects_schema_shape_damage_after_open(tmp_path: Path) -> None:
+    path = tmp_path / "events.sqlite3"
+    QueueStore.migrate(path, busy_timeout_ms=10)
+    store = QueueStore.open(path, busy_timeout_ms=10)
+    connection = sqlite3.connect(path)
+    connection.execute("DROP INDEX dirty_claim_idx")
+    connection.commit()
+    connection.close()
+
+    health = store.ready()
+
+    assert health.ready is False
+    assert health.schema_version == CURRENT_SCHEMA_VERSION
+    assert health.error == "incompatible schema"
+
+
 def test_migrate_refuses_an_ahead_schema_without_applying_more_migrations(tmp_path: Path) -> None:
     path = tmp_path / "events.sqlite3"
     QueueStore.migrate(path, busy_timeout_ms=10)

@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import hmac
 import json
-import logging
 import time
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -15,6 +14,7 @@ from typing import Any, Protocol
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from . import logging as event_logging
 from .models import (
     EnqueueResult,
     EventsConfig,
@@ -26,7 +26,6 @@ from .models import (
 )
 from .normalize import normalize_delivery
 
-logger = logging.getLogger(__name__)
 _HEX = frozenset("0123456789abcdefABCDEF")
 
 
@@ -48,18 +47,16 @@ def _signature_is_valid(value: str) -> bool:
 
 def _log(delivery: VerifiedDelivery | None, *, status: int, invalidation_count: int, started_at: float) -> None:
     """Emit only receiver-safe diagnostic fields."""
-    logger.info(
+    event_logging.emit(
         "webhook_delivery",
-        extra={
-            "delivery_guid": None if delivery is None else delivery.guid,
-            "event": None if delivery is None else delivery.event_type,
-            "action": None if delivery is None else delivery.action,
-            "repository_id": None if delivery is None else delivery.repository_id,
-            "disposition": None if delivery is None else delivery.disposition,
-            "invalidation_count": invalidation_count,
-            "http_status": status,
-            "elapsed_ms": int((time.monotonic() - started_at) * 1000),
-        },
+        delivery_guid=None if delivery is None else delivery.guid,
+        event_type=None if delivery is None else delivery.event_type,
+        action=None if delivery is None else delivery.action,
+        repository_id=None if delivery is None else delivery.repository_id,
+        disposition=None if delivery is None else delivery.disposition,
+        invalidation_count=invalidation_count,
+        http_status=status,
+        elapsed_ms=int((time.monotonic() - started_at) * 1000),
     )
 
 

@@ -136,8 +136,13 @@ def _scheduled_polls(
             ScheduledPoll(
                 "poll-projects",
                 loaded.polling.projects_interval,
-                lambda store, now: pollers.poll_projects_once(
-                    loaded, store, read_token, worker_id=_worker_id("poll-projects"), now=now
+                lambda store, now, stop_requested: pollers.poll_projects_once(
+                    loaded,
+                    store,
+                    read_token,
+                    worker_id=_worker_id("poll-projects"),
+                    now=now,
+                    stop_requested=stop_requested,
                 ),
             )
         )
@@ -145,13 +150,14 @@ def _scheduled_polls(
         ScheduledPoll(
             "poll-reactions",
             loaded.polling.reactions_interval,
-            lambda store, now: pollers.poll_reactions_once(
+            lambda store, now, stop_requested: pollers.poll_reactions_once(
                 loaded,
                 store,
                 read_token,
                 bot_logins,
                 worker_id=_worker_id("poll-reactions"),
                 now=now,
+                stop_requested=stop_requested,
             ),
         )
     )

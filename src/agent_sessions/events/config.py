@@ -89,6 +89,7 @@ def load(path: Path) -> EventsConfig:
         names.add(pair)
         repositories.append(RepositoryConfig(identity))
     boards: list[BoardConfig] = []
+    board_identities: set[tuple[str, int]] = set()
     for item in _table_array(raw["boards"], "boards"):
         _expect_keys(item, _BOARD, "board")
         raw_repository_ids = item["repository_ids"]
@@ -97,7 +98,13 @@ def load(path: Path) -> EventsConfig:
         repository_ids = tuple(_positive(repository_id, "board repository id") for repository_id in raw_repository_ids)
         if any(repository_id not in ids for repository_id in repository_ids):
             raise ValueError("board references an unknown repository")
-        boards.append(BoardConfig(_owner_name(item["owner"], "board owner"), _positive(item["number"], "board number"), repository_ids))
+        owner = _owner_name(item["owner"], "board owner")
+        number = _positive(item["number"], "board number")
+        board_identity = (owner.casefold(), number)
+        if board_identity in board_identities:
+            raise ValueError("duplicate board owner/number")
+        board_identities.add(board_identity)
+        boards.append(BoardConfig(owner, number, repository_ids))
     return EventsConfig(
         database=database,
         busy_timeout_ms=values["busy_timeout_ms"], claim_limit=values["claim_limit"],

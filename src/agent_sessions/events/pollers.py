@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from .github import (
     ApprovalPredicateObservation,
     CompleteProjectSnapshot,
+    GitHubReadStopped,
     fetch_approval_predicates,
     fetch_project_items,
 )
@@ -27,6 +28,10 @@ from .store import QueueStore
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _never_stop() -> bool:
+    return False
 
 
 @dataclass(frozen=True)
@@ -108,13 +113,16 @@ def poll_projects_once(
     *,
     worker_id: str,
     now: datetime,
-    fetcher: Callable[[BoardConfig, str], CompleteProjectSnapshot] = fetch_project_items,
+    fetcher: Callable[[BoardConfig, str], CompleteProjectSnapshot] | None = None,
     clock: Callable[[], datetime] = _utc_now,
+    stop_requested: Callable[[], bool] = _never_stop,
 ) -> PollRunResult:
     """Poll every configured board once, under an independent source lease."""
     attempted = skipped = invalidation_count = 0
     errors: list[str] = []
     for board in config.boards:
+        if stop_requested():
+            break
         source_key = f"projects:{board.key}"
         if not store.acquire_poller_lease(
             source_key,
@@ -126,7 +134,15 @@ def poll_projects_once(
             continue
         attempted += 1
         try:
-            snapshot = fetcher(board, token)
+            snapshot = (
+                fetch_project_items(
+                    board,
+                    token,
+                    stop_requested=stop_requested,
+                )
+                if fetcher is None
+                else fetcher(board, token)
+            )
             if snapshot.board_key != board.key:
                 raise PollFailure("project snapshot belongs to a different board")
             established = store.poller_last_success_at(source_key) is not None
@@ -155,6 +171,14 @@ def poll_projects_once(
                 now=committed_at,
             )
             invalidation_count += len(invalidations)
+        except GitHubReadStopped:
+            store.finish_poller(
+                source_key,
+                worker_id=worker_id,
+                succeeded=False,
+                now=clock(),
+            )
+            break
         except Exception as error:  # every failed source must release its lease and fail the pass
             message = f"{source_key}: {error}"
             errors.append(message)
@@ -179,13 +203,17 @@ def poll_reactions_once(
     fetcher: Callable[
         [RepositoryConfig, tuple[ApprovalWatch, ...], str, frozenset[str]],
         tuple[ApprovalPredicateObservation, ...],
-    ] = fetch_approval_predicates,
+    ]
+    | None = None,
     clock: Callable[[], datetime] = _utc_now,
+    stop_requested: Callable[[], bool] = _never_stop,
 ) -> PollRunResult:
     """Poll active approval watches once, under one lease per repository."""
     attempted = skipped = invalidation_count = 0
     errors: list[str] = []
     for repository in config.repositories:
+        if stop_requested():
+            break
         repository_id = repository.identity.id
         watches = store.list_watches(repository_id)
         if not watches:
@@ -201,7 +229,17 @@ def poll_reactions_once(
             continue
         attempted += 1
         try:
-            observations = fetcher(repository, watches, token, bot_logins)
+            observations = (
+                fetch_approval_predicates(
+                    repository,
+                    watches,
+                    token,
+                    bot_logins,
+                    stop_requested=stop_requested,
+                )
+                if fetcher is None
+                else fetcher(repository, watches, token, bot_logins)
+            )
             expected = {
                 (item.repository_id, item.issue_number, item.predicate, item.parked_at)
                 for item in watches
@@ -239,6 +277,14 @@ def poll_reactions_once(
                 succeeded=True,
                 now=completed_at,
             )
+        except GitHubReadStopped:
+            store.finish_poller(
+                source_key,
+                worker_id=worker_id,
+                succeeded=False,
+                now=clock(),
+            )
+            break
         except Exception as error:  # failed fetches preserve observations and fail the pass
             errors.append(f"{source_key}: {error}")
             store.finish_poller(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -12,7 +13,8 @@ from typing import Any
 from .pollers import PollRunResult
 from .store import QueueStore
 
-PollPass = Callable[[QueueStore, datetime], PollRunResult]
+StopRequested = Callable[[], bool]
+PollPass = Callable[[QueueStore, datetime, StopRequested], PollRunResult]
 
 
 @dataclass(frozen=True)
@@ -35,13 +37,19 @@ class DaemonRuntime:
         self._polls = polls
         self._result_logger = result_logger
         self._stopping = asyncio.Event()
+        self._stop_requested = threading.Event()
         self._tasks: tuple[asyncio.Task[None], ...] = ()
 
     async def _run(self, poll: ScheduledPoll) -> None:
         while not self._stopping.is_set():
             store = self._store_factory()
             try:
-                result = await asyncio.to_thread(poll.run, store, datetime.now(UTC))
+                result = await asyncio.to_thread(
+                    poll.run,
+                    store,
+                    datetime.now(UTC),
+                    self._stop_requested.is_set,
+                )
                 self._result_logger(poll.name, result)
             finally:
                 store.close()
@@ -55,6 +63,7 @@ class DaemonRuntime:
     @asynccontextmanager
     async def lifespan(self, _app: Any) -> AsyncIterator[None]:
         self._stopping.clear()
+        self._stop_requested.clear()
         self._tasks = tuple(
             asyncio.create_task(self._run(poll), name=f"event-poll:{poll.name}")
             for poll in self._polls
@@ -62,6 +71,7 @@ class DaemonRuntime:
         try:
             yield
         finally:
+            self._stop_requested.set()
             self._stopping.set()
             if self._tasks:
                 await asyncio.gather(*self._tasks, return_exceptions=True)

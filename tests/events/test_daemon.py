@@ -48,7 +48,9 @@ async def test_runtime_runs_each_poll_immediately_then_at_its_own_fixed_delay_wi
     active = maximum_active = 0
     lock = threading.Lock()
 
-    def projects(store: QueueStore, _now: datetime) -> PollRunResult:
+    def projects(
+        store: QueueStore, _now: datetime, _stop_requested
+    ) -> PollRunResult:
         nonlocal active, maximum_active
         with lock:
             active += 1
@@ -67,7 +69,9 @@ async def test_runtime_runs_each_poll_immediately_then_at_its_own_fixed_delay_wi
                     completed_at.append(time.monotonic())
                     first_completed.set()
 
-    def reactions(_store: QueueStore, _now: datetime) -> PollRunResult:
+    def reactions(
+        _store: QueueStore, _now: datetime, _stop_requested
+    ) -> PollRunResult:
         reactions_started.append(time.monotonic())
         return PollRunResult(attempted=1)
 
@@ -109,12 +113,14 @@ async def test_runtime_logs_result_failures_but_a_raised_pass_exception_makes_it
     logged: list[tuple[str, PollRunResult]] = []
     calls = 0
 
-    def transient(_store: QueueStore, _now: datetime) -> PollRunResult:
+    def transient(
+        _store: QueueStore, _now: datetime, _stop_requested
+    ) -> PollRunResult:
         nonlocal calls
         calls += 1
         return PollRunResult(errors=("temporary source failure",))
 
-    def broken(_store: QueueStore, _now: datetime) -> PollRunResult:
+    def broken(_store: QueueStore, _now: datetime, _stop_requested) -> PollRunResult:
         raise RuntimeError("unexpected poll crash")
 
     runtime = DaemonRuntime(
@@ -143,7 +149,9 @@ async def test_runtime_shutdown_waits_for_an_inflight_bounded_pass(tmp_path: Pat
     release = threading.Event()
     loop = asyncio.get_running_loop()
 
-    def in_flight(_store: QueueStore, _now: datetime) -> PollRunResult:
+    def in_flight(
+        _store: QueueStore, _now: datetime, _stop_requested
+    ) -> PollRunResult:
         entered.set()
         while not release.is_set():
             time.sleep(0.005)
@@ -169,6 +177,51 @@ async def test_runtime_shutdown_waits_for_an_inflight_bounded_pass(tmp_path: Pat
             await lifespan.__aexit__(None, None, None)
 
     assert len(stores) == 1
+
+
+@pytest.mark.anyio
+async def test_runtime_shutdown_stops_an_inflight_pass_before_its_next_call(
+    tmp_path: Path,
+) -> None:
+    from agent_sessions.events.daemon import DaemonRuntime, ScheduledPoll
+
+    database = tmp_path / "events.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    stores: list[QueueStore] = []
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    second_entered = threading.Event()
+
+    def two_calls(
+        _store: QueueStore,
+        _now: datetime,
+        stop_requested,
+    ) -> PollRunResult:
+        first_entered.set()
+        assert release_first.wait(timeout=1)
+        if not stop_requested():
+            second_entered.set()
+        return PollRunResult(attempted=1)
+
+    runtime = DaemonRuntime(
+        _store_factory(database, stores),
+        (ScheduledPoll("projects", timedelta(seconds=1), two_calls),),
+        lambda _name, _result: None,
+    )
+    lifespan = runtime.lifespan(None)
+    await lifespan.__aenter__()
+    exit_task: asyncio.Task[object] | None = None
+    try:
+        assert await asyncio.to_thread(first_entered.wait, 1)
+        exit_task = asyncio.create_task(lifespan.__aexit__(None, None, None))
+        await asyncio.sleep(0.05)
+        release_first.set()
+        await exit_task
+        assert not second_entered.is_set()
+    finally:
+        release_first.set()
+        if exit_task is None:
+            await lifespan.__aexit__(None, None, None)
 
 
 def test_scheduled_polls_omit_projects_without_boards_but_keep_reactions() -> None:

@@ -478,11 +478,17 @@ def select_work(
             candidate_issues_by_claim.get(selected_claim, set()) - {selected[0]},
             key=int,
         )
-        if selected_claim.target_kind == "pull_request" and sibling_numbers:
+        if sibling_numbers:
+            diagnostic = {
+                "source_target_kind": selected_claim.target_kind,
+                "source_target_key": selected_claim.target_key,
+            }
+            if selected_claim.target_kind == "pull_request":
+                diagnostic["source_pull_request"] = selected_claim.target_key
             runtime.store.enqueue_synthetic(
                 "claim_resolution",
                 (
-                    f"pull_request:{selected_claim.repository_id}:"
+                    f"{selected_claim.target_kind}:{selected_claim.repository_id}:"
                     f"{selected_claim.target_key}:{selected_claim.generation}"
                 ),
                 (
@@ -491,7 +497,7 @@ def select_work(
                         "issue",
                         number,
                         "unselected_closing_issue",
-                        {"source_pull_request": selected_claim.target_key},
+                        diagnostic,
                     )
                     for number in sibling_numbers
                 ),

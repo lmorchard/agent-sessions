@@ -151,6 +151,16 @@ name = "repo"
         config.load(write_config(tmp_path / "missing.toml", missing))
 
 
+@pytest.mark.parametrize("duplicate_owner", ("lmorchard", "LMORCHARD"))
+def test_rejects_case_insensitive_duplicate_board_identities(
+    tmp_path: Path, duplicate_owner: str
+) -> None:
+    duplicate = VALID + BOARD_TABLE.replace("lmorchard", duplicate_owner)
+
+    with pytest.raises(ValueError, match="duplicate board"):
+        config.load(write_config(tmp_path / "duplicate-board.toml", duplicate))
+
+
 @pytest.mark.parametrize(
     ("case", "message"),
     [

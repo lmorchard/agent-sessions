@@ -1351,6 +1351,73 @@ def test_selected_pr_claim_materializes_unselected_closing_issue_for_the_next_ru
     assert second.selected_claim.target_key == "21"
 
 
+def test_selected_revision_claim_preserves_unselected_issue_after_acknowledgement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    current = runtime(tmp_path)
+    enqueue(current, ("revision", "wanted"))
+    spec = "<!-- agent-session:spec -->\n## Tier: auto-ok"
+    install_resolver(
+        monkeypatch,
+        FakeResolver(
+            {
+                ("revision", "wanted"): ResolvedTarget(
+                    claim("revision", "wanted"),
+                    (issue(20, body=spec), issue(21, body=spec)),
+                    (
+                        pull(120, closes=(20,), head="wanted"),
+                        pull(121, closes=(21,), head="wanted"),
+                    ),
+                    (),
+                )
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "agent_sessions.driver.agent_session_driver.acquire_lock",
+        lambda *_args, **_kwargs: True,
+    )
+
+    first = select_work(context(tmp_path), current, now=NOW, worker_id="first")
+
+    assert first.selection is not None
+    assert first.selection.candidates == [("20", "request_review")]
+    assert first.selected_claim is not None
+    assert first.selected_claim.target_kind == "revision"
+    assert current.store.acknowledge(first.selected_claim)
+    dirty = current.store.connection.execute(
+        "SELECT target_kind,target_key,generation,lease_owner "
+        "FROM dirty_targets ORDER BY target_kind,target_key"
+    ).fetchall()
+    assert [tuple(row) for row in dirty] == [("issue", "21", 1, None)]
+
+    install_resolver(
+        monkeypatch,
+        FakeResolver(
+            {
+                ("issue", "21"): ResolvedTarget(
+                    claim("issue", "21"),
+                    (issue(21, body=spec),),
+                    (),
+                    (),
+                )
+            }
+        ),
+    )
+    second = select_work(
+        context(tmp_path),
+        current,
+        now=NOW + timedelta(seconds=1),
+        worker_id="second",
+    )
+
+    assert second.selection is not None
+    assert second.selection.candidates == [("21", "execute")]
+    assert second.selected_claim is not None
+    assert second.selected_claim.target_kind == "issue"
+    assert second.selected_claim.target_key == "21"
+
+
 def test_pr_sibling_materialization_coalesces_and_preserves_a_newer_generation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

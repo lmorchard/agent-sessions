@@ -31,6 +31,10 @@ class GitHubTransientError(GitHubError):
     """A target read may succeed on a later queue attempt."""
 
 
+class GitHubReadStopped(GitHubTransientError):
+    """A read was not started because service shutdown was requested."""
+
+
 class GitHubPermanentError(GitHubError):
     """A target read failed in a way retrying cannot repair."""
 
@@ -208,9 +212,11 @@ class LiveTargetResolver:
         *,
         read_token: str,
         runner: Callable[..., Any] | None = None,
+        stop_requested: Callable[[], bool] | None = None,
     ) -> None:
         self.read_token = read_token
         self.runner = subprocess.run if runner is None else runner
+        self.stop_requested = (lambda: False) if stop_requested is None else stop_requested
 
     def _read(
         self,
@@ -219,6 +225,8 @@ class LiveTargetResolver:
         missing_is_permanent: bool = False,
         token: str | None = None,
     ) -> JSONValue:
+        if self.stop_requested():
+            raise GitHubReadStopped("GitHub read stopped before starting a subprocess")
         env = dict(os.environ)
         credential = self.read_token if token is None else token
         env["GH_TOKEN"] = credential
@@ -667,12 +675,17 @@ def fetch_board_items(
     *,
     token: str,
     runner: Callable[..., Any] | None = None,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> list[dict[str, JSONValue]]:
     """Read a complete board snapshot without converting failures to emptiness."""
     if "/" not in board:
         raise GitHubTransientError("board identifier is malformed")
     owner, number = board.split("/", 1)
-    resolver = LiveTargetResolver(read_token=token, runner=runner)
+    resolver = LiveTargetResolver(
+        read_token=token,
+        runner=runner,
+        stop_requested=stop_requested,
+    )
     value = resolver._dict(
         resolver._read(
             [
@@ -791,10 +804,15 @@ def fetch_project_items(
     *,
     runner: Callable[..., Any] | None = None,
     now: datetime | None = None,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> CompleteProjectSnapshot:
     """Fetch and validate one complete Projects V2 routing projection."""
     fetched_at = datetime.now(UTC) if now is None else now
-    resolver = LiveTargetResolver(read_token=token, runner=runner)
+    resolver = LiveTargetResolver(
+        read_token=token,
+        runner=runner,
+        stop_requested=stop_requested,
+    )
     try:
         pages = resolver._graphql_pages(
             _PROJECT_ITEMS_QUERY,
@@ -842,7 +860,7 @@ def fetch_project_items(
                     raise PollFailure("GitHub returned a duplicate project item")
                 item_ids.add(projection.item_node_id)
                 projections.append(projection)
-    except PollFailure:
+    except (PollFailure, GitHubReadStopped):
         raise
     except GitHubError as error:
         raise PollFailure(str(error)) from error
@@ -925,9 +943,14 @@ def fetch_approval_predicates(
     bot_logins: frozenset[str],
     *,
     runner: Callable[..., Any] | None = None,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> tuple[ApprovalPredicateObservation, ...]:
     """Resolve only active approval watches for one repository."""
-    resolver = LiveTargetResolver(read_token=token, runner=runner)
+    resolver = LiveTargetResolver(
+        read_token=token,
+        runner=runner,
+        stop_requested=stop_requested,
+    )
     observations: list[ApprovalPredicateObservation] = []
     try:
         for watch in watches:
@@ -942,7 +965,7 @@ def fetch_approval_predicates(
                     _approval_predicate(resolver, comments, watch, bot_logins),
                 )
             )
-    except PollFailure:
+    except (PollFailure, GitHubReadStopped):
         raise
     except GitHubError as error:
         raise PollFailure(str(error)) from error

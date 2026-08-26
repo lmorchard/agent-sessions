@@ -94,6 +94,63 @@ async def test_signed_exact_bytes_are_retained_after_normalization(tmp_path: Pat
 
 
 @pytest.mark.anyio
+async def test_delivery_outcomes_emit_safe_structured_json_records(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent_sessions.events.webhook import create_app
+
+    store = store_for(tmp_path)
+    app = create_app(
+        config=config(tmp_path / "events.sqlite3"),
+        store=store,
+        webhook_secret=SECRET,
+    )
+    accepted_body = body()
+    malformed_body = body(issue={"number": "wrong"})
+
+    assert (await request(app, accepted_body)).status_code == 202
+    assert (
+        await request(
+            app,
+            malformed_body,
+            **{"X-GitHub-Delivery": "delivery-bad"},
+        )
+    ).status_code == 400
+
+    captured = capsys.readouterr().err
+    records = [json.loads(line) for line in captured.splitlines()]
+    assert len(records) == 2
+    assert records[0] == {
+        "action": "opened",
+        "delivery_guid": "delivery-1",
+        "disposition": "accepted",
+        "elapsed_ms": records[0]["elapsed_ms"],
+        "event": "webhook_delivery",
+        "event_type": "issues",
+        "http_status": 202,
+        "invalidation_count": 1,
+        "repository_id": 1,
+    }
+    assert isinstance(records[0]["elapsed_ms"], int)
+    assert records[1] == {
+        "action": "opened",
+        "delivery_guid": "delivery-bad",
+        "disposition": "malformed",
+        "elapsed_ms": records[1]["elapsed_ms"],
+        "event": "webhook_delivery",
+        "event_type": "issues",
+        "http_status": 400,
+        "invalidation_count": 0,
+        "repository_id": 1,
+    }
+    assert accepted_body.decode() not in captured
+    assert malformed_body.decode() not in captured
+    assert SECRET.decode() not in captured
+    assert headers(accepted_body)["X-Hub-Signature-256"] not in captured
+
+
+@pytest.mark.anyio
 async def test_headers_signatures_and_malformed_supported_payloads_are_rejected_without_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_sessions.events import webhook
 
@@ -385,11 +442,17 @@ repository_ids = [1]
         resolved_logins.append(token)
         return "agent-reader"
 
-    def projects(_config, _store, token, *, worker_id, now) -> PollRunResult:
+    def projects(
+        _config, _store, token, *, worker_id, now, stop_requested
+    ) -> PollRunResult:
+        assert stop_requested() is False
         received_tokens.append(("projects", token))
         return PollRunResult()
 
-    def reactions(_config, _store, token, bot_logins, *, worker_id, now) -> PollRunResult:
+    def reactions(
+        _config, _store, token, bot_logins, *, worker_id, now, stop_requested
+    ) -> PollRunResult:
+        assert stop_requested() is False
         received_tokens.append(("reactions", token))
         received_bot_logins.append(bot_logins)
         return PollRunResult()
@@ -419,7 +482,7 @@ repository_ids = [1]
     assert CapturedRuntime.instance is not None
     for _pass in range(2):
         for poll in CapturedRuntime.instance.polls:
-            poll.run(object(), NOW)
+            poll.run(object(), NOW, lambda: False)
     assert received_tokens == [
         ("projects", "read-token"),
         ("reactions", "read-token"),

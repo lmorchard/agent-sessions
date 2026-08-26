@@ -50,6 +50,28 @@ def test_github_reads_have_a_bounded_timeout_and_translate_expiry() -> None:
     assert calls[0]["timeout"] == 60
 
 
+def test_github_reads_check_for_shutdown_before_each_subprocess() -> None:
+    stopping = False
+    calls = 0
+
+    def runner(_command, **_kwargs):
+        nonlocal calls, stopping
+        calls += 1
+        stopping = True
+        return Result(stdout="{}")
+
+    resolver = LiveTargetResolver(
+        read_token="read-token",
+        runner=runner,
+        stop_requested=lambda: stopping,
+    )
+
+    assert resolver._read(["gh", "api", "user"]) == {}
+    with pytest.raises(GitHubTransientError, match="stopped"):
+        resolver._read(["gh", "api", "rate_limit"])
+    assert calls == 1
+
+
 class Result:
     def __init__(self, *, returncode: int = 0, stdout: str = "", stderr: str = "") -> None:
         self.returncode = returncode
@@ -609,10 +631,15 @@ def test_poll_reactions_cli_runs_one_pass_with_only_the_read_credential(
         lambda: "read-token",
     )
     resolved_logins: list[str] = []
+
+    def resolve_read_login(token: str) -> str:
+        resolved_logins.append(token)
+        return "agent-reader"
+
     monkeypatch.setattr(
         cli.credentials,
         "resolve_read_login",
-        lambda token: resolved_logins.append(token) or "agent-reader",
+        resolve_read_login,
     )
     monkeypatch.setattr(
         cli.credentials,
