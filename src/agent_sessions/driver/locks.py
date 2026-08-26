@@ -13,7 +13,9 @@ from agent_sessions.driver.output import log
 CURRENT_LOCK_ISSUE: str | None = None
 
 
-def release_lock(repo_path: Path) -> None:
+def release_lock(
+    repo_path: Path, *, write_env: dict[str, str] | None = None
+) -> None:
     global CURRENT_LOCK_ISSUE
     if CURRENT_LOCK_ISSUE:
         log(f"Releasing lock for #{CURRENT_LOCK_ISSUE}...")
@@ -21,13 +23,21 @@ def release_lock(repo_path: Path) -> None:
             subprocess.run(
                 ["git", "-C", str(repo_path), "push", "origin", f":refs/locks/issue-{CURRENT_LOCK_ISSUE}"],
                 capture_output=True,
+                env=write_env,
             )
         except Exception:
             pass
         CURRENT_LOCK_ISSUE = None
 
 
-def acquire_lock(issue_number: str | int, phase: str, repo_path: Path) -> bool:
+def acquire_lock(
+    issue_number: str | int,
+    phase: str,
+    repo_path: Path,
+    *,
+    read_env: dict[str, str] | None = None,
+    write_env: dict[str, str] | None = None,
+) -> bool:
     global CURRENT_LOCK_ISSUE
     if not repo_path or not str(repo_path):
         return True
@@ -81,6 +91,7 @@ def acquire_lock(issue_number: str | int, phase: str, repo_path: Path) -> bool:
             ["git", "-C", str(repo_path), "ls-remote", "origin", lock_ref],
             capture_output=True,
             text=True,
+            env=read_env,
         )
         current_lock = res.stdout.split()[0] if res.stdout.strip() else ""
     except Exception:
@@ -92,6 +103,7 @@ def acquire_lock(issue_number: str | int, phase: str, repo_path: Path) -> bool:
                 ["git", "-C", str(repo_path), "push", "origin", f"{lock_sha}:{lock_ref}"],
                 capture_output=True,
                 text=True,
+                env=write_env,
             )
             if res_push.returncode == 0:
                 CURRENT_LOCK_ISSUE = str(issue_number)
@@ -107,6 +119,7 @@ def acquire_lock(issue_number: str | int, phase: str, repo_path: Path) -> bool:
             ["git", "-C", str(repo_path), "fetch", "origin", lock_ref, "--depth", "1", "-q"],
             capture_output=True,
             text=True,
+            env=read_env,
         )
         res_log = subprocess.run(
             ["git", "-C", str(repo_path), "log", "-1", "--format=%ct", current_lock],
@@ -136,6 +149,7 @@ def acquire_lock(issue_number: str | int, phase: str, repo_path: Path) -> bool:
                 ],
                 capture_output=True,
                 text=True,
+                env=write_env,
             )
             if res_force.returncode == 0:
                 CURRENT_LOCK_ISSUE = str(issue_number)

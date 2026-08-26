@@ -608,13 +608,19 @@ def test_poll_reactions_cli_runs_one_pass_with_only_the_read_credential(
         "resolve_read_credential",
         lambda: "read-token",
     )
+    resolved_logins: list[str] = []
+    monkeypatch.setattr(
+        cli.credentials,
+        "resolve_read_login",
+        lambda token: resolved_logins.append(token) or "agent-reader",
+    )
     monkeypatch.setattr(
         cli.credentials,
         "resolve_board_credential",
         lambda: pytest.fail("Reaction polling inspected the board credential"),
     )
-    monkeypatch.setenv("DRIVER_GH_LOGIN", "agent-bot")
-    monkeypatch.setenv("DRIVER_BOT_LOGINS", "extra-bot")
+    monkeypatch.setenv("DRIVER_GH_LOGIN", "private-driver-login")
+    monkeypatch.setenv("DRIVER_BOT_LOGINS", "private-extra-bot")
 
     def one_pass(_config, _store, token, bot_logins, *, worker_id, now):
         calls.append((token, bot_logins, worker_id))
@@ -625,5 +631,8 @@ def test_poll_reactions_cli_runs_one_pass_with_only_the_read_credential(
 
     assert cli.main(["--config", str(tmp_path / "events.toml"), "poll-reactions"]) == 0
     assert len(calls) == 1 and calls[0][0] == "read-token"
-    assert {"agent-bot", "extra-bot"} <= calls[0][1]
+    assert "agent-reader" in calls[0][1]
+    assert "private-driver-login" not in calls[0][1]
+    assert "private-extra-bot" not in calls[0][1]
+    assert resolved_logins == ["read-token"]
     assert "attempted=1" in capsys.readouterr().err

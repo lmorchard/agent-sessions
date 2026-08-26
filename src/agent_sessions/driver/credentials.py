@@ -81,6 +81,18 @@ TOKEN_VARS = (
     "GH_ENTERPRISE_TOKEN",
     "GITHUB_ENTERPRISE_TOKEN",
     WRITE_TOKEN_VAR,
+    BOARD_TOKEN_VAR,
+)
+
+# Configuration that can resolve or expose a mutation credential. It is not all
+# secret material itself (`*_CMD` and the key path are configuration), so exposure
+# checks use `TOKEN_VARS` while the agent child strips this broader set.
+AGENT_CREDENTIAL_VARS = TOKEN_VARS + (
+    WRITE_TOKEN_VAR + CMD_SUFFIX,
+    BOARD_TOKEN_VAR + CMD_SUFFIX,
+    APP_ID_VAR,
+    APP_INSTALLATION_ID_VAR,
+    APP_PRIVATE_KEY_FILE_VAR,
 )
 
 #: Variables the read token is installed into for the child.
@@ -246,6 +258,36 @@ def resolve_read_credential(
     raise RuntimeError(f"{READ_TOKEN_VAR} or {READ_TOKEN_VAR}{CMD_SUFFIX} is required")
 
 
+def resolve_read_login(
+    read_token: str,
+    env: Mapping[str, str] | None = None,
+    *,
+    runner: CommandRunner | None = None,
+) -> str:
+    """Resolve the account behind the shared read credential."""
+    src = os.environ if env is None else env
+    command_runner = cast(CommandRunner, subprocess.run) if runner is None else runner
+    child = agent_env(dict(src), Credentials(read_token=read_token))
+    try:
+        result = command_runner(
+            ["gh", "api", "user", "--jq", ".login"],
+            capture_output=True,
+            text=True,
+            env=child,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("shared read credential identity lookup timed out") from error
+    except OSError as error:
+        raise RuntimeError("shared read credential identity lookup could not start") from error
+    if result.returncode != 0:
+        raise RuntimeError("shared read credential identity lookup failed")
+    login = str(result.stdout or "").strip()
+    if not login or login.startswith(("{", "[")):
+        raise RuntimeError("shared read credential identity lookup returned no login")
+    return login
+
+
 def resolve_board_credential(
     env: Mapping[str, str] | None = None,
     *,
@@ -396,7 +438,7 @@ def agent_env(env: dict[str, str], creds: Credentials) -> dict[str, str]:
     runner invoked on its own.
     """
     child = dict(env)
-    for var in TOKEN_VARS:
+    for var in AGENT_CREDENTIAL_VARS:
         child.pop(var, None)
     if creds.git_author_name:
         child["GIT_AUTHOR_NAME"] = creds.git_author_name
@@ -414,10 +456,11 @@ def agent_env(env: dict[str, str], creds: Credentials) -> dict[str, str]:
 
 
 def driver_env(env: dict[str, str], creds: Credentials) -> dict[str, str]:
-    """The environment the driver's own `gh` and `git` calls run in.
+    """The read-only default for the driver's own `gh` and `git` calls.
 
-    No write token configured is a configuration the driver refuses (`config_error`),
-    so this only strips the read token back out rather than inventing anything.
+    Repository and Project mutations must replace this environment explicitly at
+    their call boundaries. A missing read token removes inherited active credentials;
+    startup rejects that configuration separately.
     """
     parent = dict(env)
     if creds.git_author_name:
@@ -428,15 +471,27 @@ def driver_env(env: dict[str, str], creds: Credentials) -> dict[str, str]:
         parent["GIT_COMMITTER_NAME"] = creds.git_committer_name
     if creds.git_committer_email:
         parent["GIT_COMMITTER_EMAIL"] = creds.git_committer_email
-    if not creds.write_token:
+    if not creds.read_token:
         for var in AGENT_TOKEN_VARS:
-            if parent.get(var) and parent[var] == creds.read_token:
-                # The read token must never be the driver's active credential.
-                parent.pop(var, None)
+            parent.pop(var, None)
         return parent
     for var in AGENT_TOKEN_VARS:
-        parent[var] = creds.write_token
+        parent[var] = creds.read_token
     return parent
+
+
+def repository_write_env(
+    base_env: dict[str, str], creds: Credentials
+) -> dict[str, str]:
+    """Environment for one explicit repository mutation boundary."""
+    env = dict(base_env)
+    if not creds.write_token:
+        for var in AGENT_TOKEN_VARS:
+            env.pop(var, None)
+        return env
+    for var in AGENT_TOKEN_VARS:
+        env[var] = creds.write_token
+    return env
 
 
 def board_env(base_env: dict[str, str], creds: Credentials) -> dict[str, str]:
@@ -450,9 +505,7 @@ def board_env(base_env: dict[str, str], creds: Credentials) -> dict[str, str]:
 
 
 def apply_driver_env(creds: Credentials, env: dict[str, str] | None = None) -> None:
-    """Install the write credential into this process, so every `gh` and `git`
-    subprocess the driver spawns inherits it. The agent's child is built by
-    `agent_env`, which strips it back out again."""
+    """Install the shared read credential as the driver's process default."""
     target = os.environ if env is None else env
     desired = driver_env(dict(target), creds)
     for var in AGENT_TOKEN_VARS:

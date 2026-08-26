@@ -171,7 +171,15 @@ class WritesResult(writes.ExecuteResult):
     applied: int
 
 
-def perform_writes(writes_file: Path, repo: str, repo_path: Path, rundir: Path, board: str = "") -> WritesResult:
+def perform_writes(
+    writes_file: Path,
+    repo: str,
+    repo_path: Path,
+    rundir: Path,
+    board: str = "",
+    *,
+    write_env: dict[str, str] | None = None,
+) -> WritesResult:
     messages: list[str] = []
     try:
         entries = writes.load(writes_file)
@@ -180,7 +188,7 @@ def perform_writes(writes_file: Path, repo: str, repo_path: Path, rundir: Path, 
             repo=repo,
             repo_path=repo_path,
             scratch=rundir / "writes",
-            env=dict(os.environ),
+            env=dict(os.environ) if write_env is None else write_env,
             board=board,
         )
     except writes.ManifestError as e:

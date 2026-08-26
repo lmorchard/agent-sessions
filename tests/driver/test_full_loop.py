@@ -44,6 +44,7 @@ from pathlib import Path
 
 import pytest
 from loop_harness import (
+    BOARD_TOKEN,
     DRIVER_LOGIN,
     EMPTY_TREE,
     FROZEN,
@@ -199,6 +200,61 @@ def test_pass_ending_gate_eligible(loop):
     assert (rundir / "gate.yaml").read_text(encoding="utf-8") == gate.extract_gate(
         gh.pr_by_number(201)["body"]
     )
+
+
+def test_driver_reads_use_the_system_token_and_mutations_are_explicit(loop):
+    """The process default is read-only; each mutation crosses an explicit boundary."""
+    agent_session_driver._BOARD_METADATA_CACHE.clear()
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        board_items=[{**board_item(101), "id": "ITEM_101"}],
+    )
+
+    code, _out = loop.run(gh, agent=StubAgent())
+
+    assert code == 0
+
+    def tokens(prefix: list[str]) -> list[str]:
+        return [
+            env.get("GH_TOKEN", "")
+            for argv, env in gh.calls_with_env
+            if argv[: len(prefix)] == prefix
+        ]
+
+    for read_prefix in (
+        ["gh", "project", "item-list"],
+        ["gh", "project", "view"],
+        ["gh", "project", "field-list"],
+        ["gh", "issue", "list"],
+        ["gh", "pr", "list"],
+        ["gh", "discussion", "list"],
+        ["git", "-C", str(loop.repo_path), "ls-remote"],
+    ):
+        observed = tokens(read_prefix)
+        assert observed, (
+            f"the pass did not exercise the read boundary: {read_prefix}; "
+            f"commands={[argv for argv, _env in gh.calls_with_env]}"
+        )
+        assert set(observed) == {READ_TOKEN}, read_prefix
+
+    mutation_credentials = (
+        (["gh", "project", "item-edit"], BOARD_TOKEN),
+        (["gh", "discussion", "create"], WRITE_TOKEN),
+        (["gh", "discussion", "comment"], WRITE_TOKEN),
+        (["git", "-C", str(loop.repo_path), "push"], WRITE_TOKEN),
+    )
+    for mutation_prefix, expected_token in mutation_credentials:
+        observed = tokens(mutation_prefix)
+        assert observed, f"the pass did not exercise the mutation boundary: {mutation_prefix}"
+        assert set(observed) == {expected_token}, mutation_prefix
+
+    label_tokens = [
+        env.get("GH_TOKEN", "")
+        for argv, env in gh.calls_with_env
+        if argv and argv[0] == os.sys.executable and Path(argv[1]).name == "label_manager.py"
+    ]
+    assert label_tokens
+    assert set(label_tokens) == {WRITE_TOKEN}
 
 
 def test_pass_with_empty_diff_is_classified_as_gate_human(loop):
@@ -644,16 +700,14 @@ def test_the_driver_opens_the_pr_the_agent_recorded(loop):
 
 
 def test_the_agent_is_invoked_with_a_credential_that_cannot_write(loop):
-    """The driver installs the write token in its *own* environment so `gh` inherits
-    it. The property that matters is that the child's environment, derived from that
-    same environment, does not carry it."""
+    """The driver and the agent inherit only the system read credential by default."""
     gh = FakeGitHub(issues=[issue(106, body=spec_body("auto-ok"), labels=["P1"])], board_items=[board_item(106)])
     agent = StubAgent()
 
     loop.run(gh, agent=agent)
 
     parent = agent.env_at_call
-    assert parent["GH_TOKEN"] == WRITE_TOKEN, "the driver's own writes were not on the write credential"
+    assert parent["GH_TOKEN"] == READ_TOKEN
 
     child = credentials.agent_env(parent, credentials.resolve(parent))
     assert child["GH_TOKEN"] == READ_TOKEN

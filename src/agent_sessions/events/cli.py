@@ -111,18 +111,8 @@ def _worker_id(command: str) -> str:
     return f"{socket.gethostname()}:{os.getpid()}:{command}"
 
 
-def _reaction_bot_logins() -> frozenset[str]:
-    extras = tuple(
-        value.strip()
-        for value in os.environ.get(credentials.BOT_LOGINS_VAR, "").split(",")
-        if value.strip()
-    )
-    return credentials.bot_logins(
-        credentials.Credentials(
-            login=os.environ.get(credentials.LOGIN_VAR, "").strip(),
-            extra_bot_logins=extras,
-        )
-    )
+def _reaction_bot_logins(read_login: str) -> frozenset[str]:
+    return credentials.bot_logins(credentials.Credentials(login=read_login))
 
 
 def _log_poll_result(command: str, result: pollers.PollRunResult) -> None:
@@ -135,7 +125,11 @@ def _log_poll_result(command: str, result: pollers.PollRunResult) -> None:
     )
 
 
-def _scheduled_polls(loaded: config.EventsConfig, read_token: str) -> tuple[ScheduledPoll, ...]:
+def _scheduled_polls(
+    loaded: config.EventsConfig,
+    read_token: str,
+    bot_logins: frozenset[str],
+) -> tuple[ScheduledPoll, ...]:
     polls: list[ScheduledPoll] = []
     if loaded.boards:
         polls.append(
@@ -155,7 +149,7 @@ def _scheduled_polls(loaded: config.EventsConfig, read_token: str) -> tuple[Sche
                 loaded,
                 store,
                 read_token,
-                _reaction_bot_logins(),
+                bot_logins,
                 worker_id=_worker_id("poll-reactions"),
                 now=now,
             ),
@@ -181,6 +175,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         webhook_secret = _secret_from_environment(parser)
         try:
             read_token = credentials.resolve_read_credential()
+            bot_logins = _reaction_bot_logins(
+                credentials.resolve_read_login(read_token)
+            )
         except RuntimeError as error:
             event_logging.emit("serve", message=f"failed: {error}")
             return 1
@@ -188,7 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         store.register_repositories(item.identity for item in loaded.repositories)
         runtime = DaemonRuntime(
             lambda: QueueStore.open(loaded.database, busy_timeout_ms=loaded.busy_timeout_ms),
-            _scheduled_polls(loaded, read_token),
+            _scheduled_polls(loaded, read_token, bot_logins),
             _log_poll_result,
         )
         uvicorn.run(
@@ -213,11 +210,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     now=now,
                 )
             else:
+                bot_logins = _reaction_bot_logins(
+                    credentials.resolve_read_login(read_token)
+                )
                 result = pollers.poll_reactions_once(
                     loaded,
                     store,
                     read_token,
-                    _reaction_bot_logins(),
+                    bot_logins,
                     worker_id=_worker_id(args.command),
                     now=now,
                 )

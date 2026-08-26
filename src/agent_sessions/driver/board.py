@@ -19,12 +19,22 @@ def board_command(board: str, limit: int = 500) -> list[str]:
     return ["gh", "project", "item-list", num, "--owner", owner, "--format", "json", "--limit", str(limit)]
 
 
-def fetch_board_json(board: str) -> list[dict]:
+def fetch_board_json(board: str, *, env: dict[str, str] | None = None) -> list[dict]:
     if not board or "/" not in board:
         return []
     try:
-        env = credentials.board_env(dict(os.environ), credentials.resolve())
-        res = subprocess.run(board_command(board), capture_output=True, text=True, check=True, env=env)
+        read_env = (
+            credentials.driver_env(dict(os.environ), credentials.resolve())
+            if env is None
+            else env
+        )
+        res = subprocess.run(
+            board_command(board),
+            capture_output=True,
+            text=True,
+            check=True,
+            env=read_env,
+        )
         data = json.loads(res.stdout)
         items = data.get("items", [])
         say(f"board {board}: read {len(items)} items (advisory only; does not gate)")
@@ -42,7 +52,12 @@ def _cmd_error_msg(e: Exception) -> str:
     return str(e)
 
 
-def get_board_metadata(board: str, retries: int = 3) -> dict | None:
+def get_board_metadata(
+    board: str,
+    retries: int = 3,
+    *,
+    env: dict[str, str] | None = None,
+) -> dict | None:
     if board in _BOARD_METADATA_CACHE and _BOARD_METADATA_CACHE[board] is not None:
         return _BOARD_METADATA_CACHE[board]
 
@@ -51,13 +66,17 @@ def get_board_metadata(board: str, retries: int = 3) -> dict | None:
 
     owner, number = board.split("/", 1)
     last_err = ""
-    env = credentials.board_env(dict(os.environ), credentials.resolve())
+    read_env = (
+        credentials.driver_env(dict(os.environ), credentials.resolve())
+        if env is None
+        else env
+    )
     for attempt in range(retries):
         try:
-            res = subprocess.run(["gh", "project", "view", number, "--owner", owner, "--format", "json"], capture_output=True, text=True, check=True, env=env)
+            res = subprocess.run(["gh", "project", "view", number, "--owner", owner, "--format", "json"], capture_output=True, text=True, check=True, env=read_env)
             project_id = json.loads(res.stdout)["id"]
 
-            res = subprocess.run(["gh", "project", "field-list", number, "--owner", owner, "--format", "json"], capture_output=True, text=True, check=True, env=env)
+            res = subprocess.run(["gh", "project", "field-list", number, "--owner", owner, "--format", "json"], capture_output=True, text=True, check=True, env=read_env)
             fields = json.loads(res.stdout).get("fields", [])
             status_field = next((f for f in fields if f.get("name") == "Status"), None)
             if not status_field:
@@ -87,13 +106,24 @@ def get_board_metadata(board: str, retries: int = 3) -> dict | None:
     return None
 
 
-def mark_board_in_progress(board: str, item_id: str, retries: int = 3) -> bool:
-    meta = get_board_metadata(board)
+def mark_board_in_progress(
+    board: str,
+    item_id: str,
+    retries: int = 3,
+    *,
+    read_env: dict[str, str] | None = None,
+    write_env: dict[str, str] | None = None,
+) -> bool:
+    meta = get_board_metadata(board, env=read_env)
     if not meta:
         return False
 
     last_err = ""
-    env = credentials.board_env(dict(os.environ), credentials.resolve())
+    mutation_env = (
+        credentials.board_env(dict(os.environ), credentials.resolve())
+        if write_env is None
+        else write_env
+    )
     for attempt in range(retries):
         try:
             subprocess.run([
@@ -102,7 +132,7 @@ def mark_board_in_progress(board: str, item_id: str, retries: int = 3) -> bool:
                 "--project-id", str(meta["project_id"]),
                 "--field-id", str(meta["field_id"]),
                 "--single-select-option-id", str(meta["option_id"])
-            ], capture_output=True, text=True, check=True, env=env)
+            ], capture_output=True, text=True, check=True, env=mutation_env)
             return True
         except Exception as e:
             last_err = _cmd_error_msg(e)

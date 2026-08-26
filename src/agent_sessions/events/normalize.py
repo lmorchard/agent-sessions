@@ -169,11 +169,11 @@ def normalize_delivery(event_type: str, payload: Mapping[str, JSONValue], config
             for identifier in installation_repositories
         )
         if event_type != "installation_target":
-            fields = (
-                ("repositories",)
-                if event_type == "installation"
-                else ("repositories_added", "repositories_removed")
-            )
+            fields: tuple[str, ...]
+            if event_type == "installation":
+                fields = ("repositories",) if "repositories" in payload else ()
+            else:
+                fields = ("repositories_added", "repositories_removed")
             affected: list[int] = []
             allowed = set(installation_repositories)
             for field in fields:

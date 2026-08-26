@@ -99,10 +99,25 @@ def test_agent_env_installs_the_read_token_for_gh():
 
 
 def test_agent_env_carries_no_write_capable_credential():
-    hostile = split_env(GH_TOKEN=WRITE, GITHUB_TOKEN=WRITE, GH_ENTERPRISE_TOKEN=WRITE)
+    hostile = split_env(
+        GH_TOKEN=WRITE,
+        GITHUB_TOKEN=WRITE,
+        GH_ENTERPRISE_TOKEN=WRITE,
+        **{
+            credentials.BOARD_TOKEN_VAR: "board-token",
+            credentials.WRITE_TOKEN_VAR + credentials.CMD_SUFFIX: "write-command",
+            credentials.BOARD_TOKEN_VAR + credentials.CMD_SUFFIX: "board-command",
+            credentials.APP_ID_VAR: "app-id",
+            credentials.APP_INSTALLATION_ID_VAR: "installation-id",
+            credentials.APP_PRIVATE_KEY_FILE_VAR: "/private/key",
+        },
+    )
     env = credentials.agent_env(hostile, credentials.resolve(hostile))
     assert WRITE not in env.values(), f"a write-capable token reached the agent: {env}"
-    assert credentials.WRITE_TOKEN_VAR not in env
+    mutation_material = set(credentials.AGENT_CREDENTIAL_VARS) - set(
+        credentials.AGENT_TOKEN_VARS
+    )
+    assert not mutation_material & env.keys()
 
 
 def test_agent_env_preserves_unrelated_variables():
@@ -128,26 +143,33 @@ def test_agent_env_with_no_read_token_hands_over_no_credential_at_all():
     assert env["PATH"] == "/usr/bin"
 
 
-# -- the driver's own environment -------------------------------------------
+# -- the driver's read and mutation environments ----------------------------
 
 
-def test_driver_env_installs_the_write_token():
+def test_driver_env_installs_the_read_token_as_the_process_default():
     env = credentials.driver_env(split_env(), credentials.resolve(split_env()))
-    assert env["GH_TOKEN"] == WRITE
-    assert env["GITHUB_TOKEN"] == WRITE
+    assert env["GH_TOKEN"] == READ
+    assert env["GITHUB_TOKEN"] == READ
 
 
-def test_driver_env_invents_nothing_when_no_write_token_is_configured():
-    """A configuration `config_error` refuses outright; asserted here so the function
-    stays total, and so it cannot quietly promote the read token to the write slot."""
-    base = {credentials.READ_TOKEN_VAR: READ, "GH_TOKEN": READ, "PATH": "/usr/bin"}
+def test_driver_env_invents_nothing_when_no_read_token_is_configured():
+    base = {credentials.WRITE_TOKEN_VAR: WRITE, "GH_TOKEN": WRITE, "PATH": "/usr/bin"}
     env = credentials.driver_env(base, credentials.resolve(base))
     assert "GH_TOKEN" not in env
 
 
-def test_driver_env_never_carries_the_read_token_as_the_active_credential():
-    env = credentials.driver_env(split_env(GH_TOKEN=READ), credentials.resolve(split_env()))
+def test_repository_write_env_installs_only_the_write_token():
+    env = credentials.repository_write_env(
+        split_env(GH_TOKEN=READ), credentials.resolve(split_env())
+    )
     assert env["GH_TOKEN"] == WRITE
+    assert env["GITHUB_TOKEN"] == WRITE
+
+
+def test_repository_write_env_invents_nothing_without_a_write_token():
+    base = {credentials.READ_TOKEN_VAR: READ, "GH_TOKEN": READ, "PATH": "/usr/bin"}
+    env = credentials.repository_write_env(base, credentials.resolve(base))
+    assert "GH_TOKEN" not in env
 
 
 # -- the startup refusal ----------------------------------------------------
@@ -452,6 +474,38 @@ def test_read_credential_resolver_reads_only_the_read_literal():
     assert credentials.resolve_read_credential(env) == "read-only"
 
 
+def test_resolve_read_login_uses_the_explicit_shared_read_environment():
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def runner(command, **kwargs):
+        calls.append((list(command), kwargs))
+
+        class Success:
+            returncode = 0
+            stdout = "agent-reader\n"
+            stderr = ""
+
+        return Success()
+
+    login = credentials.resolve_read_login(
+        "read-token",
+        env={
+            "GH_TOKEN": "host-token",
+            "GITHUB_TOKEN": "host-token",
+            credentials.WRITE_TOKEN_VAR: "write-token",
+            credentials.LOGIN_VAR: "private-driver-login",
+        },
+        runner=runner,
+    )
+
+    assert login == "agent-reader"
+    assert calls[0][0] == ["gh", "api", "user", "--jq", ".login"]
+    assert calls[0][1]["timeout"] == 60
+    child = calls[0][1]["env"]
+    assert isinstance(child, dict)
+    assert child["GH_TOKEN"] == child["GITHUB_TOKEN"] == "read-token"
+
+
 def test_read_credential_resolver_executes_only_the_read_command():
     read_command = "security find-generic-password -s agent-read -w"
     runner = FakeCommandRunner({read_command: "read-command-token", CMD: WRITE})
@@ -730,3 +784,11 @@ def test_apply_driver_env_installs_git_vars_in_target():
     assert target["GIT_AUTHOR_EMAIL"] == "apply-bot@users.noreply.github.com"
     assert target["GIT_COMMITTER_NAME"] == "apply-bot"
     assert target["GIT_COMMITTER_EMAIL"] == "apply-bot@users.noreply.github.com"
+
+
+def test_apply_driver_env_installs_the_read_token_as_the_active_default():
+    base = split_env(**{credentials.LOGIN_VAR: "apply-bot"})
+    target = {"GH_TOKEN": WRITE, "GITHUB_TOKEN": WRITE}
+    credentials.apply_driver_env(credentials.resolve(base), target)
+    assert target["GH_TOKEN"] == READ
+    assert target["GITHUB_TOKEN"] == READ

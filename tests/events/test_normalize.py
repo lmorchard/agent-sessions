@@ -177,6 +177,34 @@ def test_repository_less_installation_deliveries_target_only_configured_installa
     assert delivery.diagnostic["installation_id"] == 10
 
 
+def test_plain_installation_without_repository_snapshot_is_still_accepted() -> None:
+    from agent_sessions.events.normalize import normalize_delivery
+
+    event = dict(CONTROL_PLANE_FIXTURES["installation"])
+    event.pop("repositories")
+
+    delivery = normalize_delivery("installation", event, config())
+
+    assert delivery.disposition == "accepted"
+    assert tuple(
+        (item.repository_id, item.target_kind, item.target_key)
+        for item in delivery.invalidations
+    ) == ((1, "installation", "10"), (2, "installation", "10"))
+
+
+@pytest.mark.parametrize("missing", ("repositories_added", "repositories_removed"))
+def test_installation_repositories_requires_both_repository_lists(missing: str) -> None:
+    from agent_sessions.events.normalize import normalize_delivery
+
+    event = dict(CONTROL_PLANE_FIXTURES["installation_repositories"])
+    event.pop(missing)
+
+    delivery = normalize_delivery("installation_repositories", event, config())
+
+    assert delivery.disposition == "malformed"
+    assert delivery.invalidations == ()
+
+
 def test_unconfigured_installation_cannot_dirty_a_configured_repository() -> None:
     from agent_sessions.events.normalize import normalize_delivery
 

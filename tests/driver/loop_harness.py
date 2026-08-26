@@ -344,9 +344,13 @@ class FakeGitHub:
 
     def run(self, cmd, **kwargs):
         argv = [str(c) for c in cmd]
-        env = dict(kwargs.get("env") or {})
+        env = (
+            dict(kwargs["env"])
+            if kwargs.get("env") is not None
+            else dict(os.environ)
+        )
         self.calls_with_env.append((argv, env))
-        self._active_token = env.get("GH_TOKEN", os.environ.get("GH_TOKEN", ""))
+        self._active_token = env.get("GH_TOKEN", "")
         if argv[0] == "gh":
             res = self._gh(argv)
         elif argv[0] == "git":
@@ -897,7 +901,7 @@ _DRIVER_ENV = (
     "HIGH_TIER_MODEL", "LOW_TIER_MODEL", "RETRY", "XDG_STATE_HOME", "EVENTS_CONFIG",
     "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
     credentials.READ_TOKEN_VAR, credentials.WRITE_TOKEN_VAR, credentials.LOGIN_VAR,
-    credentials.BOT_LOGINS_VAR, credentials.CONFIG_FILE_VAR,
+    credentials.BOARD_TOKEN_VAR, credentials.BOT_LOGINS_VAR, credentials.CONFIG_FILE_VAR,
     credentials.READ_TOKEN_VAR + credentials.CMD_SUFFIX,
     credentials.WRITE_TOKEN_VAR + credentials.CMD_SUFFIX,
 )
@@ -907,6 +911,7 @@ _DRIVER_ENV = (
 #: pass that wants the refusal has to unset one of these deliberately.
 READ_TOKEN = "read-scoped-token"
 WRITE_TOKEN = "write-capable-token"
+BOARD_TOKEN = "board-write-capable-token"
 
 
 class LoopHarness:
@@ -928,6 +933,7 @@ class LoopHarness:
             monkeypatch.delenv(var, raising=False)
         monkeypatch.setenv(credentials.READ_TOKEN_VAR, READ_TOKEN)
         monkeypatch.setenv(credentials.WRITE_TOKEN_VAR, WRITE_TOKEN)
+        monkeypatch.setenv(credentials.BOARD_TOKEN_VAR, BOARD_TOKEN)
         monkeypatch.setenv(credentials.LOGIN_VAR, DRIVER_LOGIN)
         monkeypatch.setattr(output, "now", frozen_now)
         # The driver releases its lock from an atexit hook keyed on a module global in

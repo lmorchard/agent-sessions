@@ -650,14 +650,14 @@ class LiveTargetResolver:
             return ResolvedTarget(claim, (), (), (), control_plane_only=True)
 
         if claim.target_kind == "installation":
-            try:
-                self._read(
-                    ["gh", "api", "installation/repositories"],
-                    missing_is_permanent=True,
-                )
-            except _GitHubNotFound:
-                return ResolvedTarget(claim, (), (), (), "installation is unavailable")
-            return ResolvedTarget(claim, (), (), (), control_plane_only=True)
+            return ResolvedTarget(
+                claim,
+                (),
+                (),
+                (),
+                "installation topology is not reconciled by the static read credential",
+                control_plane_only=True,
+            )
 
         raise GitHubPermanentError(f"unsupported target kind: {claim.target_kind}")
 

@@ -365,6 +365,18 @@ def test_missing_and_control_plane_targets_are_non_actionable() -> None:
     assert installation.control_plane_only is True
 
 
+def test_installation_target_is_diagnostic_without_an_app_token_api_call() -> None:
+    runner = RecordingRunner([])
+
+    resolved = LiveTargetResolver(read_token="read-token", runner=runner).resolve(
+        REPOSITORY, claim("installation", "99")
+    )
+
+    assert resolved.control_plane_only is True
+    assert "topology" in resolved.irrelevant_reason
+    assert runner.calls == []
+
+
 @pytest.mark.parametrize(
     ("returncode", "stderr"),
     [
@@ -826,7 +838,7 @@ def test_housekeeping_only_unpark_is_applied_and_acknowledged(
     removed: list[str] = []
     monkeypatch.setattr(
         "agent_sessions.driver.agent_session_driver.park_label_remove",
-        lambda number, _repo: removed.append(str(number)),
+        lambda number, _repo, **_kwargs: removed.append(str(number)),
     )
     monkeypatch.setattr(
         events_driver.lifecycle,
@@ -866,7 +878,7 @@ def test_failed_targeted_unpark_preserves_approval_watch(
     )
     monkeypatch.setattr(
         "agent_sessions.driver.agent_session_driver.park_label_remove",
-        lambda _number, _repo: None,
+        lambda _number, _repo, **_kwargs: None,
     )
     monkeypatch.setattr(
         events_driver.lifecycle,
@@ -919,7 +931,7 @@ def test_malformed_targeted_unpark_verification_preserves_approval_watch(
     )
     monkeypatch.setattr(
         "agent_sessions.driver.agent_session_driver.park_label_remove",
-        lambda _number, _repo: None,
+        lambda _number, _repo, **_kwargs: None,
     )
     monkeypatch.setattr(
         events_driver.lifecycle.subprocess,
@@ -969,7 +981,7 @@ def test_current_human_reaction_after_park_triggers_unpark_housekeeping(
     removed: list[str] = []
     monkeypatch.setattr(
         "agent_sessions.driver.agent_session_driver.park_label_remove",
-        lambda number, _repo: removed.append(str(number)),
+        lambda number, _repo, **_kwargs: removed.append(str(number)),
     )
     monkeypatch.setattr(
         events_driver.lifecycle,
@@ -1036,7 +1048,8 @@ def test_claim_batch_is_bounded_and_nonselected_actionable_claims_are_released(
     resolver = FakeResolver(responses)
     install_resolver(monkeypatch, resolver)
     monkeypatch.setattr(
-        "agent_sessions.driver.agent_session_driver.acquire_lock", lambda *_args: True
+        "agent_sessions.driver.agent_session_driver.acquire_lock",
+        lambda *_args, **_kwargs: True,
     )
 
     result = select_work(context(tmp_path), current, now=NOW, worker_id="worker")
@@ -1071,7 +1084,7 @@ def test_router_priority_wins_and_git_ref_lock_is_the_final_exclusion_check(
     )
     lock_calls: list[tuple[str, str]] = []
 
-    def acquire(number, phase, _repo_path):
+    def acquire(number, phase, _repo_path, **_kwargs):
         lock_calls.append((str(number), phase))
         return True
 
@@ -1118,7 +1131,8 @@ def test_current_board_status_can_qualify_an_issue_without_a_priority_label(
         ],
     )
     monkeypatch.setattr(
-        "agent_sessions.driver.agent_session_driver.acquire_lock", lambda *_args: True
+        "agent_sessions.driver.agent_session_driver.acquire_lock",
+        lambda *_args, **_kwargs: True,
     )
 
     result = select_work(ctx, current, now=NOW, worker_id="worker")
@@ -1223,7 +1237,8 @@ def test_incomplete_direct_pr_pagination_retries_without_acknowledgement(
         ),
     )
     monkeypatch.setattr(
-        "agent_sessions.driver.agent_session_driver.acquire_lock", lambda *_args: False
+        "agent_sessions.driver.agent_session_driver.acquire_lock",
+        lambda *_args, **_kwargs: False,
     )
 
     result = select_work(context(tmp_path), current, now=NOW, worker_id="worker")
@@ -1258,7 +1273,8 @@ def test_selected_pr_claim_is_not_released_when_it_closes_multiple_candidates(
         ),
     )
     monkeypatch.setattr(
-        "agent_sessions.driver.agent_session_driver.acquire_lock", lambda *_args: True
+        "agent_sessions.driver.agent_session_driver.acquire_lock",
+        lambda *_args, **_kwargs: True,
     )
 
     result = select_work(context(tmp_path), current, now=NOW, worker_id="worker")
@@ -1292,7 +1308,8 @@ def test_selected_pr_claim_materializes_unselected_closing_issue_for_the_next_ru
         ),
     )
     monkeypatch.setattr(
-        "agent_sessions.driver.agent_session_driver.acquire_lock", lambda *_args: True
+        "agent_sessions.driver.agent_session_driver.acquire_lock",
+        lambda *_args, **_kwargs: True,
     )
 
     first = select_work(context(tmp_path), current, now=NOW, worker_id="first")
@@ -1370,7 +1387,8 @@ def test_pr_sibling_materialization_coalesces_and_preserves_a_newer_generation(
         ),
     )
     monkeypatch.setattr(
-        "agent_sessions.driver.agent_session_driver.acquire_lock", lambda *_args: True
+        "agent_sessions.driver.agent_session_driver.acquire_lock",
+        lambda *_args, **_kwargs: True,
     )
 
     result = select_work(context(tmp_path), current, now=NOW, worker_id="worker")
@@ -1401,7 +1419,8 @@ def test_lock_contended_actionable_claim_is_released_without_a_candidate(
         ),
     )
     monkeypatch.setattr(
-        "agent_sessions.driver.agent_session_driver.acquire_lock", lambda *_args: False
+        "agent_sessions.driver.agent_session_driver.acquire_lock",
+        lambda *_args, **_kwargs: False,
     )
 
     result = select_work(context(tmp_path), current, now=NOW, worker_id="worker")

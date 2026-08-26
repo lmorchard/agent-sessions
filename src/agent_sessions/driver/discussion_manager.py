@@ -15,20 +15,28 @@ import sys
 from pathlib import Path
 
 
-def run_gh(args: list[str]) -> tuple[int, str, str]:
+def run_gh(
+    args: list[str], *, env: dict[str, str] | None = None
+) -> tuple[int, str, str]:
     """Execute gh command and return (returncode, stdout, stderr)."""
     try:
         res = subprocess.run(
             ["gh"] + args,
             capture_output=True,
             text=True,
+            env=env,
         )
         return res.returncode, res.stdout, res.stderr
     except Exception as e:
         return 1, "", str(e)
 
 
-def check_category(repo: str, category_name: str = "Lab Notebook") -> bool:
+def check_category(
+    repo: str,
+    category_name: str = "Lab Notebook",
+    *,
+    read_env: dict[str, str] | None = None,
+) -> bool:
     """Check if discussion category exists on GitHub repo using GraphQL API."""
     if not repo or "/" not in repo:
         return False
@@ -53,7 +61,8 @@ def check_category(repo: str, category_name: str = "Lab Notebook") -> bool:
             f"owner={owner}",
             "-f",
             f"repo={repo_name}",
-        ]
+        ],
+        env=read_env,
     )
     if rc == 0 and stdout.strip():
         try:
@@ -88,7 +97,13 @@ def ensure_category(repo: str, category_name: str = "Lab Notebook") -> bool:
     return check_category(repo, category_name)
 
 
-def get_or_create_daily_discussion(repo: str, category_name: str = "Lab Notebook") -> str:
+def get_or_create_daily_discussion(
+    repo: str,
+    category_name: str = "Lab Notebook",
+    *,
+    read_env: dict[str, str] | None = None,
+    write_env: dict[str, str] | None = None,
+) -> str:
     """Find today's daily discussion thread URL or create it."""
     if not repo:
         return ""
@@ -98,7 +113,10 @@ def get_or_create_daily_discussion(repo: str, category_name: str = "Lab Notebook
     body = f"Agent run log and narratives for {today}."
 
     # List discussions in category
-    rc, stdout, _ = run_gh(["discussion", "list", "--repo", repo, "--category", category_name, "--json", "title,url"])
+    rc, stdout, _ = run_gh(
+        ["discussion", "list", "--repo", repo, "--category", category_name, "--json", "title,url"],
+        env=read_env,
+    )
     if rc == 0 and stdout.strip():
         try:
             data = json.loads(stdout)
@@ -110,16 +128,30 @@ def get_or_create_daily_discussion(repo: str, category_name: str = "Lab Notebook
             pass
 
     # Create if not found
-    rc, stdout, _ = run_gh(["discussion", "create", "--repo", repo, "--category", category_name, "--title", title, "--body", body])
+    rc, stdout, _ = run_gh(
+        ["discussion", "create", "--repo", repo, "--category", category_name, "--title", title, "--body", body],
+        env=write_env,
+    )
     if rc == 0 and stdout.strip():
         return stdout.strip().splitlines()[-1]
 
     return ""
 
 
-def post_start(repo: str, issue: str, phase: str, budget: str, rundir: str) -> bool:
+def post_start(
+    repo: str,
+    issue: str,
+    phase: str,
+    budget: str,
+    rundir: str,
+    *,
+    read_env: dict[str, str] | None = None,
+    write_env: dict[str, str] | None = None,
+) -> bool:
     """Post start-of-work comment to daily discussion."""
-    disc_url = get_or_create_daily_discussion(repo)
+    disc_url = get_or_create_daily_discussion(
+        repo, read_env=read_env, write_env=write_env
+    )
     if not disc_url:
         return False
 
@@ -130,7 +162,10 @@ def post_start(repo: str, issue: str, phase: str, budget: str, rundir: str) -> b
 - **Budget**: ${budget}
 - **Run Dir**: `{rundir}`"""
 
-    rc, _, _ = run_gh(["discussion", "comment", disc_url, "--repo", repo, "--body", comment_body])
+    rc, _, _ = run_gh(
+        ["discussion", "comment", disc_url, "--repo", repo, "--body", comment_body],
+        env=write_env,
+    )
     return rc == 0
 
 
@@ -144,9 +179,14 @@ def post_finish(
     prurl: str,
     reason: str,
     rundir: str,
+    *,
+    read_env: dict[str, str] | None = None,
+    write_env: dict[str, str] | None = None,
 ) -> bool:
     """Post finish-run comment with final.txt narrative to daily discussion."""
-    disc_url = get_or_create_daily_discussion(repo)
+    disc_url = get_or_create_daily_discussion(
+        repo, read_env=read_env, write_env=write_env
+    )
     if not disc_url:
         return False
 
@@ -167,7 +207,10 @@ def post_finish(
 
 {final_text or '(no narrative)'}"""
 
-    rc, _, _ = run_gh(["discussion", "comment", disc_url, "--repo", repo, "--body", comment_body])
+    rc, _, _ = run_gh(
+        ["discussion", "comment", disc_url, "--repo", repo, "--body", comment_body],
+        env=write_env,
+    )
     return rc == 0
 
 

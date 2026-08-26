@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
@@ -114,7 +115,10 @@ def _full_scan(
     if not selection.issue_snapshot_complete:
         from agent_sessions.driver import agent_session_driver
 
-        agent_session_driver.release_lock(ctx.repo_path)
+        agent_session_driver.release_lock(
+            ctx.repo_path,
+            write_env=credentials.repository_write_env(dict(os.environ), ctx.creds),
+        )
         runtime.store.finish_scan(
             repository_id,
             worker_id=worker_id,
@@ -319,7 +323,7 @@ def select_work(
         try:
             current_board_items = fetch_board_items(
                 ctx.board,
-                token=ctx.creds.board_token or ctx.creds.read_token,
+                token=ctx.creds.read_token,
             )
         except GitHubTransientError as error:
             for current_claim in claims:
@@ -394,7 +398,11 @@ def select_work(
         lifecycle.say(message)
 
     for number in selection_data["unpark_actions"]:
-        agent_session_driver.park_label_remove(number, ctx.repo)
+        agent_session_driver.park_label_remove(
+            number,
+            ctx.repo,
+            write_env=credentials.repository_write_env(dict(os.environ), ctx.creds),
+        )
         try:
             if lifecycle.authoritative_issue_is_parked(ctx, str(number)):
                 continue
@@ -415,6 +423,7 @@ def select_work(
             ctx.state_dir,
             ctx.parked_log,
             quiet=True,
+            write_env=credentials.repository_write_env(dict(os.environ), ctx.creds),
         )
 
     candidate_numbers = {str(number) for number, _phase in selection_data["candidates"]}
@@ -445,7 +454,13 @@ def select_work(
         issue_claims = claims_by_issue.get(str(number), [])
         if not issue_claims:
             continue
-        if not agent_session_driver.acquire_lock(number, phase, ctx.repo_path):
+        if not agent_session_driver.acquire_lock(
+            number,
+            phase,
+            ctx.repo_path,
+            read_env=credentials.driver_env(dict(os.environ), ctx.creds),
+            write_env=credentials.repository_write_env(dict(os.environ), ctx.creds),
+        ):
             lifecycle.say(
                 f"  SKIP    #{number}  lock contention (another agent holds or held lock)"
             )

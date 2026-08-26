@@ -191,6 +191,11 @@ def test_scheduled_polls_omit_projects_without_boards_but_keep_reactions() -> No
         boards=(),
     )
 
-    assert [poll.name for poll in cli._scheduled_polls(loaded, "read-token")] == [
+    assert [
+        poll.name
+        for poll in cli._scheduled_polls(
+            loaded, "read-token", frozenset({"agent-reader"})
+        )
+    ] == [
         "poll-reactions"
     ]

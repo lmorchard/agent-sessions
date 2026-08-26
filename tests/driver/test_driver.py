@@ -372,8 +372,11 @@ def test_mark_board_in_progress_retry_success(monkeypatch):
     class MockResEdit:
         stdout = ""
 
+    environments = []
+
     def mock_run(cmd, *args, **kwargs):
         cmd_str = [str(c) for c in cmd]
+        environments.append((cmd_str, dict(kwargs.get("env") or {})))
         if cmd_str[:2] == ["gh", "project"] and cmd_str[2] == "view":
             return MockResView()
         if cmd_str[:2] == ["gh", "project"] and cmd_str[2] == "field-list":
@@ -388,9 +391,24 @@ def test_mark_board_in_progress_retry_success(monkeypatch):
     monkeypatch.setattr("subprocess.run", mock_run)
     monkeypatch.setattr("time.sleep", lambda s: None)
 
-    ok = agent_session_driver.mark_board_in_progress("owner/6", "ITEM_1", retries=3)
+    read_env = {"GH_TOKEN": "read-token", "GITHUB_TOKEN": "read-token"}
+    board_write_env = {"GH_TOKEN": "board-token", "GITHUB_TOKEN": "board-token"}
+    ok = agent_session_driver.mark_board_in_progress(
+        "owner/6",
+        "ITEM_1",
+        retries=3,
+        read_env=read_env,
+        write_env=board_write_env,
+    )
     assert ok is True
     assert attempts[0] == 2
+    assert {
+        tuple(command[:3]): env.get("GH_TOKEN") for command, env in environments
+    } == {
+        ("gh", "project", "view"): "read-token",
+        ("gh", "project", "field-list"): "read-token",
+        ("gh", "project", "item-edit"): "board-token",
+    }
 
 
 def test_mark_board_in_progress_failure_logs_stderr(monkeypatch):

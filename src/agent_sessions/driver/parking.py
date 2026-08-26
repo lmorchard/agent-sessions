@@ -16,7 +16,9 @@ from agent_sessions.driver.labels import (
 from agent_sessions.driver.output import say
 
 
-def run_label_manager(repo: str, *args: str) -> bool:
+def run_label_manager(
+    repo: str, *args: str, env: dict[str, str] | None = None
+) -> bool:
     """Invoke `label_manager` for one label operation. True if it succeeded.
 
     This block was written out five times in this module, and **four of the five
@@ -43,13 +45,19 @@ def run_label_manager(repo: str, *args: str) -> bool:
         cmd.extend(["--repo", repo])
     cmd.extend(args)
     try:
-        subprocess.run(cmd, capture_output=True, check=True)
+        subprocess.run(cmd, capture_output=True, check=True, env=env)
         return True
     except Exception:
         return False
 
 
-def get_attempts(issue_number: str | int, repo: str, issues_json: list[dict] | None = None) -> int:
+def get_attempts(
+    issue_number: str | int,
+    repo: str,
+    issues_json: list[dict] | None = None,
+    *,
+    read_env: dict[str, str] | None = None,
+) -> int:
     labels: list[dict] = []
     if issues_json:
         for iss in issues_json:
@@ -63,6 +71,7 @@ def get_attempts(issue_number: str | int, repo: str, issues_json: list[dict] | N
                 capture_output=True,
                 text=True,
                 check=True,
+                env=read_env,
             )
             data = json.loads(res.stdout)
             labels = data.get("labels", [])
@@ -79,32 +88,80 @@ def get_attempts(issue_number: str | int, repo: str, issues_json: list[dict] | N
     return 0
 
 
-def increment_attempts(issue_number: str | int, repo: str) -> None:
-    count = get_attempts(issue_number, repo) + 1
+def increment_attempts(
+    issue_number: str | int,
+    repo: str,
+    *,
+    read_env: dict[str, str] | None = None,
+    write_env: dict[str, str] | None = None,
+) -> None:
+    count = get_attempts(issue_number, repo, read_env=read_env) + 1
     # Failure ignored: the counter is a loop breaker, and a run that cannot increment it
     # is still better off proceeding than aborting. The cost is a loop that runs one
     # attempt longer than intended, which the operator sees in the ledger.
-    run_label_manager(repo, "attempt", "--issue", str(issue_number), "--count", str(count))
+    run_label_manager(
+        repo,
+        "attempt",
+        "--issue",
+        str(issue_number),
+        "--count",
+        str(count),
+        env=write_env,
+    )
 
 
-def decrement_attempts(issue_number: str | int, repo: str) -> None:
-    count = get_attempts(issue_number, repo) - 1
+def decrement_attempts(
+    issue_number: str | int,
+    repo: str,
+    *,
+    read_env: dict[str, str] | None = None,
+    write_env: dict[str, str] | None = None,
+) -> None:
+    count = get_attempts(issue_number, repo, read_env=read_env) - 1
     if count < 0:
         count = 0
     # Same reasoning as the increment: a stuck counter over-parks rather than under-parks.
     if count == 0:
-        run_label_manager(repo, "clear-attempts", "--issue", str(issue_number))
+        run_label_manager(
+            repo,
+            "clear-attempts",
+            "--issue",
+            str(issue_number),
+            env=write_env,
+        )
     else:
-        run_label_manager(repo, "attempt", "--issue", str(issue_number), "--count", str(count))
+        run_label_manager(
+            repo,
+            "attempt",
+            "--issue",
+            str(issue_number),
+            "--count",
+            str(count),
+            env=write_env,
+        )
 
 
-def park_label_add(issue_number: str | int, repo: str) -> None:
-    if not run_label_manager(repo, "park", "--issue", str(issue_number)):
+def park_label_add(
+    issue_number: str | int,
+    repo: str,
+    *,
+    write_env: dict[str, str] | None = None,
+) -> None:
+    if not run_label_manager(
+        repo, "park", "--issue", str(issue_number), env=write_env
+    ):
         say(f"  WARNING: could not add the {PARK_LABEL} label to #{issue_number} -- it stays selectable")
 
 
-def park_label_remove(issue_number: str | int, repo: str) -> None:
-    if not run_label_manager(repo, "unpark", "--issue", str(issue_number)):
+def park_label_remove(
+    issue_number: str | int,
+    repo: str,
+    *,
+    write_env: dict[str, str] | None = None,
+) -> None:
+    if not run_label_manager(
+        repo, "unpark", "--issue", str(issue_number), env=write_env
+    ):
         say(f"  WARNING: could not remove the {PARK_LABEL} label from #{issue_number} -- it stays parked")
 
 
@@ -208,7 +265,12 @@ def _scan_comments(comments: object, known_bots: set[str], norm_park_time: str) 
     return False, ""
 
 
-def _graphql_comments(issue_number: str | int, repo: str) -> object:
+def _graphql_comments(
+    issue_number: str | int,
+    repo: str,
+    *,
+    read_env: dict[str, str] | None = None,
+) -> object:
     """Comment nodes from the GraphQL query, or `[]` if it could not answer."""
     owner, repo_name = repo.split("/", 1)
     cmd = [
@@ -218,7 +280,7 @@ def _graphql_comments(issue_number: str | int, repo: str) -> object:
         "-F", f"repo={repo_name}",
         "-F", f"number={issue_number}",
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, env=read_env)
     if res.returncode != 0 or not res.stdout.strip():
         return []
     data = json.loads(res.stdout)
@@ -237,6 +299,8 @@ def has_new_human_comment(
     bot_logins: frozenset[str] | set[str] | None = None,
     park_time: str = "",
     issue_updated_at: str = "",
+    *,
+    read_env: dict[str, str] | None = None,
 ) -> tuple[bool, str]:
     """True, and who, if a person has acted on this issue since it was parked.
 
@@ -262,7 +326,11 @@ def has_new_human_comment(
 
     if repo and "/" in repo:
         try:
-            found, who = _scan_comments(_graphql_comments(issue_number, repo), known_bots, norm_park_time)
+            found, who = _scan_comments(
+                _graphql_comments(issue_number, repo, read_env=read_env),
+                known_bots,
+                norm_park_time,
+            )
             if found:
                 return True, who
         except Exception:
@@ -270,7 +338,9 @@ def has_new_human_comment(
 
     try:
         cmd = ["gh", "issue", "view", str(issue_number), "--repo", repo, "--json", "comments"]
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        res = subprocess.run(
+            cmd, capture_output=True, text=True, check=True, env=read_env
+        )
         found, who = _scan_comments(json.loads(res.stdout).get("comments", []), known_bots, norm_park_time)
         if found:
             return True, who
@@ -279,7 +349,9 @@ def has_new_human_comment(
 
     try:
         pr_cmd = ["gh", "pr", "view", str(issue_number), "--repo", repo, "--json", "reviews"]
-        pr_res = subprocess.run(pr_cmd, capture_output=True, text=True)
+        pr_res = subprocess.run(
+            pr_cmd, capture_output=True, text=True, env=read_env
+        )
         if pr_res.returncode == 0:
             for rev in reversed(json.loads(pr_res.stdout).get("reviews", [])):
                 if not isinstance(rev, dict):
@@ -354,6 +426,8 @@ def apply_park_state(
     state_dir: Path,
     parked_log: Path,
     quiet: bool = False,
+    *,
+    write_env: dict[str, str] | None = None,
 ) -> None:
     from agent_sessions.driver import agent_session_driver
 
@@ -362,7 +436,9 @@ def apply_park_state(
         row = {"issue": int(iss_num), "repo": repo, "parked_at": ts, "outcome": outcome, "reason": reason}
         with open(parked_log, "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
-        agent_session_driver.park_label_add(iss_num, repo)
+        agent_session_driver.park_label_add(
+            iss_num, repo, write_env=write_env
+        )
         if not quiet:
             say(f"  parked -- excluded from future selection unless --retry {iss_num}")
         notify_human(iss_num, f"{outcome}: {reason}", state_dir)
@@ -370,7 +446,9 @@ def apply_park_state(
         row = {"issue": int(iss_num), "repo": repo, "parked_at": ts, "outcome": outcome, "reason": reason}
         with open(parked_log, "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
-        agent_session_driver.park_label_add(iss_num, repo)
+        agent_session_driver.park_label_add(
+            iss_num, repo, write_env=write_env
+        )
         say(f"  parked for human review -- excluded from future selection unless --retry {iss_num}")
         notify_human(iss_num, f"gate-human: {reason}", state_dir)
     elif outcome == "incomplete":
@@ -378,9 +456,13 @@ def apply_park_state(
         with open(parked_log, "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
         say("  incomplete -- leaving unparked so the loop can re-evaluate later")
-        agent_session_driver.park_label_remove(iss_num, repo)
+        agent_session_driver.park_label_remove(
+            iss_num, repo, write_env=write_env
+        )
     elif outcome == "gate-eligible":
-        if not run_label_manager(repo, "merge-ready", "--issue", iss_num):
+        if not run_label_manager(
+            repo, "merge-ready", "--issue", iss_num, env=write_env
+        ):
             say(f"  WARNING: could not add the {MERGE_READY_LABEL} label to #{iss_num} -- "
                 f"the verdict is in the PR body and the ledger regardless")
         notify_human(iss_num, f"gate-eligible: {reason}", state_dir)

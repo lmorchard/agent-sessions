@@ -359,6 +359,7 @@ repository_ids = [1]
     monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: seen.update(app=app, **kwargs))
     resolved: list[str] = []
     received_tokens: list[tuple[str, str]] = []
+    received_bot_logins: list[frozenset[str]] = []
 
     class CapturedRuntime:
         instance: "CapturedRuntime | None" = None
@@ -378,12 +379,19 @@ repository_ids = [1]
         resolved.append("read-token")
         return "read-token"
 
+    resolved_logins: list[str] = []
+
+    def resolve_read_login(token: str) -> str:
+        resolved_logins.append(token)
+        return "agent-reader"
+
     def projects(_config, _store, token, *, worker_id, now) -> PollRunResult:
         received_tokens.append(("projects", token))
         return PollRunResult()
 
-    def reactions(_config, _store, token, _bot_logins, *, worker_id, now) -> PollRunResult:
+    def reactions(_config, _store, token, bot_logins, *, worker_id, now) -> PollRunResult:
         received_tokens.append(("reactions", token))
+        received_bot_logins.append(bot_logins)
         return PollRunResult()
 
     def forbidden(*_args, **_kwargs):
@@ -391,6 +399,7 @@ repository_ids = [1]
 
     monkeypatch.setattr(cli, "DaemonRuntime", CapturedRuntime)
     monkeypatch.setattr(cli.credentials, "resolve_read_credential", resolve_read_credential)
+    monkeypatch.setattr(cli.credentials, "resolve_read_login", resolve_read_login)
     monkeypatch.setattr(cli.credentials, "resolve_board_credential", forbidden)
     monkeypatch.setattr(cli.credentials, "resolve", forbidden)
     monkeypatch.setattr(cli.credentials, "generate_app_jwt", forbidden)
@@ -408,6 +417,17 @@ repository_ids = [1]
     assert seen["workers"] == 1
     assert resolved == ["read-token"]
     assert CapturedRuntime.instance is not None
-    for poll in CapturedRuntime.instance.polls:
-        poll.run(object(), NOW)
-    assert received_tokens == [("projects", "read-token"), ("reactions", "read-token")]
+    for _pass in range(2):
+        for poll in CapturedRuntime.instance.polls:
+            poll.run(object(), NOW)
+    assert received_tokens == [
+        ("projects", "read-token"),
+        ("reactions", "read-token"),
+        ("projects", "read-token"),
+        ("reactions", "read-token"),
+    ]
+    assert received_bot_logins == [
+        cli.credentials.bot_logins(cli.credentials.Credentials(login="agent-reader")),
+        cli.credentials.bot_logins(cli.credentials.Credentials(login="agent-reader")),
+    ]
+    assert resolved_logins == ["read-token"]

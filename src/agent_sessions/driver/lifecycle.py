@@ -98,6 +98,18 @@ class RunContext:
     events_config_path: Path | None = None
 
 
+def _read_env(ctx: RunContext) -> dict[str, str]:
+    return credentials.driver_env(dict(os.environ), ctx.creds)
+
+
+def _repository_write_env(ctx: RunContext) -> dict[str, str]:
+    return credentials.repository_write_env(dict(os.environ), ctx.creds)
+
+
+def _board_write_env(ctx: RunContext) -> dict[str, str]:
+    return credentials.board_env(dict(os.environ), ctx.creds)
+
+
 @dataclass(frozen=True)
 class SelectionResult:
     # `board_items` and `open_issues` used to be carried here too. Both were populated
@@ -343,7 +355,9 @@ def preflight(argv: list[str] | None = None) -> RunContext:
         die(config_problem)
 
     read_login = agent_session_driver.whoami(credentials.agent_env(dict(os.environ), creds))
-    write_login = agent_session_driver.whoami(credentials.driver_env(dict(os.environ), creds))
+    write_login = agent_session_driver.whoami(
+        credentials.repository_write_env(dict(os.environ), creds)
+    )
     identity_problem = credentials.identity_error(creds, read_login=read_login, write_login=write_login)
     if identity_problem:
         die(identity_problem)
@@ -413,7 +427,12 @@ def preflight(argv: list[str] | None = None) -> RunContext:
     runs_log.touch(exist_ok=True)
     parked_log.touch(exist_ok=True)
 
-    atexit.register(lambda: agent_session_driver.release_lock(repo_path))
+    atexit.register(
+        lambda: agent_session_driver.release_lock(
+            repo_path,
+            write_env=credentials.repository_write_env(dict(os.environ), creds),
+        )
+    )
 
     inflight_file = state_dir / "inflight.json"
     if inflight_file.is_file():
@@ -650,7 +669,16 @@ def run_classify_only(ctx: RunContext) -> int:
         writes={"recorded": 0, "applied": 0, "ok": True},
     )
 
-    agent_session_driver.apply_park_state(issue_num, outcome, ts, reason, ctx.repo, ctx.state_dir, ctx.parked_log)
+    agent_session_driver.apply_park_state(
+        issue_num,
+        outcome,
+        ts,
+        reason,
+        ctx.repo,
+        ctx.state_dir,
+        ctx.parked_log,
+        write_env=_repository_write_env(ctx),
+    )
     if ctx.inflight_file.is_file():
         ctx.inflight_file.unlink(missing_ok=True)
     say("\nrecorded to runs.jsonl. Nothing was merged.")
@@ -665,7 +693,11 @@ def select_queue(
     from agent_sessions.driver import agent_session_driver
 
     say("== select ==")
-    board_items = agent_session_driver.fetch_board_json(ctx.board) if ctx.board and not ctx.all_issues else []
+    board_items = (
+        agent_session_driver.fetch_board_json(ctx.board, env=_read_env(ctx))
+        if ctx.board and not ctx.all_issues
+        else []
+    )
 
     try:
         cmd = ["gh", "issue", "list", "--repo", ctx.repo, "--state", "open", "--limit", "500", "--json", "number,title,body,labels,url,updatedAt"]
@@ -730,7 +762,14 @@ def select_queue(
         if n in parked_nums and n != ctx.retry:
             park_t = agent_session_driver.get_park_time(n, ctx.state_dir)
             updated_at = open_issues_map.get(n, "")
-            has_human, login = agent_session_driver.has_new_human_comment(n, ctx.repo, ctx.driver_bots, park_time=park_t, issue_updated_at=updated_at)
+            has_human, login = agent_session_driver.has_new_human_comment(
+                n,
+                ctx.repo,
+                ctx.driver_bots,
+                park_time=park_t,
+                issue_updated_at=updated_at,
+                read_env=_read_env(ctx),
+            )
             human_comments_map[n] = (has_human, login)
             if not has_human:
                 park_reasons[n] = agent_session_driver.park_reason(n, ctx.state_dir)
@@ -796,7 +835,9 @@ def select_queue(
     ts_str = output.now().strftime("%Y%m%dT%H%M%SZ")
     confirmed_unparked: set[str] = set()
     for m in sel_res["unpark_actions"]:
-        agent_session_driver.park_label_remove(m, ctx.repo)
+        agent_session_driver.park_label_remove(
+            m, ctx.repo, write_env=_repository_write_env(ctx)
+        )
         try:
             if not authoritative_issue_is_parked(ctx, m):
                 confirmed_unparked.add(str(m))
@@ -804,7 +845,17 @@ def select_queue(
             report_approval_watch_failure(error)
 
     for m, reason in sel_res["park_actions"]:
-        agent_session_driver.apply_park_state(m, "parked", ts_str, f"parked by loop breaker: {reason}", ctx.repo, ctx.state_dir, ctx.parked_log, quiet=True)
+        agent_session_driver.apply_park_state(
+            m,
+            "parked",
+            ts_str,
+            f"parked by loop breaker: {reason}",
+            ctx.repo,
+            ctx.state_dir,
+            ctx.parked_log,
+            quiet=True,
+            write_env=_repository_write_env(ctx),
+        )
 
     if approval_watch_runtime is not None and issue_snapshot_complete:
         repair_approval_watches(
@@ -819,7 +870,13 @@ def select_queue(
     locked_candidates: list[tuple[str, str]] = []
     for cand_item in all_candidates:
         num, cand_phase = cand_item
-        if agent_session_driver.acquire_lock(num, cand_phase, ctx.repo_path):
+        if agent_session_driver.acquire_lock(
+            num,
+            cand_phase,
+            ctx.repo_path,
+            read_env=_read_env(ctx),
+            write_env=_repository_write_env(ctx),
+        ):
             locked_candidates.append(cand_item)
             break
         else:
@@ -1124,7 +1181,13 @@ def invoke_agent(
     # Post start discussion note
     try:
         ok = discussion_manager.post_start(
-            repo=ctx.repo, issue=issue_num, phase=phase, budget=str(ctx.max_budget_usd), rundir=str(rundir)
+            repo=ctx.repo,
+            issue=issue_num,
+            phase=phase,
+            budget=str(ctx.max_budget_usd),
+            rundir=str(rundir),
+            read_env=_read_env(ctx),
+            write_env=_repository_write_env(ctx),
         )
         if not ok:
             say("  NOTE: could not post start discussion note to Lab Notebook")
@@ -1133,7 +1196,12 @@ def invoke_agent(
 
     # Update board status to "In progress" for execute phase
     if phase == "execute" and ctx.board and issue_num in board_item_ids:
-        if agent_session_driver.mark_board_in_progress(ctx.board, board_item_ids[issue_num]):
+        if agent_session_driver.mark_board_in_progress(
+            ctx.board,
+            board_item_ids[issue_num],
+            read_env=_read_env(ctx),
+            write_env=_board_write_env(ctx),
+        ):
             say(f"  NOTE: moved issue #{issue_num} to 'In progress' on board {ctx.board}")
 
     # Write inflight marker
@@ -1158,7 +1226,12 @@ def invoke_agent(
             ctx.inflight_file.unlink(missing_ok=True)
             raise
 
-    agent_session_driver.increment_attempts(issue_num, ctx.repo)
+    agent_session_driver.increment_attempts(
+        issue_num,
+        ctx.repo,
+        read_env=_read_env(ctx),
+        write_env=_repository_write_env(ctx),
+    )
 
     if phase not in PHASE_TIERS:
         die(f"unknown phase: {phase}")
@@ -1206,7 +1279,14 @@ def invoke_agent(
     say(f"  exit {ret}   cost ${cost}   session {session_id or 'none'}")
 
     # Perform the agent's GitHub writes, with the driver's credential.
-    writes_result = agent_session_driver.perform_writes(writes_file, ctx.repo, run_repo_path, rundir, ctx.board)
+    writes_result = agent_session_driver.perform_writes(
+        writes_file,
+        ctx.repo,
+        run_repo_path,
+        rundir,
+        ctx.board,
+        write_env=_repository_write_env(ctx),
+    )
     for line in writes_result["messages"]:
         say(line)
 
@@ -1288,7 +1368,12 @@ def classify_and_record(
                     outcome = "parked"
                     if "inconclusive" in inv.final_text.lower():
                         reason = f"parked (inconclusive reply) by agent during {inv.phase}: {inv.final_text[:400]}"
-                        agent_session_driver.decrement_attempts(inv.issue_num, ctx.repo)
+                        agent_session_driver.decrement_attempts(
+                            inv.issue_num,
+                            ctx.repo,
+                            read_env=_read_env(ctx),
+                            write_env=_repository_write_env(ctx),
+                        )
                     else:
                         reason = f"parked by agent during {inv.phase}: {inv.final_text[:400]}"
                 elif inv.phase == "refine" and issue_tier == "needs-review":
@@ -1301,7 +1386,12 @@ def classify_and_record(
                 outcome = "parked"
                 if "inconclusive" in inv.final_text.lower():
                     reason = f"parked (inconclusive reply); run's own account: {inv.final_text[:400]}"
-                    agent_session_driver.decrement_attempts(inv.issue_num, ctx.repo)
+                    agent_session_driver.decrement_attempts(
+                        inv.issue_num,
+                        ctx.repo,
+                        read_env=_read_env(ctx),
+                        write_env=_repository_write_env(ctx),
+                    )
                 else:
                     reason = f"no PR opened; run's own account: {inv.final_text[:400]}"
         else:
@@ -1393,6 +1483,7 @@ def classify_and_record(
         ctx.repo,
         ctx.state_dir,
         ctx.parked_log,
+        write_env=_repository_write_env(ctx),
     )
     if approval_watch_runtime is not None:
         maintain_approval_watch_after_outcome(
@@ -1414,6 +1505,8 @@ def classify_and_record(
             prurl=prurl or "none",
             reason=reason,
             rundir=str(inv.rundir),
+            read_env=_read_env(ctx),
+            write_env=_repository_write_env(ctx),
         )
         if not ok:
             say("  NOTE: could not post finish discussion note to Lab Notebook")
@@ -1702,7 +1795,9 @@ def main(argv: list[str] | None = None) -> int:
                     worker_id=f"{os.getpid()}",
                 )
             except _queue_failure_types() as error:
-                agent_session_driver.release_lock(ctx.repo_path)
+                agent_session_driver.release_lock(
+                    ctx.repo_path, write_env=_repository_write_env(ctx)
+                )
                 _queue_degraded(error)
                 queue_runtime = None
                 sel_res = agent_session_driver.select_queue(ctx)
@@ -1721,7 +1816,9 @@ def main(argv: list[str] | None = None) -> int:
         if queue_runtime is not None and queue_selection is not None:
             if queue_selection.selected_claim is not None:
                 queue_runtime.store.release(queue_selection.selected_claim)
-                agent_session_driver.release_lock(ctx.repo_path)
+                agent_session_driver.release_lock(
+                    ctx.repo_path, write_env=_repository_write_env(ctx)
+                )
         say("\ndry run -- no claude invocation.")
         return 0
 
@@ -1773,7 +1870,9 @@ def main(argv: list[str] | None = None) -> int:
         except _queue_failure_types() as error:
             if after_inflight is None:
                 raise
-            agent_session_driver.release_lock(ctx.repo_path)
+            agent_session_driver.release_lock(
+                ctx.repo_path, write_env=_repository_write_env(ctx)
+            )
             _queue_degraded(error)
             queue_runtime = None
             queue_selection = None
