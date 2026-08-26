@@ -245,5 +245,15 @@
   the controller's event, driver, documentation, lint, and typecheck matrix exited 0. The driver
   suite passed 776 tests with 2 documented skips; docs-check, Ruff, and mypy were green.
 - A fresh scoped re-review approved both the App-alias stripping and page-by-page GraphQL
-  pagination with no new findings. Owner-review replies, push, deployment, service-manager actions,
-  Caddy reload, GitHub mutation, merge, and infrastructure changes remain unperformed.
+  pagination with no new findings. Deployment, service-manager actions, Caddy reload, merge, and
+  infrastructure changes remain unperformed.
+
+### PR review update
+
+- The reviewed implementation was pushed to the existing `issue-269` branch for PR #275 without
+  force. The remote advanced from `4d25ed8` through `decfae6` before this bookkeeping update.
+- Replies were posted to all five owner-review threads. They describe the general runbook, combined
+  daemon, full-scan terminology, simplified transaction boundary, and typed GraphQL operations.
+- Each reply includes the final verification result: `make check` passed 776 tests with 2
+  documented skips and printed `all checks passed`.
+- No merge, deployment, service-manager action, Caddy reload, or infrastructure change occurred.

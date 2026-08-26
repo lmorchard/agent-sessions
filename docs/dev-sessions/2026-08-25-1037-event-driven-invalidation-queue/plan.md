@@ -1250,8 +1250,8 @@ The driver unit joins the same readers and database groups, loads `/etc/agent-se
 - [x] Re-run `make driver-test` and record the fresh result in `notes.md`.
 - [x] Re-run `make check` and record the fresh result in `notes.md`.
 - [x] Run `git diff --check` and inspect the full branch diff.
-- [ ] Reply to each owner-review thread with the specific code or documentation change and fresh verification evidence.
-- [ ] Push the reviewed commits to PR #275. Do not deploy or merge.
+- [x] Reply to each owner-review thread with the specific code or documentation change and fresh verification evidence.
+- [x] Push the reviewed commits to PR #275. Do not deploy or merge.
 
 ## Review-revision coverage and self-review
 
