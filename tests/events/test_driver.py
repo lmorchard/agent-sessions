@@ -143,6 +143,7 @@ def claim(kind: str, key: str, *, generation: int = 1) -> ClaimedTarget:
         ("_OPEN_PR_DISCOVERY_QUERY", "OpenPullRequestDiscovery"),
         ("_CLOSING_ISSUES_QUERY", "ClosingIssues"),
         ("_PROJECT_ITEMS_QUERY", "ProjectItems"),
+        ("_PROJECT_FIELDS_QUERY", "ProjectFields"),
     ],
 )
 def test_event_graphql_queries_have_exact_named_operations(

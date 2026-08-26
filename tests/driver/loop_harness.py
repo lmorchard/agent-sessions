@@ -441,15 +441,6 @@ class FakeGitHub:
             checks = [self._project(c, fields, f"pr {number} check") for c in pull["checks"]]
             return _Result(0, json.dumps(checks))
 
-        if rest[:2] == ["project", "item-list"]:
-            return _Result(0, json.dumps({"items": self.board_items}))
-
-        if rest[:2] == ["project", "view"]:
-            return _Result(0, json.dumps({"id": "PVT_kwHNVLfOAXqLIg"}))
-
-        if rest[:2] == ["project", "field-list"]:
-            return _Result(0, json.dumps({"fields": [{"id": "PVTSSF_lAHNVLfOAXqLIs4WQWjt", "name": "Status", "options": [{"id": "a8efeb1f", "name": "In progress"}]}]}))
-
         if rest[:2] == ["project", "item-edit"]:
             return _Result(0, "")
 
@@ -611,6 +602,43 @@ class FakeGitHub:
                 )
 
             if operation is GraphQLOperation.PROJECT_ITEMS:
+                nodes = []
+                for index, item in enumerate(self.board_items):
+                    number = item["content"]["number"]
+                    issue_record = self.issue_by_number(number)
+                    title = issue_record["title"] if issue_record else f"Issue {number}"
+                    field_values = []
+                    for field_name, key in (("Status", "status"), ("Priority", "priority")):
+                        if item.get(key):
+                            field_values.append(
+                                {
+                                    "__typename": "ProjectV2ItemFieldSingleSelectValue",
+                                    "name": item[key],
+                                    "field": {"name": field_name},
+                                }
+                            )
+                    nodes.append(
+                        {
+                            "id": item.get("id", f"ITEM_{index}"),
+                            "type": "ISSUE",
+                            "content": {
+                                "__typename": "Issue",
+                                "number": number,
+                                "title": title,
+                                "repository": {
+                                    "databaseId": 1,
+                                    "nameWithOwner": REPO,
+                                },
+                            },
+                            "fieldValues": {
+                                "nodes": field_values,
+                                "pageInfo": {
+                                    "hasNextPage": False,
+                                    "endCursor": None,
+                                },
+                            },
+                        }
+                    )
                 return graphql_result(
                     {
                         "data": {
@@ -618,7 +646,7 @@ class FakeGitHub:
                                 "projectV2": {
                                     "id": "PVT_kwHNVLfOAXqLIg",
                                     "items": {
-                                        "nodes": [],
+                                        "nodes": nodes,
                                         "pageInfo": {
                                             "hasNextPage": False,
                                             "endCursor": None,
@@ -627,6 +655,39 @@ class FakeGitHub:
                                 }
                             },
                             "rateLimit": {"limit": 5000, "cost": 1, "remaining": 4999, "resetAt": "2026-08-10T12:00:00Z"},
+                        }
+                    }
+                )
+
+            if operation is GraphQLOperation.PROJECT_FIELDS:
+                return graphql_result(
+                    {
+                        "data": {
+                            "user": {
+                                "projectV2": {
+                                    "id": "PVT_kwHNVLfOAXqLIg",
+                                    "fields": {
+                                        "totalCount": 1,
+                                        "nodes": [
+                                            {
+                                                "__typename": "ProjectV2SingleSelectField",
+                                                "id": "PVTSSF_lAHNVLfOAXqLIs4WQWjt",
+                                                "name": "Status",
+                                                "options": [
+                                                    {
+                                                        "id": "a8efeb1f",
+                                                        "name": "In progress",
+                                                    }
+                                                ],
+                                            }
+                                        ],
+                                        "pageInfo": {
+                                            "hasNextPage": False,
+                                            "endCursor": None,
+                                        },
+                                    },
+                                }
+                            }
                         }
                     }
                 )

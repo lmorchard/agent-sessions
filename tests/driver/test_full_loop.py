@@ -222,9 +222,7 @@ def test_driver_reads_use_the_system_token_and_mutations_are_explicit(loop):
         ]
 
     for read_prefix in (
-        ["gh", "project", "item-list"],
-        ["gh", "project", "view"],
-        ["gh", "project", "field-list"],
+        ["gh", "api", "graphql"],
         ["gh", "issue", "list"],
         ["gh", "pr", "list"],
         ["gh", "discussion", "list"],

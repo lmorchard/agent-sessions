@@ -77,10 +77,26 @@ def _successful_doctor_runner(
         payload = {"total_count": 0, "check_runs": []}
     elif endpoint == f"repos/owner/repo/commits/{'a' * 40}/status":
         payload = {"sha": "a" * 40, "state": "pending", "statuses": []}
-    elif command[:3] == ["gh", "project", "field-list"]:
+    elif command[:3] == ["gh", "api", "graphql"]:
         payload = {
-            "fields": [{"name": "Status"}, {"name": "Priority"}],
-            "totalCount": 2,
+            "data": {
+                "user": {
+                    "projectV2": {
+                        "id": "PVT_1",
+                        "fields": {
+                            "nodes": [
+                                {"id": "status", "name": "Status"},
+                                {"id": "priority", "name": "Priority"},
+                            ],
+                            "pageInfo": {
+                                "hasNextPage": False,
+                                "endCursor": None,
+                            },
+                            "totalCount": 2,
+                        },
+                    }
+                }
+            }
         }
     else:
         raise AssertionError(f"unexpected doctor command: {command}")
@@ -510,24 +526,15 @@ def test_doctor_detects_repository_id_mismatch_without_github_writes(
 
     assert report.by_code("repository-read:owner/repo").status == "pass"
     assert report.by_code("repository-identity:owner/repo").status == "fail"
-    assert commands == [
+    assert commands[:-1] == [
         ["gh", "api", "repos/owner/repo"],
         ["gh", "api", "repos/owner/repo/commits?per_page=1"],
         ["gh", "api", f"repos/owner/repo/commits/{'a' * 40}/check-runs"],
         ["gh", "api", f"repos/owner/repo/commits/{'a' * 40}/status"],
-        [
-            "gh",
-            "project",
-            "field-list",
-            "1",
-            "--owner",
-            "owner",
-            "--limit",
-            "1000",
-            "--format",
-            "json",
-        ],
     ]
+    assert commands[-1][:3] == ["gh", "api", "graphql"]
+    assert "owner=owner" in commands[-1]
+    assert "number=1" in commands[-1]
 
 
 def test_doctor_exercises_check_run_and_combined_status_reads_at_a_discovered_sha(
@@ -548,7 +555,11 @@ def test_doctor_exercises_check_run_and_combined_status_reads_at_a_discovered_sh
     statuses = {probe.code: probe.status for probe in report.probes}
     assert statuses.get("checks-read:owner/repo") == "pass"
     assert statuses.get("statuses-read:owner/repo") == "pass"
-    assert [command for command in commands if command[:2] == ["gh", "api"]] == [
+    assert [
+        command
+        for command in commands
+        if command[:2] == ["gh", "api"] and command[:3] != ["gh", "api", "graphql"]
+    ] == [
         ["gh", "api", "repos/owner/repo"],
         ["gh", "api", "repos/owner/repo/commits?per_page=1"],
         ["gh", "api", f"repos/owner/repo/commits/{'a' * 40}/check-runs"],
@@ -609,14 +620,34 @@ def test_doctor_skips_field_absence_when_the_board_field_list_is_incomplete(
     QueueStore.migrate(database, busy_timeout_ms=100)
 
     def runner(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        if command[:3] == ["gh", "project", "field-list"]:
+        if command[:3] == ["gh", "api", "graphql"]:
             fields = [{"name": "Status"}] + [
                 {"name": f"Field {number}"} for number in range(2, 31)
             ]
+            for index, field in enumerate(fields):
+                field["id"] = f"field-{index}"
             return subprocess.CompletedProcess(
                 command,
                 0,
-                json.dumps({"fields": fields, "totalCount": 31}),
+                json.dumps(
+                    {
+                        "data": {
+                            "user": {
+                                "projectV2": {
+                                    "id": "PVT_1",
+                                    "fields": {
+                                        "nodes": fields,
+                                        "pageInfo": {
+                                            "hasNextPage": False,
+                                            "endCursor": None,
+                                        },
+                                        "totalCount": 31,
+                                    },
+                                }
+                            }
+                        }
+                    }
+                ),
                 "",
             )
         return _successful_doctor_runner(command, **kwargs)
@@ -636,7 +667,7 @@ def test_doctor_reports_inaccessible_board_and_all_four_probe_statuses(
     QueueStore.migrate(database, busy_timeout_ms=100)
 
     def runner(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        if command[:3] == ["gh", "project", "field-list"]:
+        if command[:3] == ["gh", "api", "graphql"]:
             return subprocess.CompletedProcess(command, 1, "", "sensitive-api-detail")
         return _successful_doctor_runner(command, **kwargs)
 
@@ -650,6 +681,54 @@ def test_doctor_reports_inaccessible_board_and_all_four_probe_statuses(
     assert "sensitive-api-detail" not in "\n".join(
         f"{probe.message} {probe.remedy}" for probe in report.probes
     )
+
+
+def test_doctor_reads_project_fields_through_direct_graphql(tmp_path: Path) -> None:
+    database = tmp_path / "events.sqlite3"
+    config_path = tmp_path / "events.toml"
+    _write_config(config_path, database)
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    project_commands: list[list[str]] = []
+
+    def runner(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if command[:2] == ["gh", "project"]:
+            return subprocess.CompletedProcess(command, 1, "", "unknown owner type")
+        if command[:3] == ["gh", "api", "graphql"]:
+            project_commands.append(command)
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                json.dumps(
+                    {
+                        "data": {
+                            "user": {
+                                "projectV2": {
+                                    "id": "PVT_1",
+                                    "fields": {
+                                        "nodes": [
+                                            {"id": "status", "name": "Status"},
+                                            {"id": "priority", "name": "Priority"},
+                                        ],
+                                        "pageInfo": {
+                                            "hasNextPage": False,
+                                            "endCursor": None,
+                                        },
+                                        "totalCount": 2,
+                                    },
+                                }
+                            }
+                        }
+                    }
+                ),
+                "",
+            )
+        return _successful_doctor_runner(command, **kwargs)
+
+    report = _doctor_report(config_path, runner=runner)
+
+    assert report.by_code("board-read:owner/1").status == "pass"
+    assert report.by_code("board-fields:owner/1").status == "pass"
+    assert len(project_commands) == 1
 
 
 @pytest.mark.parametrize(

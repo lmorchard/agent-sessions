@@ -355,18 +355,28 @@ def test_mark_board_in_progress_retry_success(monkeypatch):
     agent_session_driver._BOARD_METADATA_CACHE.clear()
     attempts = [0]
 
-    class MockResView:
-        stdout = json.dumps({"id": "PVT_123"})
-
     class MockResFields:
+        returncode = 0
+        stderr = ""
         stdout = json.dumps({
-            "fields": [
-                {
-                    "name": "Status",
-                    "id": "FLD_456",
-                    "options": [{"name": "In progress", "id": "OPT_789"}]
+            "data": {
+                "user": {
+                    "projectV2": {
+                        "id": "PVT_123",
+                        "fields": {
+                            "nodes": [
+                                {
+                                    "name": "Status",
+                                    "id": "FLD_456",
+                                    "options": [{"name": "In progress", "id": "OPT_789"}],
+                                }
+                            ],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "totalCount": 1,
+                        },
+                    }
                 }
-            ]
+            }
         })
 
     class MockResEdit:
@@ -377,9 +387,7 @@ def test_mark_board_in_progress_retry_success(monkeypatch):
     def mock_run(cmd, *args, **kwargs):
         cmd_str = [str(c) for c in cmd]
         environments.append((cmd_str, dict(kwargs.get("env") or {})))
-        if cmd_str[:2] == ["gh", "project"] and cmd_str[2] == "view":
-            return MockResView()
-        if cmd_str[:2] == ["gh", "project"] and cmd_str[2] == "field-list":
+        if cmd_str[:3] == ["gh", "api", "graphql"]:
             return MockResFields()
         if cmd_str[:2] == ["gh", "project"] and cmd_str[2] == "item-edit":
             attempts[0] += 1
@@ -405,35 +413,105 @@ def test_mark_board_in_progress_retry_success(monkeypatch):
     assert {
         tuple(command[:3]): env.get("GH_TOKEN") for command, env in environments
     } == {
-        ("gh", "project", "view"): "read-token",
-        ("gh", "project", "field-list"): "read-token",
+        ("gh", "api", "graphql"): "read-token",
         ("gh", "project", "item-edit"): "board-token",
     }
+
+
+def test_fetch_board_json_uses_direct_graphql_with_the_read_environment(monkeypatch):
+    calls = []
+
+    def mock_run(command, **kwargs):
+        calls.append((list(command), dict(kwargs.get("env") or {})))
+        if command[:3] != ["gh", "api", "graphql"]:
+            raise AssertionError(f"read-side Project CLI command escaped: {command}")
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            json.dumps(
+                {
+                    "data": {
+                        "user": {
+                            "projectV2": {
+                                "id": "PVT_1",
+                                "items": {
+                                    "nodes": [
+                                        {
+                                            "id": "ITEM_1",
+                                            "type": "ISSUE",
+                                            "content": {
+                                                "__typename": "Issue",
+                                                "number": 1,
+                                                "title": "Direct GraphQL",
+                                                "repository": {
+                                                    "databaseId": 1,
+                                                    "nameWithOwner": "owner/repo",
+                                                },
+                                            },
+                                            "fieldValues": {
+                                                "nodes": [],
+                                                "pageInfo": {
+                                                    "hasNextPage": False,
+                                                    "endCursor": None,
+                                                },
+                                            },
+                                        }
+                                    ],
+                                    "pageInfo": {
+                                        "hasNextPage": False,
+                                        "endCursor": None,
+                                    },
+                                },
+                            }
+                        },
+                        "rateLimit": {"remaining": 4999},
+                    }
+                }
+            ),
+            "",
+        )
+
+    monkeypatch.setattr("subprocess.run", mock_run)
+    read_env = {"GH_TOKEN": "read-token", "GITHUB_TOKEN": "read-token"}
+
+    items = agent_session_driver.fetch_board_json("owner/6", env=read_env)
+
+    assert items[0]["content"]["number"] == 1
+    assert calls[0][0][:3] == ["gh", "api", "graphql"]
+    assert calls[0][1]["GH_TOKEN"] == "read-token"
 
 
 def test_mark_board_in_progress_failure_logs_stderr(monkeypatch):
     agent_session_driver._BOARD_METADATA_CACHE.clear()
     logs = []
 
-    class MockResView:
-        stdout = json.dumps({"id": "PVT_123"})
-
     class MockResFields:
+        returncode = 0
+        stderr = ""
         stdout = json.dumps({
-            "fields": [
-                {
-                    "name": "Status",
-                    "id": "FLD_456",
-                    "options": [{"name": "In progress", "id": "OPT_789"}]
+            "data": {
+                "user": {
+                    "projectV2": {
+                        "id": "PVT_123",
+                        "fields": {
+                            "nodes": [
+                                {
+                                    "name": "Status",
+                                    "id": "FLD_456",
+                                    "options": [{"name": "In progress", "id": "OPT_789"}],
+                                }
+                            ],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "totalCount": 1,
+                        },
+                    }
                 }
-            ]
+            }
         })
 
     def mock_run(cmd, *args, **kwargs):
         cmd_str = [str(c) for c in cmd]
-        if cmd_str[:2] == ["gh", "project"] and cmd_str[2] == "view":
-            return MockResView()
-        if cmd_str[:2] == ["gh", "project"] and cmd_str[2] == "field-list":
+        if cmd_str[:3] == ["gh", "api", "graphql"]:
             return MockResFields()
         if cmd_str[:2] == ["gh", "project"] and cmd_str[2] == "item-edit":
             raise subprocess.CalledProcessError(1, cmd, stderr="GraphQL: Could not resolve item\n")

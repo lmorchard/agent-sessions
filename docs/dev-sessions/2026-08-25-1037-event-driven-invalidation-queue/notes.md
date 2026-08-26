@@ -257,3 +257,26 @@
 - Each reply includes the final verification result: `make check` passed 776 tests with 2
   documented skips and printed `all checks passed`.
 - No merge, deployment, service-manager action, Caddy reload, or infrastructure change occurred.
+
+### Read-side Projects GraphQL follow-up
+
+- The local decafclaw trial exposed an accidental credential requirement in GitHub CLI's
+  `project` commands. A classic PAT with only `read:project` could query the user-owned Project
+  through GraphQL, but `gh project field-list` and `item-list` failed with `unknown owner type`
+  unless the token also carried `read:org`.
+- Project item and field reads now share two named, paginated GraphQL operations. The event poller,
+  event doctor, repository driver, driver doctor, and board audit all use those operations. Existing
+  Project mutations remain explicit `gh project` calls with the private board credential.
+- The driver doctor now probes the board with the shared read credential. Its classic write-token
+  check requires `project` only when Project mutations are configured; it no longer requires or
+  recommends `read:org`.
+- TDD started with three failures that proved the old item-list boundary. The focused event, driver,
+  doctor, and board-audit regression run later passed. `make check` passed with 777 tests and 2
+  documented skips after one mypy finding prompted explicit JSON-shape checks in `board.py`.
+- The live Keychain-backed decafclaw trial then ran `poll-projects` against `lmorchard/6` with
+  `attempted=1`, `errors=0`. Event doctor passed the repository read, board read, and complete field
+  probes with the same shared token.
+- Removing the remaining `gh` CLI transport is a separate follow-up. This patch removes only the
+  read-side `gh project view`, `field-list`, and `item-list` operations; repository reads and Project
+  mutations still use `gh`.
+- No merge, deployment, service-manager action, Caddy reload, or infrastructure change occurred.

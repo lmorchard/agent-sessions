@@ -18,6 +18,7 @@ from typing import Any, Literal, cast
 from agent_sessions.driver import credentials
 
 from . import config
+from .github import ProjectFieldsIncomplete, fetch_project_fields
 from .models import EventsConfig, QueueStatus
 from .store import CURRENT_SCHEMA_VERSION, QueueStore, schema_shape_is_current
 
@@ -704,22 +705,29 @@ def _board_probes(
 ) -> list[DoctorProbe]:
     probes: list[DoctorProbe] = []
     for board in loaded.boards:
-        command = [
-            "gh",
-            "project",
-            "field-list",
-            str(board.number),
-            "--owner",
-            board.owner,
-            "--limit",
-            "1000",
-            "--format",
-            "json",
-        ]
         try:
-            response = _github_json(
-                command, token=token, environ=environ, runner=runner
+            response = fetch_project_fields(
+                board.key,
+                token=token,
+                runner=runner,
             )
+        except ProjectFieldsIncomplete:
+            probes.extend(
+                (
+                    DoctorProbe(
+                        f"board-read:{board.key}",
+                        "pass",
+                        "configured project is readable",
+                    ),
+                    DoctorProbe(
+                        f"board-fields:{board.key}",
+                        "skip",
+                        "Status and Priority fields could not be checked completely",
+                        "retry after GitHub returns a complete project field list",
+                    ),
+                )
+            )
+            continue
         except RuntimeError:
             probes.extend(
                 (

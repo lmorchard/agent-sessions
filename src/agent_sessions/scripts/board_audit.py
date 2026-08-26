@@ -10,6 +10,12 @@ import sys
 from dataclasses import dataclass
 from typing import Literal, TextIO
 
+from agent_sessions.events.github import (
+    GitHubError,
+    fetch_board_items,
+    fetch_project_fields,
+)
+
 Severity = Literal["FAIL", "WARN"]
 
 FIELD_LIMIT = 100
@@ -185,30 +191,20 @@ def parse_closing_issue_numbers(records: list[dict[str, object]]) -> set[int]:
 
 def collect(owner: str, project: int, repo: str) -> tuple[list[BoardItem], dict[int, Issue], set[int]]:
     """Fetch and normalize the bounded GitHub state required for an audit."""
+    board = f"{owner}/{project}"
+    try:
+        field_payload = fetch_project_fields(board, token="")
+        item_payload = fetch_board_items(board, token="")
+    except GitHubError as error:
+        raise AuditError(f"board query failed: {error}") from error
     field_records = bounded_records(
-        run_gh(
-            [
-                "project", "field-list", str(project), "--owner", owner,
-                "--format", "json", "--limit", str(FIELD_LIMIT),
-            ],
-            "board fields",
-        ),
-        "board fields",
-        FIELD_LIMIT,
-        "fields",
+        field_payload, "board fields", FIELD_LIMIT, "fields",
     )
     parse_status_field(field_records)
     item_records = bounded_records(
-        run_gh(
-            [
-                "project", "item-list", str(project), "--owner", owner,
-                "--format", "json", "--limit", str(ITEM_LIMIT),
-            ],
-            "board items",
-        ),
+        item_payload,
         "board items",
         ITEM_LIMIT,
-        "items",
     )
     issue_records = bounded_records(
         run_gh(

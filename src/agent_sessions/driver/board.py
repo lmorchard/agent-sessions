@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import time
@@ -10,13 +9,18 @@ from datetime import datetime, timezone
 
 from agent_sessions.driver import credentials, gh_query, output
 from agent_sessions.driver.output import die, log, say
+from agent_sessions.events.github import (
+    fetch_board_items,
+    fetch_project_fields,
+    project_items_command,
+)
 
 _BOARD_METADATA_CACHE: dict[str, dict | None] = {}
 
 
 def board_command(board: str, limit: int = 500) -> list[str]:
-    owner, num = board.split("/", 1)
-    return ["gh", "project", "item-list", num, "--owner", owner, "--format", "json", "--limit", str(limit)]
+    del limit  # The direct query paginates in production; the doctor probes page one.
+    return project_items_command(board)
 
 
 def fetch_board_json(board: str, *, env: dict[str, str] | None = None) -> list[dict]:
@@ -28,17 +32,14 @@ def fetch_board_json(board: str, *, env: dict[str, str] | None = None) -> list[d
             if env is None
             else env
         )
-        res = subprocess.run(
-            board_command(board),
-            capture_output=True,
-            text=True,
-            check=True,
-            env=read_env,
+        token = read_env.get("GH_TOKEN") or read_env.get("GITHUB_TOKEN") or ""
+        items = fetch_board_items(
+            board,
+            token=token,
+            runner=subprocess.run,
         )
-        data = json.loads(res.stdout)
-        items = data.get("items", [])
         say(f"board {board}: read {len(items)} items (advisory only; does not gate)")
-        return items if isinstance(items, list) else []
+        return items
     except Exception as e:
         detail = getattr(e, "stderr", "") or str(e)
         say(f"board {board}: UNREADABLE ({' '.join(str(detail).split())[:120]}) -- selection falls back to priority labels")
@@ -73,21 +74,46 @@ def get_board_metadata(
     )
     for attempt in range(retries):
         try:
-            res = subprocess.run(["gh", "project", "view", number, "--owner", owner, "--format", "json"], capture_output=True, text=True, check=True, env=read_env)
-            project_id = json.loads(res.stdout)["id"]
-
-            res = subprocess.run(["gh", "project", "field-list", number, "--owner", owner, "--format", "json"], capture_output=True, text=True, check=True, env=read_env)
-            fields = json.loads(res.stdout).get("fields", [])
-            status_field = next((f for f in fields if f.get("name") == "Status"), None)
+            token = read_env.get("GH_TOKEN") or read_env.get("GITHUB_TOKEN") or ""
+            project = fetch_project_fields(
+                f"{owner}/{number}",
+                token=token,
+                runner=subprocess.run,
+            )
+            project_id = project["id"]
+            fields = project.get("fields")
+            if not isinstance(project_id, str) or not isinstance(fields, list):
+                return None
+            status_field = next(
+                (
+                    field
+                    for field in fields
+                    if isinstance(field, dict) and field.get("name") == "Status"
+                ),
+                None,
+            )
             if not status_field:
                 return None
 
             field_id = status_field["id"]
-            in_progress_opt = next((o for o in status_field.get("options", []) if o.get("name") == "In progress"), None)
+            options = status_field.get("options")
+            if not isinstance(field_id, str) or not isinstance(options, list):
+                return None
+            in_progress_opt = next(
+                (
+                    option
+                    for option in options
+                    if isinstance(option, dict)
+                    and option.get("name") == "In progress"
+                ),
+                None,
+            )
             if not in_progress_opt:
                 return None
 
             option_id = in_progress_opt["id"]
+            if not isinstance(option_id, str):
+                return None
 
             meta = {
                 "project_id": project_id,

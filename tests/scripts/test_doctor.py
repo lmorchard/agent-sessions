@@ -47,7 +47,7 @@ class FakeGh:
 
     def __init__(self, *, logins=None, visible=None, writable=None, labels=("bug",), origin=None,
                  write_token=WRITE, repo=REPO, discussions=True, categories=("Lab Notebook",),
-                 scopes="project, repo, read:org", board_ok=True):
+                 scopes="project, repo", board_ok=True):
         # `write_token` lets a test swap in a real-shaped token (`github_pat_…` vs
         # `ghp_…`) without having to restate every map by hand.
         self.logins = logins if logins is not None else {READ: BOT, write_token: BOT}
@@ -77,10 +77,15 @@ class FakeGh:
         if argv[0] == "git":
             return result(0, self.origin + "\n") if "get-url" in argv else result(1, "", "fake: unhandled git")
 
-        if argv[:2] == ["gh", "project"]:
+        if argv[:3] == ["gh", "api", "graphql"] and "query ProjectItems" in joined:
             if not self.board_ok:
-                return result(1, "", "unknown owner type")
-            return result(0, '{"items":[]}')
+                return result(1, "", "GraphQL: Could not resolve to a ProjectV2")
+            return result(
+                0,
+                '{"data":{"user":{"projectV2":{"id":"P1","items":'
+                '{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}},'
+                '"rateLimit":{"remaining":4999,"resetAt":"2099-01-01T00:00:00Z"}}}',
+            )
 
         if "-i" in argv and argv[-1] == "user":
             body = '{"login":"%s"}' % self.logins.get(token, "")
@@ -271,13 +276,16 @@ def test_a_warning_does_not_fail_the_preflight():
 
 # -- the board ---------------------------------------------------------------
 
-def test_the_board_is_probed_with_the_write_token():
-    """The driver reads the board with its own credential, so that is the one that
-    has to be able to see it."""
+def test_the_board_is_probed_with_the_shared_read_token():
+    """Board reads share the same contained credential as every other system read."""
     gh = FakeGh()
     doctor.check_all(env(), gh, repo=REPO, repo_path=".", board="lmorchard/9")
-    tokens = [tok for tok, argv in gh.calls if argv[:3] == ["gh", "project", "item-list"]]
-    assert tokens == [WRITE]
+    tokens = [
+        tok
+        for tok, argv in gh.calls
+        if argv[:3] == ["gh", "api", "graphql"] and "query ProjectItems" in " ".join(argv)
+    ]
+    assert tokens == [READ]
 
 
 def test_an_invisible_board_warns_rather_than_fails():
@@ -286,7 +294,7 @@ def test_an_invisible_board_warns_rather_than_fails():
     checks = doctor.check_all(env(), FakeGh(board_ok=False), repo=REPO, repo_path=".", board="lmorchard/9")
     check = by_name(checks, "board readable")
     assert check.status == "warn"
-    assert "read:org" in check.remedy
+    assert "Manage access" in check.remedy
     assert doctor.exit_code(checks) == 0
 
 
@@ -367,31 +375,25 @@ def test_a_fine_grained_token_on_its_owners_project_is_not_told_about_ownership(
 
 
 def test_the_board_probe_is_the_drivers_own_command():
-    """The check passed while the driver failed, because it asked GraphQL directly
-    and the driver shells out to `gh project item-list` -- which needs `read:org`
-    to resolve `--owner` and errors with `unknown owner type` without it. Checking a
-    proxy for the real call is how a configuration that cannot select an issue was
-    reported green.
-
-    Derived, not restated: both sides come from `agent_session_driver.board_command`,
-    so the two cannot drift apart again."""
+    """Derived, not restated: doctor and the driver share one board-read command."""
     from agent_sessions.driver import agent_session_driver
 
     gh = FakeGh()
     doctor.check_all(env(), gh, repo=REPO, repo_path=".", board="lmorchard/9")
 
     expected = agent_session_driver.board_command("lmorchard/9", limit=1)
-    issued = [argv for _, argv in gh.calls if argv[:3] == ["gh", "project", "item-list"]]
+    issued = [
+        argv
+        for _, argv in gh.calls
+        if argv[:3] == ["gh", "api", "graphql"] and "query ProjectItems" in " ".join(argv)
+    ]
     assert issued, f"the board was not probed with the driver's own command: {gh.calls}"
     assert issued[0] == expected
 
 
-def test_unknown_owner_type_is_diagnosed_as_the_missing_read_org_scope():
-    """`gh` resolves `--owner` by asking for the organization *and* user id in one
-    query, so the org branch fails the whole thing without `read:org` -- even for a
-    user-owned project. The surfaced error says only `unknown owner type`."""
-    remedy = doctor._board_remedy("lmorchard/9", BOT, "ghp_x", "unknown owner type")
-    assert "read:org" in remedy
+def test_the_direct_board_read_never_recommends_read_org():
+    remedy = doctor._board_remedy("lmorchard/9", BOT, "ghp_x", "NOT_FOUND")
+    assert "read:org" not in remedy
 
 
 def test_the_board_remedy_says_what_an_unreadable_board_actually_costs():
@@ -418,15 +420,14 @@ def test_classic_token_scopes_are_reported():
     assert gh is not None
 
 
-def test_a_board_without_read_org_is_flagged_from_the_scopes():
+def test_a_board_without_read_org_has_sufficient_write_scopes():
     checks = doctor.check_all(
         env(DRIVER_GH_WRITE_TOKEN="ghp_x"),
         FakeGh(write_token="ghp_x", scopes="project, repo"),
         repo=REPO, repo_path=".", board="lmorchard/9",
     )
     check = next(c for c in checks if c.name == "write token scopes")
-    assert check.status == "warn"
-    assert "read:org" in check.remedy
+    assert check.status == "pass"
 
 
 def test_the_workflow_scope_is_called_out_as_dangerous():
@@ -434,7 +435,7 @@ def test_the_workflow_scope_is_called_out_as_dangerous():
     than the token, and the one scope this project tells you never to grant."""
     checks = doctor.check_all(
         env(DRIVER_GH_WRITE_TOKEN="ghp_x"),
-        FakeGh(write_token="ghp_x", scopes="repo, workflow, project, read:org"),
+        FakeGh(write_token="ghp_x", scopes="repo, workflow, project"),
         repo=REPO, repo_path=".", board="lmorchard/9",
     )
     check = next(c for c in checks if c.name == "write token scopes")
@@ -489,23 +490,23 @@ def test_a_wholly_clean_run_still_says_so():
 # -- the report has to be actionable at a glance -----------------------------
 
 
-def _warned(scopes="project, repo, write:discussion", board="lmorchard/9"):
+def _warned(scopes="repo, write:discussion", board="lmorchard/9"):
     tok = "ghp_x"
     return doctor.check_all(
         env(DRIVER_GH_WRITE_TOKEN=tok),
-        FakeGh(write_token=tok, scopes=scopes, board_ok=False),
+        FakeGh(write_token=tok, scopes=scopes),
         repo=REPO, repo_path=".", board=board,
     )
 
 
 def test_an_action_names_the_variable_and_the_exact_scope_list():
-    """'add read:org' leaves the operator to work out which token, which kind, and
-    what the other scopes should be. Name all three."""
+    """Name the token variable, token kind, and complete scope list."""
     action = next(c.action for c in _warned() if c.action)
     assert credentials.WRITE_TOKEN_VAR in action
     assert "classic" in action
-    for scope in ("project", "read:org", "repo", "write:discussion"):
+    for scope in ("project", "repo", "write:discussion"):
         assert scope in action, f"{scope} missing from {action!r}"
+    assert "read:org" not in action
 
 
 def test_the_suggested_scopes_keep_what_the_token_already_has():
@@ -521,8 +522,6 @@ def test_the_suggested_scopes_never_include_a_dangerous_one():
 
 
 def test_one_root_cause_yields_one_next_step():
-    """Two checks fail for the same reason and print the same paragraph twice. The
-    summary must say it once."""
     report = doctor.render(_warned())
     assert report.count("Next steps") == 1
     steps = report.split("Next steps")[1]
@@ -533,7 +532,7 @@ def test_the_next_steps_block_is_absent_when_there_is_nothing_to_do():
     tok = "ghp_clean"
     checks = doctor.check_all(
         env(DRIVER_GH_WRITE_TOKEN=tok),
-        FakeGh(write_token=tok, scopes="public_repo, project, read:org"),
+        FakeGh(write_token=tok, scopes="public_repo, project"),
         repo=REPO, repo_path=".", board="lmorchard/9",
     )
     assert "Next steps" not in doctor.render(checks)

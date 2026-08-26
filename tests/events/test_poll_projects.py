@@ -9,6 +9,7 @@ import pytest
 from agent_sessions.events.github import (
     CompleteProjectSnapshot,
     GitHubReadStopped,
+    fetch_board_items,
     fetch_project_items,
 )
 from agent_sessions.events.models import (
@@ -108,6 +109,7 @@ def project_item(
     number: int = 42,
     status: str | None = "Ready",
     priority: str | None = "P1",
+    title: str = "Issue title",
 ) -> dict[str, object]:
     fields: list[dict[str, object]] = [
         {
@@ -138,6 +140,7 @@ def project_item(
         "content": {
             "__typename": typename,
             "number": number,
+            "title": title,
             "repository": {
                 "databaseId": repository_id,
                 "nameWithOwner": repository_name,
@@ -321,6 +324,38 @@ def test_fetch_project_items_reads_every_page_and_filters_other_repositories() -
     assert first_kwargs["env"]["GH_TOKEN"] == "board-token"  # type: ignore[index]
     assert second_kwargs["env"]["GH_TOKEN"] == "board-token"  # type: ignore[index]
     assert first_kwargs["timeout"] == second_kwargs["timeout"] == 60
+
+
+def test_driver_board_items_use_the_direct_graphql_snapshot_shape() -> None:
+    runner = Runner(
+        Result(
+            stdout=json.dumps(
+                project_page(
+                    [project_item("PVTI_1", title="Direct GraphQL")],
+                    has_next=False,
+                    end_cursor=None,
+                )
+            )
+        )
+    )
+
+    items = fetch_board_items("owner/9", token="read-token", runner=runner)
+
+    assert items == [
+        {
+            "id": "PVTI_1",
+            "title": "Direct GraphQL",
+            "status": "Ready",
+            "priority": "P1",
+            "content": {
+                "type": "Issue",
+                "number": 42,
+                "title": "Direct GraphQL",
+                "repository": "owner/repo",
+            },
+        }
+    ]
+    assert runner.calls[0][0][:3] == ["gh", "api", "graphql"]
 
 
 def test_shutdown_stops_project_pagination_before_the_next_page() -> None:

@@ -39,6 +39,10 @@ class GitHubPermanentError(GitHubError):
     """A target read failed in a way retrying cannot repair."""
 
 
+class ProjectFieldsIncomplete(GitHubTransientError):
+    """The Project was readable but its complete field list was not."""
+
+
 class _GitHubNotFound(GitHubError):
     pass
 
@@ -52,6 +56,7 @@ class GraphQLOperation(StrEnum):
     ISSUE_REACTIONS = "IssueReactions"
     COMMENT_REACTIONS = "CommentReactions"
     PROJECT_ITEMS = "ProjectItems"
+    PROJECT_FIELDS = "ProjectFields"
 
 
 @dataclass(frozen=True)
@@ -162,12 +167,15 @@ query ProjectItems($owner:String!,$number:Int!,$endCursor:String){
             __typename
             ... on Issue {
               number
+              title
               repository { databaseId nameWithOwner }
             }
             ... on PullRequest {
               number
+              title
               repository { databaseId nameWithOwner }
             }
+            ... on DraftIssue { title }
           }
           fieldValues(first:100){
             nodes {
@@ -185,6 +193,24 @@ query ProjectItems($owner:String!,$number:Int!,$endCursor:String){
     }
   }
   rateLimit { limit cost remaining resetAt }
+}
+""")
+_PROJECT_FIELDS_QUERY = GraphQLQuery(GraphQLOperation.PROJECT_FIELDS, """
+query ProjectFields($owner:String!,$number:Int!,$endCursor:String){
+  user(login:$owner){
+    projectV2(number:$number){
+      id
+      fields(first:100,after:$endCursor){
+        totalCount
+        nodes {
+          __typename
+          ... on ProjectV2FieldCommon { id name }
+          ... on ProjectV2SingleSelectField { options { id name } }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
 }
 """)
 _GRAPHQL_CONNECTION_PATHS = {
@@ -213,6 +239,7 @@ _GRAPHQL_CONNECTION_PATHS = {
         "closingIssuesReferences",
     ),
     GraphQLOperation.PROJECT_ITEMS: ("data", "user", "projectV2", "items"),
+    GraphQLOperation.PROJECT_FIELDS: ("data", "user", "projectV2", "fields"),
 }
 _SUPPORTED_PROJECT_ITEM_TYPES = frozenset({"ISSUE", "PULL_REQUEST"})
 _UNSUPPORTED_PROJECT_ITEM_TYPES = frozenset({"DRAFT_ISSUE", "REDACTED"})
@@ -256,8 +283,9 @@ class LiveTargetResolver:
             raise GitHubReadStopped("GitHub read stopped before starting a subprocess")
         env = dict(os.environ)
         credential = self.read_token if token is None else token
-        env["GH_TOKEN"] = credential
-        env["GITHUB_TOKEN"] = credential
+        if credential:
+            env["GH_TOKEN"] = credential
+            env["GITHUB_TOKEN"] = credential
         try:
             result = self.runner(command, capture_output=True, text=True, env=env, timeout=60)
         except subprocess.TimeoutExpired as error:
@@ -304,17 +332,7 @@ class LiveTargetResolver:
         pages: list[dict[str, JSONValue]] = []
         cursor = end_cursor
         while True:
-            command = [
-                "gh",
-                "api",
-                "graphql",
-                "-f",
-                f"query={query.document}",
-            ]
-            for key, variable_value in variables:
-                command.extend(["-F", f"{key}={variable_value}"])
-            if cursor:
-                command.extend(["-F", f"endCursor={cursor}"])
+            command = _graphql_command(query, variables, end_cursor=cursor)
             page = self._dict(self._read(command), subject)
             if page.get("errors"):
                 raise GitHubTransientError(f"GitHub returned incomplete {subject} data")
@@ -708,6 +726,31 @@ class LiveTargetResolver:
         raise GitHubPermanentError(f"unsupported target kind: {claim.target_kind}")
 
 
+def _graphql_command(
+    query: GraphQLQuery,
+    variables: tuple[tuple[str, str], ...],
+    *,
+    end_cursor: str = "",
+) -> list[str]:
+    command = ["gh", "api", "graphql", "-f", f"query={query.document}"]
+    for key, value in variables:
+        command.extend(["-F", f"{key}={value}"])
+    if end_cursor:
+        command.extend(["-F", f"endCursor={end_cursor}"])
+    return command
+
+
+def project_items_command(board: str) -> list[str]:
+    """Build the first direct-GraphQL item query for a Project."""
+    if "/" not in board:
+        raise ValueError("board identifier is malformed")
+    owner, number = board.split("/", 1)
+    return _graphql_command(
+        _PROJECT_ITEMS_QUERY,
+        (("owner", owner), ("number", number)),
+    )
+
+
 def fetch_board_items(
     board: str,
     *,
@@ -724,25 +767,144 @@ def fetch_board_items(
         runner=runner,
         stop_requested=stop_requested,
     )
-    value = resolver._dict(
-        resolver._read(
-            [
-                "gh",
-                "project",
-                "item-list",
-                number,
-                "--owner",
-                owner,
-                "--format",
-                "json",
-                "--limit",
-                "10000",
-            ],
-            token=token,
-        ),
-        "board",
+    pages = resolver._graphql_pages(
+        _PROJECT_ITEMS_QUERY,
+        subject="project items",
+        variables=(("owner", owner), ("number", number)),
     )
-    return resolver._list(value.get("items"), "board items")
+    raw_items = resolver._connection_nodes(
+        pages,
+        path=_GRAPHQL_CONNECTION_PATHS[GraphQLOperation.PROJECT_ITEMS],
+        subject="project items",
+    )
+    items: list[dict[str, JSONValue]] = []
+    for raw_item in raw_items:
+        item = _driver_board_item(resolver, raw_item)
+        if item is not None:
+            items.append(item)
+    return items
+
+
+def _driver_board_item(
+    resolver: LiveTargetResolver,
+    raw_item: dict[str, JSONValue],
+) -> dict[str, JSONValue] | None:
+    """Convert one GraphQL Project item to the driver's established input shape."""
+    item_id = raw_item.get("id")
+    item_type = raw_item.get("type")
+    if not isinstance(item_id, str) or not item_id or not isinstance(item_type, str):
+        raise GitHubTransientError("GitHub returned malformed project item identity")
+    if item_type == "REDACTED":
+        return None
+    content = resolver._dict(raw_item.get("content"), "project item content")
+    typename = content.get("__typename")
+    title = content.get("title")
+    if not isinstance(typename, str) or not isinstance(title, str):
+        raise GitHubTransientError("GitHub returned malformed project item content")
+    if item_type == "DRAFT_ISSUE":
+        if typename != "DraftIssue":
+            raise GitHubTransientError("GitHub returned inconsistent project item content")
+        return {
+            "id": item_id,
+            "title": title,
+            "content": {"type": "DraftIssue", "title": title},
+        }
+    if item_type not in _SUPPORTED_PROJECT_ITEM_TYPES:
+        raise GitHubTransientError(f"GitHub returned unknown project item type: {item_type}")
+    expected_typename = "Issue" if item_type == "ISSUE" else "PullRequest"
+    repository = resolver._dict(content.get("repository"), "project item repository")
+    number = content.get("number")
+    repository_name = repository.get("nameWithOwner")
+    if (
+        typename != expected_typename
+        or not isinstance(number, int)
+        or isinstance(number, bool)
+        or not isinstance(repository_name, str)
+    ):
+        raise GitHubTransientError("GitHub returned inconsistent project item content")
+    field_values = resolver._dict(raw_item.get("fieldValues"), "project field values")
+    page_info = resolver._dict(field_values.get("pageInfo"), "project field pagination")
+    if page_info.get("hasNextPage") is not False:
+        raise GitHubTransientError("GitHub returned incomplete project field pagination")
+    status: JSONValue = None
+    priority: JSONValue = None
+    for field_value in resolver._list(field_values.get("nodes"), "project field values"):
+        if field_value.get("__typename") != "ProjectV2ItemFieldSingleSelectValue":
+            continue
+        field = resolver._dict(field_value.get("field"), "project field")
+        field_name = field.get("name")
+        value_name = field_value.get("name")
+        if not isinstance(field_name, str) or not isinstance(value_name, str):
+            raise GitHubTransientError("GitHub returned malformed project field data")
+        if field_name == "Status":
+            status = value_name
+        elif field_name == "Priority":
+            priority = value_name
+    return {
+        "id": item_id,
+        "title": title,
+        "status": status,
+        "priority": priority,
+        "content": {
+            "type": typename,
+            "number": number,
+            "title": title,
+            "repository": repository_name,
+        },
+    }
+
+
+def fetch_project_fields(
+    board: str,
+    *,
+    token: str,
+    runner: Callable[..., Any] | None = None,
+) -> dict[str, JSONValue]:
+    """Read a complete Project field list through direct GraphQL."""
+    if "/" not in board:
+        raise GitHubTransientError("board identifier is malformed")
+    owner, number = board.split("/", 1)
+    resolver = LiveTargetResolver(read_token=token, runner=runner)
+    pages = resolver._graphql_pages(
+        _PROJECT_FIELDS_QUERY,
+        subject="project fields",
+        variables=(("owner", owner), ("number", number)),
+    )
+    fields = resolver._connection_nodes(
+        pages,
+        path=_GRAPHQL_CONNECTION_PATHS[GraphQLOperation.PROJECT_FIELDS],
+        subject="project fields",
+    )
+    project_ids: set[str] = set()
+    total_counts: set[int] = set()
+    for page in pages:
+        data = resolver._dict(page.get("data"), "project fields")
+        user = resolver._dict(data.get("user"), "project owner")
+        project = resolver._dict(user.get("projectV2"), "project")
+        project_id = project.get("id")
+        connection = resolver._dict(project.get("fields"), "project fields")
+        total_count = connection.get("totalCount")
+        if (
+            not isinstance(project_id, str)
+            or not project_id
+            or not isinstance(total_count, int)
+            or isinstance(total_count, bool)
+        ):
+            raise GitHubTransientError("GitHub returned malformed project field metadata")
+        project_ids.add(project_id)
+        total_counts.add(total_count)
+    if len(project_ids) != 1:
+        raise GitHubTransientError("GitHub returned incomplete project field metadata")
+    if total_counts != {len(fields)}:
+        raise ProjectFieldsIncomplete("GitHub returned incomplete project field metadata")
+    for field in fields:
+        if not isinstance(field.get("id"), str) or not isinstance(field.get("name"), str):
+            raise GitHubTransientError("GitHub returned malformed project field")
+    return {
+        "id": next(iter(project_ids)),
+        "fields": cast(JSONValue, fields),
+        "totalCount": len(fields),
+    }
 
 
 def _project_item_projection(

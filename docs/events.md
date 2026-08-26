@@ -108,6 +108,10 @@ The daemon runs `AGENT_GH_READ_TOKEN_CMD` only at startup.
 Use a long-lived, genuinely read-only PAT. Use this command only to retrieve that PAT. Do not mint
 an expiring App token.
 
+For public repositories and a user-owned Projects V2 board, use a classic PAT with
+`read:project`. Project reads use GraphQL directly and do not require `read:org`. A fine-grained PAT
+cannot read a project owned by another account, even when that account grants repository access.
+
 Use one form, not both. A `*_CMD` value contains direct command arguments. Do not use pipes,
 redirection, or shell expansion. The command writes only the token to standard output.
 

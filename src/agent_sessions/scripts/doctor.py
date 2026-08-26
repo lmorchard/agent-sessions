@@ -33,13 +33,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from agent_sessions.driver import agent_session_driver, credentials  # noqa: E402
 
-#: Scopes a classic token needs, by what they unlock. `X-OAuth-Scopes` reports these
-#: definitively -- only fine-grained tokens have to be probed.
-#: `read:org` is the non-obvious one: `gh project` resolves `--owner` by asking for the
-#: organization *and* user id in one query, so the org branch fails the whole thing
-#: without it, even for a user-owned project. The surfaced error is `unknown owner type`.
-BOARD_SCOPES = ("project", "read:project")
-ORG_SCOPE = "read:org"
+#: Scopes a classic write token needs, by what they unlock. `X-OAuth-Scopes`
+#: reports these definitively -- only fine-grained tokens have to be probed.
+BOARD_WRITE_SCOPE = "project"
 WRITE_SCOPES = ("repo", "public_repo")
 
 #: Never grant this. It buys whoever holds the token the ability to rewrite
@@ -162,9 +158,7 @@ def scope_action(scopes: set[str], board: str) -> str:
     if not desired & set(WRITE_SCOPES):
         desired.add("public_repo")
     if board:
-        if not desired & set(BOARD_SCOPES):
-            desired.add("project")
-        desired.add(ORG_SCOPE)
+        desired.add(BOARD_WRITE_SCOPE)
     desired -= set(DANGEROUS_SCOPES)
     return (
         f"re-issue {credentials.WRITE_TOKEN_VAR} as a classic PAT with scopes: "
@@ -191,10 +185,8 @@ def _scopes_check(runner, token: str, board: str) -> tuple[Check, frozenset]:
     missing = []
     if not scopes & set(WRITE_SCOPES):
         missing.append("a write scope")
-    if board and not scopes & set(BOARD_SCOPES):
+    if board and BOARD_WRITE_SCOPE not in scopes:
         missing.append("a project scope")
-    if board and ORG_SCOPE not in scopes:
-        missing.append(ORG_SCOPE)
     dangerous = sorted(scopes & set(DANGEROUS_SCOPES))
 
     if not missing and not dangerous:
@@ -202,12 +194,6 @@ def _scopes_check(runner, token: str, board: str) -> tuple[Check, frozenset]:
 
     detail = ", ".join(sorted(scopes)) + " -- missing " + " and ".join(missing) if missing else ", ".join(sorted(scopes))
     why = []
-    if ORG_SCOPE in missing:
-        why.append(
-            f"`{ORG_SCOPE}` is the non-obvious one: `gh project` resolves `--owner` by asking for the "
-            "organization and user id in one query, so it fails with `unknown owner type` without it, "
-            "even for a user-owned project."
-        )
     if dangerous:
         detail += f" -- has {', '.join(dangerous)}"
         why.append(
@@ -234,13 +220,6 @@ def _board_remedy(board: str, login: str, token: str, error: str) -> str:
         " Selection falls back to priority labels, and if no issue carries one, nothing is eligible "
         "and the pass does nothing at all."
     )
-    if "unknown owner type" in error.lower():
-        return (
-            "`gh project` could not classify the owner, which is what it reports when it lacks "
-            f"`{ORG_SCOPE}`: it resolves `--owner` by asking for the organization and user id in one "
-            "query, so the org branch fails the whole thing even for a user-owned project. Add "
-            f"`{ORG_SCOPE}` to the classic PAT." + cost
-        )
     if "scope" in error.lower():
         return (
             "The token is missing the projects scope: add `read:project` to a classic PAT, or "
@@ -417,6 +396,7 @@ def check_all(environ: dict, runner, *, repo: str, repo_path: str, board: str = 
                 )
             )
 
+    reader = next((p for p in visible if p.label == "read"), None)
     writer = next((p for p in visible if p.label == "write"), None)
 
     if writer and token_kind(writer.token) == "classic":
@@ -431,26 +411,18 @@ def check_all(environ: dict, runner, *, repo: str, repo_path: str, board: str = 
             )
         )
 
-    if board and writer:
-        res = _gh(runner, agent_session_driver.board_command(board, limit=1)[1:], writer.token)
+    if board and reader:
+        res = _gh(runner, agent_session_driver.board_command(board, limit=1)[1:], reader.token)
         text = _message(res)
         if getattr(res, "returncode", 1) == 0:
             checks.append(Check("board readable", "pass", board))
         else:
-            # Same root cause as the scopes check when it is a scope problem, so it
-            # emits the same action string and the two collapse into one next step.
-            action = (
-                scope_action(set(writer.scopes), board)
-                if token_kind(writer.token) == "classic" and "unknown owner type" in text.lower()
-                else ""
-            )
             checks.append(
                 Check(
                     "board readable",
                     "warn",
                     f"{board}: {text}",
-                    _board_remedy(board, writer.login, writer.token, text),
-                    action,
+                    _board_remedy(board, reader.login, reader.token, text),
                 )
             )
 

@@ -350,7 +350,7 @@ def test_run_gh_rejects_malformed_json(monkeypatch):
     )
 
     with pytest.raises(board_audit.AuditError, match="items query returned malformed JSON"):
-        board_audit.run_gh(["project", "item-list"], "items")
+        board_audit.run_gh(["issue", "list"], "items")
 
 
 def test_bounded_records_accepts_raw_arrays_and_project_named_arrays():
@@ -384,6 +384,64 @@ def test_bounded_records_rejects_a_response_at_its_limit(limit):
 def configure_gh_stub(tmp_path, monkeypatch, responses, failure=None):
     response_paths = {}
     for name, response in responses.items():
+        if not isinstance(response, str) and name == "field":
+            nodes = []
+            for index, field in enumerate(response["fields"]):
+                node = {
+                    "__typename": "ProjectV2SingleSelectField" if "options" in field else "ProjectV2Field",
+                    "id": f"F{index}",
+                    **field,
+                }
+                nodes.append(node)
+            response = {
+                "data": {"user": {"projectV2": {"id": "P1", "fields": {
+                    "nodes": nodes,
+                    "totalCount": response.get("totalCount", len(nodes)),
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                }}}},
+            }
+        elif not isinstance(response, str) and name == "item":
+            nodes = []
+            for index, item in enumerate(response["items"]):
+                content = item["content"]
+                content_type = content["type"]
+                title = item.get("title", content.get("title", "Draft issue"))
+                if content_type == "DraftIssue":
+                    graphql_content = {"__typename": "DraftIssue", "title": title}
+                    item_type = "DRAFT_ISSUE"
+                else:
+                    graphql_content = {
+                        "__typename": content_type,
+                        "number": content["number"],
+                        "title": title,
+                        "repository": {
+                            "databaseId": 1,
+                            "nameWithOwner": content["repository"],
+                        },
+                    }
+                    item_type = "ISSUE" if content_type == "Issue" else "PULL_REQUEST"
+                field_values = []
+                if item.get("status") is not None:
+                    field_values.append({
+                        "__typename": "ProjectV2ItemFieldSingleSelectValue",
+                        "name": item["status"],
+                        "field": {"name": "Status"},
+                    })
+                nodes.append({
+                    "id": f"PVTI{index}",
+                    "type": item_type,
+                    "content": graphql_content,
+                    "fieldValues": {
+                        "nodes": field_values,
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    },
+                })
+            response = {
+                "data": {"user": {"projectV2": {"id": "P1", "items": {
+                    "nodes": nodes,
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                }}}},
+            }
         path = tmp_path / f"{name}.json"
         path.write_text(response if isinstance(response, str) else json.dumps(response))
         response_paths[name] = path
@@ -397,15 +455,24 @@ from pathlib import Path
 import sys
 
 queries = {
-    ("project", "field-list"): ("field", ["project", "field-list", "9", "--owner", "acme", "--format", "json", "--limit", "100"]),
-    ("project", "item-list"): ("item", ["project", "item-list", "9", "--owner", "acme", "--format", "json", "--limit", "500"]),
     ("issue", "list"): ("issue", ["issue", "list", "--repo", "acme/widgets", "--state", "all", "--limit", "500", "--json", "number,title,state"]),
     ("pr", "list"): ("pr", ["pr", "list", "--repo", "acme/widgets", "--state", "open", "--limit", "500", "--json", "number,closingIssuesReferences"]),
 }
 
 argv = sys.argv[1:]
-entry = queries.get(tuple(argv[:2]))
-if entry is None or argv != entry[1]:
+if argv[:2] == ["api", "graphql"]:
+    joined = " ".join(argv)
+    if "query ProjectFields" in joined:
+        entry = ("field", argv)
+    elif "query ProjectItems" in joined:
+        entry = ("item", argv)
+    else:
+        entry = None
+    valid = entry is not None and "owner=acme" in argv and "number=9" in argv
+else:
+    entry = queries.get(tuple(argv[:2]))
+    valid = entry is not None and argv == entry[1]
+if not valid:
     sys.stderr.write("unexpected gh argv: " + json.dumps(argv))
     raise SystemExit(97)
 name, _ = entry
@@ -446,10 +513,14 @@ def run_cli():
     )
 
 
-def expected_gh_calls():
-    return [
-        ["project", "field-list", "9", "--owner", "acme", "--format", "json", "--limit", "100"],
-        ["project", "item-list", "9", "--owner", "acme", "--format", "json", "--limit", "500"],
+def assert_expected_gh_calls(log_path):
+    calls = [json.loads(line) for line in log_path.read_text().splitlines()]
+    assert len(calls) == 4
+    assert calls[0][:2] == ["api", "graphql"]
+    assert "query ProjectFields" in " ".join(calls[0])
+    assert calls[1][:2] == ["api", "graphql"]
+    assert "query ProjectItems" in " ".join(calls[1])
+    assert calls[2:] == [
         ["issue", "list", "--repo", "acme/widgets", "--state", "all", "--limit", "500", "--json", "number,title,state"],
         ["pr", "list", "--repo", "acme/widgets", "--state", "open", "--limit", "500", "--json", "number,closingIssuesReferences"],
     ]
@@ -465,7 +536,7 @@ def test_cli_uses_only_the_four_bounded_queries_and_reports_warnings(tmp_path, m
         "WARN #17: is 'In review' without an open pull request that closes it\n"
         "board-audit: scanned 1 issue item(s); 0 failure(s); 1 warning(s)\n"
     )
-    assert [json.loads(line) for line in log_path.read_text().splitlines()] == expected_gh_calls()
+    assert_expected_gh_calls(log_path)
 
 
 def test_cli_reports_a_clean_result(tmp_path, monkeypatch):
@@ -493,7 +564,7 @@ def test_cli_returns_one_for_strict_audit_failures(tmp_path, monkeypatch):
     "responses, failure, expected",
     [
         ({**default_gh_responses(), "issue": "not json"}, None, "FAIL: issues query returned malformed JSON: Expecting value"),
-        (default_gh_responses(), "item", "FAIL: board items query failed: stubbed item failure"),
+        (default_gh_responses(), "item", "FAIL: board query failed: stubbed item failure"),
     ],
 )
 def test_cli_reports_operational_failures_as_zero_scanned(tmp_path, monkeypatch, responses, failure, expected):
@@ -514,7 +585,7 @@ def test_cli_allows_an_empty_target_repository_item_set(tmp_path, monkeypatch):
 
     assert completed.returncode == 0
     assert completed.stdout == "board-audit: scanned 0 issue item(s); 0 failure(s); 0 warning(s)\n"
-    assert [json.loads(line) for line in log_path.read_text().splitlines()] == expected_gh_calls()
+    assert_expected_gh_calls(log_path)
 
 
 def test_cli_ignores_pull_request_project_items_and_audits_issue_items(tmp_path, monkeypatch):
