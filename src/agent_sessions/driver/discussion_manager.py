@@ -31,6 +31,15 @@ def run_gh(
         return 1, "", str(e)
 
 
+def _run_gh_with_optional_env(
+    args: list[str], *, env: dict[str, str] | None
+) -> tuple[int, str, str]:
+    """Pass an explicit credential environment without changing default call shape."""
+    if env is None:
+        return run_gh(args)
+    return run_gh(args, env=env)
+
+
 def check_category(
     repo: str,
     category_name: str = "Lab Notebook",
@@ -51,7 +60,7 @@ def check_category(
       }
     }
     """
-    rc, stdout, stderr = run_gh(
+    rc, stdout, stderr = _run_gh_with_optional_env(
         [
             "api",
             "graphql",
@@ -113,7 +122,7 @@ def get_or_create_daily_discussion(
     body = f"Agent run log and narratives for {today}."
 
     # List discussions in category
-    rc, stdout, _ = run_gh(
+    rc, stdout, _ = _run_gh_with_optional_env(
         ["discussion", "list", "--repo", repo, "--category", category_name, "--json", "title,url"],
         env=read_env,
     )
@@ -128,7 +137,7 @@ def get_or_create_daily_discussion(
             pass
 
     # Create if not found
-    rc, stdout, _ = run_gh(
+    rc, stdout, _ = _run_gh_with_optional_env(
         ["discussion", "create", "--repo", repo, "--category", category_name, "--title", title, "--body", body],
         env=write_env,
     )
@@ -162,7 +171,7 @@ def post_start(
 - **Budget**: ${budget}
 - **Run Dir**: `{rundir}`"""
 
-    rc, _, _ = run_gh(
+    rc, _, _ = _run_gh_with_optional_env(
         ["discussion", "comment", disc_url, "--repo", repo, "--body", comment_body],
         env=write_env,
     )
@@ -207,7 +216,7 @@ def post_finish(
 
 {final_text or '(no narrative)'}"""
 
-    rc, _, _ = run_gh(
+    rc, _, _ = _run_gh_with_optional_env(
         ["discussion", "comment", disc_url, "--repo", repo, "--body", comment_body],
         env=write_env,
     )

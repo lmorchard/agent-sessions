@@ -102,6 +102,31 @@ def test_get_or_create_daily_discussion_creates_new():
         assert url == "https://github.com/owner/repo/discussions/11"
 
 
+def test_get_or_create_daily_discussion_uses_explicit_read_and_write_environments():
+    read_env = {"GH_TOKEN": "read-token"}
+    write_env = {"GH_TOKEN": "write-token"}
+    calls = []
+
+    def mock_run_gh(args, *, env):
+        calls.append((args, env))
+        if "list" in args:
+            return 0, "[]", ""
+        if "create" in args:
+            return 0, "https://github.com/owner/repo/discussions/11\n", ""
+        return 1, "", "error"
+
+    with patch(f"{MODULE_PATH}.run_gh", side_effect=mock_run_gh):
+        url = get_or_create_daily_discussion(
+            "owner/repo", read_env=read_env, write_env=write_env
+        )
+
+    assert url == "https://github.com/owner/repo/discussions/11"
+    assert [("list" in args, env) for args, env in calls] == [
+        (True, read_env),
+        (False, write_env),
+    ]
+
+
 def test_post_start():
     calls = []
 

@@ -77,6 +77,29 @@ def model_github(gh):
     return gh
 
 
+def acquire_lock_with_split_credentials(num, phase, repo, *, read_env, write_env):
+    """Accept the lock while asserting its read and mutation credential boundary."""
+    assert read_env["GH_TOKEN"] == "dummy_read_token"
+    assert read_env["GITHUB_TOKEN"] == "dummy_read_token"
+    assert write_env["GH_TOKEN"] == "dummy_write_token"
+    assert write_env["GITHUB_TOKEN"] == "dummy_write_token"
+    return True
+
+
+def release_lock_with_write_credential(repo, *, write_env):
+    """Accept lock release only with the repository mutation credential."""
+    assert write_env["GH_TOKEN"] == "dummy_write_token"
+    assert write_env["GITHUB_TOKEN"] == "dummy_write_token"
+
+
+def increment_attempts_with_split_credentials(num, repo, *, read_env, write_env):
+    """Accept attempt tracking only with distinct read and mutation credentials."""
+    assert read_env["GH_TOKEN"] == "dummy_read_token"
+    assert read_env["GITHUB_TOKEN"] == "dummy_read_token"
+    assert write_env["GH_TOKEN"] == "dummy_write_token"
+    assert write_env["GITHUB_TOKEN"] == "dummy_write_token"
+
+
 def test_driver_workspace_isolation_enabled(dummy_git_repo: Path, tmp_path: Path, monkeypatch, recording_gh):
     state_dir = tmp_path / "state"
     ws_dir = tmp_path / "workspaces"
@@ -99,9 +122,18 @@ def test_driver_workspace_isolation_enabled(dummy_git_repo: Path, tmp_path: Path
 
     monkeypatch.setattr("agent_sessions.driver.router.select", mock_select)
     monkeypatch.setattr("agent_sessions.driver.gh_query.fetch_open_prs", lambda repo: [])
-    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.acquire_lock", lambda num, phase, repo: True)
-    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.release_lock", lambda repo: None)
-    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.increment_attempts", lambda num, repo: None)
+    monkeypatch.setattr(
+        "agent_sessions.driver.agent_session_driver.acquire_lock",
+        acquire_lock_with_split_credentials,
+    )
+    monkeypatch.setattr(
+        "agent_sessions.driver.agent_session_driver.release_lock",
+        release_lock_with_write_credential,
+    )
+    monkeypatch.setattr(
+        "agent_sessions.driver.agent_session_driver.increment_attempts",
+        increment_attempts_with_split_credentials,
+    )
 
     model_github(recording_gh)
 
@@ -159,9 +191,18 @@ def test_driver_no_workspace_isolation_flag(dummy_git_repo: Path, tmp_path: Path
 
     monkeypatch.setattr("agent_sessions.driver.router.select", mock_select)
     monkeypatch.setattr("agent_sessions.driver.gh_query.fetch_open_prs", lambda repo: [])
-    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.acquire_lock", lambda num, phase, repo: True)
-    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.release_lock", lambda repo: None)
-    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.increment_attempts", lambda num, repo: None)
+    monkeypatch.setattr(
+        "agent_sessions.driver.agent_session_driver.acquire_lock",
+        acquire_lock_with_split_credentials,
+    )
+    monkeypatch.setattr(
+        "agent_sessions.driver.agent_session_driver.release_lock",
+        release_lock_with_write_credential,
+    )
+    monkeypatch.setattr(
+        "agent_sessions.driver.agent_session_driver.increment_attempts",
+        increment_attempts_with_split_credentials,
+    )
 
 
     model_github(recording_gh)
@@ -218,9 +259,18 @@ def test_driver_clean_workspaces_flag(dummy_git_repo: Path, tmp_path: Path, monk
 
     monkeypatch.setattr("agent_sessions.driver.router.select", mock_select)
     monkeypatch.setattr("agent_sessions.driver.gh_query.fetch_open_prs", lambda repo: [])
-    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.acquire_lock", lambda num, phase, repo: True)
-    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.release_lock", lambda repo: None)
-    monkeypatch.setattr("agent_sessions.driver.agent_session_driver.increment_attempts", lambda num, repo: None)
+    monkeypatch.setattr(
+        "agent_sessions.driver.agent_session_driver.acquire_lock",
+        acquire_lock_with_split_credentials,
+    )
+    monkeypatch.setattr(
+        "agent_sessions.driver.agent_session_driver.release_lock",
+        release_lock_with_write_credential,
+    )
+    monkeypatch.setattr(
+        "agent_sessions.driver.agent_session_driver.increment_attempts",
+        increment_attempts_with_split_credentials,
+    )
 
     model_github(recording_gh)
     monkeypatch.setattr("agent_sessions.driver.agent_runner.run_agent", lambda runner_args: 0)
