@@ -160,5 +160,11 @@
 
 - The manifest now includes `/etc/agent-session` as `root:root` mode `0755`. The example test first failed on its missing `read-environment-directory` role and then passed after the manifest addition.
 - The event runbook now requires a long-lived, genuinely read-only PAT. It states that `AGENT_GH_READ_TOKEN_CMD` runs only at startup and can retrieve that PAT but cannot mint an expiring App token. It also names repository and Projects V2 board read access. `docs/usage.md` says the App route remains driver-only.
-- The Simple English pragmatic pass separates descriptive and procedural passages. The three longest prose sentences have 20, 16, and 16 words. Searches found no listed mechanical violations or alternate validation verbs in prose.
+- The Simple English pragmatic pass did not yet separate every descriptive and procedural passage. The three longest prose sentences have 20, 16, and 16 words. Searches found no listed mechanical violations or alternate validation verbs in prose.
 - Review verification: `PYTHONPATH=src python3 -m pytest -q tests/events/test_examples.py` passed 7 tests. `make docs-check` exited 0 with its pre-existing explicit `make gate-test` assertion-count skip. `git diff --check` passed. No service-manager, deployment, GitHub, push, or merge action occurred.
+
+### Review fix round 2
+
+- The runbook now puts the daemon's one-time `_CMD` behavior in its own descriptive paragraph. The PAT instructions now form a procedural paragraph. It also puts daemon-owned polling cadence in a descriptive paragraph and gives the busy-database alternatives explicit conditions.
+- The changed passages follow the pragmatic Simple English audit. The task report no longer says that the first rewrite separated every passage.
+- `make docs-check` exited 0 with its pre-existing explicit `make gate-test` assertion-count skip. `git diff --check` passed. No broad suite ran for this prose-only correction.

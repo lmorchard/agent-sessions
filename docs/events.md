@@ -102,8 +102,10 @@ AGENT_GH_READ_TOKEN=<read-only-token>
 AGENT_GH_READ_TOKEN_CMD=<command-that-prints-one-read-only-token>
 ```
 
-Use a long-lived, genuinely read-only PAT. The daemon runs `AGENT_GH_READ_TOKEN_CMD` only at
-startup. Use this command only to retrieve that PAT. Do not mint an expiring App token.
+The daemon runs `AGENT_GH_READ_TOKEN_CMD` only at startup.
+
+Use a long-lived, genuinely read-only PAT. Use this command only to retrieve that PAT. Do not mint
+an expiring App token.
 
 Use one form, not both. A `*_CMD` value contains direct command arguments. Do not use pipes,
 redirection, or shell expansion. The command writes only the token to standard output.
@@ -183,7 +185,9 @@ errors. New clocks show `never` or `unknown`.
 
 Start the event daemon through the approved host procedure.
 
-Then start existing repository driver timers. The daemon owns polling cadence.
+Then start existing repository driver timers.
+
+The daemon owns polling cadence.
 
 Use the one-pass commands only for diagnosis:
 
@@ -244,7 +248,7 @@ Before you copy, replace, or inspect database files, stop the event daemon and r
 | Symptom | Safe response |
 |---|---|
 | unavailable database | Make sure that the path, owners, modes, and local file system are correct. If the file is missing, restore the complete backup set. |
-| busy database | Find the process with a long transaction. Wait for it or stop it. Do not remove WAL files or lock artifacts. Run `doctor` again. |
+| busy database | Find the process with a long transaction. If the transaction can finish, wait for it. If the transaction is stuck, stop the process. Do not remove WAL files or lock artifacts. Run `doctor` again. |
 | incompatible schema | Keep services stopped. Back up the database set. Run `migrate` from the matching binary. Then run `doctor` again. Never change schema metadata by hand. |
 | corrupt database | Keep a database, WAL, and shared-memory copy for diagnosis. If a verified backup is available, restore it. If no verified backup is available, use a reviewed procedure to rebuild from GitHub. |
 
