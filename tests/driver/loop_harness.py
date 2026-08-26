@@ -469,10 +469,7 @@ class FakeGitHub:
                 return _Result(1, "", "fake: unnamed event GraphQL operation")
 
             def graphql_result(payload):
-                return _Result(
-                    0,
-                    json.dumps([payload] if "--slurp" in argv else payload),
-                )
+                return _Result(0, json.dumps(payload))
 
             if operation is GraphQLOperation.OPEN_PULL_REQUEST_DISCOVERY:
                 nodes = [

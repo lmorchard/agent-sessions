@@ -86,52 +86,48 @@ def pull(number: int, *, closes: tuple[int, ...], head: str = "head", unresolved
     }
 
 
-def discovery_pages(*pull_requests: dict) -> list[dict]:
-    return [
-        {
-            "data": {
-                "repository": {
-                    "pullRequests": {
-                        "nodes": [
-                            {
-                                "number": item["number"],
-                                "headRefOid": item["headRefOid"],
-                                "closingIssuesReferences": {
-                                    "nodes": item["closingIssuesReferences"],
-                                    "pageInfo": {
-                                        "hasNextPage": False,
-                                        "endCursor": None,
-                                    },
+def discovery_page(*pull_requests: dict) -> dict:
+    return {
+        "data": {
+            "repository": {
+                "pullRequests": {
+                    "nodes": [
+                        {
+                            "number": item["number"],
+                            "headRefOid": item["headRefOid"],
+                            "closingIssuesReferences": {
+                                "nodes": item["closingIssuesReferences"],
+                                "pageInfo": {
+                                    "hasNextPage": False,
+                                    "endCursor": None,
                                 },
-                            }
-                            for item in pull_requests
-                        ],
-                        "pageInfo": {"hasNextPage": False, "endCursor": None},
-                    }
-                }
-            }
-        }
-    ]
-
-
-def closing_reference_pages(*numbers: int) -> list[dict]:
-    return [
-        {
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "closingIssuesReferences": {
-                            "nodes": [{"number": number} for number in numbers],
-                            "pageInfo": {
-                                "hasNextPage": False,
-                                "endCursor": None,
                             },
                         }
+                        for item in pull_requests
+                    ],
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                }
+            }
+        }
+    }
+
+
+def closing_reference_page(*numbers: int) -> dict:
+    return {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "closingIssuesReferences": {
+                        "nodes": [{"number": number} for number in numbers],
+                        "pageInfo": {
+                            "hasNextPage": False,
+                            "endCursor": None,
+                        },
                     }
                 }
             }
         }
-    ]
+    }
 
 
 def claim(kind: str, key: str, *, generation: int = 1) -> ClaimedTarget:
@@ -166,9 +162,9 @@ def test_issue_target_fetches_current_issue_and_current_closing_prs() -> None:
     runner = RecordingRunner(
         [
             Result(stdout=json.dumps(current_issue)),
-            Result(stdout=json.dumps(discovery_pages(matching, unrelated))),
+            Result(stdout=json.dumps(discovery_page(matching, unrelated))),
             Result(stdout=json.dumps(matching)),
-            Result(stdout=json.dumps(closing_reference_pages(42))),
+            Result(stdout=json.dumps(closing_reference_page(42))),
         ]
     )
 
@@ -187,7 +183,7 @@ def test_pr_target_uses_current_closing_references_to_fetch_issues() -> None:
     runner = RecordingRunner(
         [
             Result(stdout=json.dumps(current_pr)),
-            Result(stdout=json.dumps(closing_reference_pages(42))),
+            Result(stdout=json.dumps(closing_reference_page(42))),
             Result(stdout=json.dumps(current_issue)),
         ]
     )
@@ -206,7 +202,7 @@ def test_pr_target_fetches_current_unresolved_review_threads() -> None:
     runner = RecordingRunner(
         [
             Result(stdout=json.dumps(current_pr)),
-            Result(stdout=json.dumps(closing_reference_pages(42))),
+            Result(stdout=json.dumps(closing_reference_page(42))),
             Result(
                 stdout=json.dumps(
                     {
@@ -285,7 +281,7 @@ def test_parked_issue_fetches_current_comments_and_reactions() -> None:
                     }
                 )
             ),
-            Result(stdout=json.dumps(discovery_pages())),
+            Result(stdout=json.dumps(discovery_page())),
         ]
     )
 
@@ -302,9 +298,9 @@ def test_revision_target_finds_current_pr_by_head_sha_and_then_closing_issues() 
     unrelated = pull(8, closes=(99,), head="other")
     runner = RecordingRunner(
         [
-            Result(stdout=json.dumps(discovery_pages(matching, unrelated))),
+            Result(stdout=json.dumps(discovery_page(matching, unrelated))),
             Result(stdout=json.dumps(matching)),
-            Result(stdout=json.dumps(closing_reference_pages(42))),
+            Result(stdout=json.dumps(closing_reference_page(42))),
             Result(stdout=json.dumps(issue(42))),
         ]
     )
@@ -323,15 +319,15 @@ def test_issue_pr_and_revision_targets_converge_on_the_same_current_issue() -> N
     runner = RecordingRunner(
         [
             Result(stdout=json.dumps(current_issue)),
-            Result(stdout=json.dumps(discovery_pages(current_pr))),
+            Result(stdout=json.dumps(discovery_page(current_pr))),
             Result(stdout=json.dumps(current_pr)),
-            Result(stdout=json.dumps(closing_reference_pages(42))),
+            Result(stdout=json.dumps(closing_reference_page(42))),
             Result(stdout=json.dumps(current_pr)),
-            Result(stdout=json.dumps(closing_reference_pages(42))),
+            Result(stdout=json.dumps(closing_reference_page(42))),
             Result(stdout=json.dumps(current_issue)),
-            Result(stdout=json.dumps(discovery_pages(current_pr))),
+            Result(stdout=json.dumps(discovery_page(current_pr))),
             Result(stdout=json.dumps(current_pr)),
-            Result(stdout=json.dumps(closing_reference_pages(42))),
+            Result(stdout=json.dumps(closing_reference_page(42))),
             Result(stdout=json.dumps(current_issue)),
         ]
     )
@@ -447,8 +443,9 @@ def test_review_thread_pagination_includes_a_later_unresolved_thread() -> None:
     runner = RecordingRunner(
         [
             Result(stdout=json.dumps(current_pr)),
-            Result(stdout=json.dumps(closing_reference_pages(42))),
-            Result(stdout=json.dumps(pages)),
+            Result(stdout=json.dumps(closing_reference_page(42))),
+            Result(stdout=json.dumps(pages[0])),
+            Result(stdout=json.dumps(pages[1])),
             Result(stdout=json.dumps(issue(42))),
         ]
     )
@@ -464,9 +461,11 @@ def test_review_thread_pagination_includes_a_later_unresolved_thread() -> None:
         for command, _env in runner.calls
         if "reviewThreads(first:100,after:$endCursor" in " ".join(command)
     ]
-    assert len(review_calls) == 1
-    assert "--paginate" in review_calls[0]
-    assert "--slurp" in review_calls[0]
+    assert len(review_calls) == 2
+    assert all("--paginate" not in command for command in review_calls)
+    assert all("--slurp" not in command for command in review_calls)
+    assert not any(part.startswith("endCursor=") for part in review_calls[0])
+    assert "endCursor=one" in review_calls[1]
 
 
 def test_comment_and_reaction_pagination_includes_later_human_activity() -> None:
@@ -556,9 +555,10 @@ def test_comment_and_reaction_pagination_includes_later_human_activity() -> None
     runner = RecordingRunner(
         [
             Result(stdout=json.dumps(parked)),
-            Result(stdout=json.dumps(comment_pages)),
-            Result(stdout=json.dumps(reaction_pages)),
-            Result(stdout=json.dumps(no_pr_pages)),
+            Result(stdout=json.dumps(comment_pages[0])),
+            Result(stdout=json.dumps(comment_pages[1])),
+            Result(stdout=json.dumps(reaction_pages[0])),
+            Result(stdout=json.dumps(no_pr_pages[0])),
         ]
     )
 
@@ -629,9 +629,10 @@ def test_pr_discovery_pagination_finds_a_later_closing_pr() -> None:
     runner = RecordingRunner(
         [
             Result(stdout=json.dumps(current_issue)),
-            Result(stdout=json.dumps(discovery_pages)),
+            Result(stdout=json.dumps(discovery_pages[0])),
+            Result(stdout=json.dumps(discovery_pages[1])),
             Result(stdout=json.dumps(matching)),
-            Result(stdout=json.dumps(closing_reference_pages(42))),
+            Result(stdout=json.dumps(closing_reference_page(42))),
         ]
     )
 
@@ -684,6 +685,7 @@ def test_direct_pr_hydration_paginates_all_closing_issue_references(
             }
         },
     ]
+
     def runner(command, **_kwargs):
         argv = [str(item) for item in command]
         if argv[1:3] == ["pr", "view"]:
@@ -691,13 +693,12 @@ def test_direct_pr_hydration_paginates_all_closing_issue_references(
         if argv[1:3] == ["issue", "view"]:
             return Result(stdout=json.dumps(issue(int(argv[3]))))
         if argv[1:3] == ["api", "graphql"]:
-            query = next(
-                (item for item in argv if item.startswith("query=")), ""
-            )
-            if "pullRequests(first:100,after:$endCursor" in query:
-                return Result(stdout=json.dumps(discovery_pages(current_pr)))
-            if "closingIssuesReferences(first:100,after:$endCursor" in query:
-                return Result(stdout=json.dumps(closing_pages))
+            query = next((item for item in argv if item.startswith("query=")), "")
+            if query == f"query={github._OPEN_PR_DISCOVERY_QUERY.document}":
+                return Result(stdout=json.dumps(discovery_page(current_pr)))
+            if query == f"query={github._CLOSING_ISSUES_QUERY.document}":
+                page_index = 1 if "endCursor=closing-1" in argv else 0
+                return Result(stdout=json.dumps(closing_pages[page_index]))
         pytest.fail(f"unexpected GitHub command: {argv}")
 
     resolved = LiveTargetResolver(read_token="read-token", runner=runner).resolve(
@@ -1181,35 +1182,62 @@ def test_board_read_failure_retries_board_only_claim_instead_of_acknowledging(
 
 
 @pytest.mark.parametrize(
-    "closing_result",
+    "closing_results",
     [
-        Result(
-            stdout=json.dumps(
-                {
-                    "data": {
-                        "repository": {
-                            "pullRequest": {
-                                "closingIssuesReferences": {
-                                    "nodes": [{"number": 42}]
+        [
+            Result(
+                stdout=json.dumps(
+                    {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "closingIssuesReferences": {
+                                        "nodes": [{"number": 42}]
+                                    }
                                 }
                             }
                         }
                     }
-                }
+                )
             )
-        ),
-        Result(returncode=1, stderr="HTTP 502 while fetching closing-reference page 2"),
+        ],
+        [
+            Result(
+                stdout=json.dumps(
+                    {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "closingIssuesReferences": {
+                                        "nodes": [{"number": 42}],
+                                        "pageInfo": {
+                                            "hasNextPage": True,
+                                            "endCursor": "closing-1",
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                )
+            ),
+            Result(
+                returncode=1,
+                stderr="HTTP 502 while fetching closing-reference page 2",
+            ),
+        ],
     ],
     ids=["missing-page-info", "later-page-failure"],
 )
 def test_incomplete_direct_pr_pagination_retries_without_acknowledgement(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    closing_result: Result,
+    closing_results: list[Result],
 ) -> None:
     current = runtime(tmp_path)
     enqueue(current, ("pull_request", "7"))
     current_pr = pull(7, closes=(42,))
+    graphql_results = iter(closing_results)
 
     def runner(command, **_kwargs):
         argv = [str(item) for item in command]
@@ -1225,7 +1253,7 @@ def test_incomplete_direct_pr_pagination_retries_without_acknowledgement(
                 )
             )
         if argv[1:3] == ["api", "graphql"]:
-            return closing_result
+            return next(graphql_results)
         pytest.fail(f"unexpected GitHub command: {argv}")
 
     monkeypatch.setattr(

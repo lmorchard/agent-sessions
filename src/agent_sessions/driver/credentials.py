@@ -93,6 +93,9 @@ AGENT_CREDENTIAL_VARS = TOKEN_VARS + (
     APP_ID_VAR,
     APP_INSTALLATION_ID_VAR,
     APP_PRIVATE_KEY_FILE_VAR,
+    "GH_APP_ID",
+    "GH_APP_INSTALLATION_ID",
+    "GH_APP_PRIVATE_KEY_FILE",
 )
 
 #: Variables the read token is installed into for the child.

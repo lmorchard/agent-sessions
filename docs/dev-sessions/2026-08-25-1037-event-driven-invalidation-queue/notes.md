@@ -220,3 +220,27 @@
   merge, or infrastructure write occurred during this fix pass.
 - These results support evidence reconciliation. They do not constitute the final whole-branch
   re-review.
+
+### Whole-branch fix re-review round 1
+
+- The re-review left two Important boundaries open. The agent child stripped the driver-prefixed
+  GitHub App variables but retained the three supported `GH_APP_*` aliases. GraphQL pagination
+  used one `gh api graphql --paginate --slurp` process, so shutdown had no boundary between the
+  internal page requests.
+- The credential regression names all six accepted App spellings independently. RED passed the
+  three `DRIVER_GH_APP_*` cases and failed the three `GH_APP_*` cases. The child environment now
+  strips all six while driver resolution retains both spellings.
+- GraphQL pagination now runs one bounded subprocess per page. It keeps the six typed operation
+  documents unchanged, maps each operation to its response connection without field-substring
+  dispatch, passes each next cursor explicitly, and checks the stop signal through `_read`
+  immediately before every page subprocess. One-shot calls still fetch every page.
+- The combined RED was `...FFFF`: three leaked legacy aliases and one project-pagination shutdown
+  case that returned incomplete pagination instead of stopping. The focused GREEN was `.......`.
+  The credential, resolver/driver, Projects, reactions, and daemon focus then passed 180 tests.
+- `make driver-test` passed 776 tests with 2 documented skips. `make events-test` reached 301 passes
+  and only the same two sandbox set-group-ID failures. Excluding only those two environment cases,
+  all remaining 301 event tests passed. Ruff passed, mypy found no issues in 104 source files, and
+  `git diff --check` passed.
+- The planned commit subject is `Review: finish credential and shutdown boundaries`. No plan
+  checkbox, deployment, service-manager action, Caddy reload, GitHub mutation, push, merge, or
+  owner-review reply changed in this round. Final whole-branch re-review remains pending.

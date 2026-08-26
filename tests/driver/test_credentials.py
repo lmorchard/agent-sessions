@@ -120,6 +120,25 @@ def test_agent_env_carries_no_write_capable_credential():
     assert not mutation_material & env.keys()
 
 
+@pytest.mark.parametrize(
+    "variable",
+    (
+        credentials.APP_ID_VAR,
+        credentials.APP_INSTALLATION_ID_VAR,
+        credentials.APP_PRIVATE_KEY_FILE_VAR,
+        "GH_APP_ID",
+        "GH_APP_INSTALLATION_ID",
+        "GH_APP_PRIVATE_KEY_FILE",
+    ),
+)
+def test_agent_env_strips_every_supported_app_credential_alias(variable: str):
+    hostile = split_env(**{variable: "private-app-material"})
+
+    env = credentials.agent_env(hostile, credentials.resolve(hostile))
+
+    assert variable not in env
+
+
 def test_agent_env_preserves_unrelated_variables():
     env = credentials.agent_env(split_env(PATH="/usr/bin", HOME="/home/x"), credentials.resolve(split_env()))
     assert env["PATH"] == "/usr/bin"

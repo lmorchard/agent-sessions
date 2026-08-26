@@ -191,7 +191,8 @@ def test_fetch_approval_predicates_groups_watches_and_reads_every_comment_page()
     )
     runner = SequenceRunner(
         [
-            Result(stdout=json.dumps([first_page, second_page])),
+            Result(stdout=json.dumps(first_page)),
+            Result(stdout=json.dumps(second_page)),
             Result(stdout=json.dumps(comments_page([]))),
         ]
     )
@@ -209,9 +210,13 @@ def test_fetch_approval_predicates_groups_watches_and_reads_every_comment_page()
         (43, False),
     ]
     commands = [command for command, _kwargs in runner.calls]
-    assert len(commands) == 2
-    assert all(command[:4] == ["gh", "api", "graphql", "--paginate"] for command in commands)
+    assert len(commands) == 3
+    assert all(command[:3] == ["gh", "api", "graphql"] for command in commands)
+    assert all("--paginate" not in command for command in commands)
+    assert all("--slurp" not in command for command in commands)
+    assert "endCursor=comments-1" in commands[1]
     assert [next(part for part in command if part.startswith("issue=")) for command in commands] == [
+        "issue=42",
         "issue=42",
         "issue=43",
     ]

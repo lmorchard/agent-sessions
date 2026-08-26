@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from agent_sessions.events.github import CompleteProjectSnapshot, fetch_project_items
+from agent_sessions.events.github import (
+    CompleteProjectSnapshot,
+    GitHubReadStopped,
+    fetch_project_items,
+)
 from agent_sessions.events.models import (
     BoardConfig,
     EventsConfig,
@@ -34,13 +38,13 @@ class Result:
 
 
 class Runner:
-    def __init__(self, result: Result) -> None:
-        self.result = result
+    def __init__(self, result: Result | list[Result]) -> None:
+        self.results = iter(result if isinstance(result, list) else [result])
         self.calls: list[tuple[list[str], dict[str, object]]] = []
 
     def __call__(self, command, **kwargs):
         self.calls.append((list(command), kwargs))
-        return self.result
+        return next(self.results)
 
 
 def repository(repository_id: int = 1, name: str = "repo") -> RepositoryConfig:
@@ -253,14 +257,18 @@ def test_project_diff_uses_only_membership_status_and_priority(
 
 def test_fetch_project_items_reads_every_page_and_filters_other_repositories() -> None:
     runner = Runner(
-        Result(
-            stdout=json.dumps(
-                [
+        [
+            Result(
+                stdout=json.dumps(
                     project_page(
                         [project_item("PVTI_1", number=42)],
                         has_next=True,
                         end_cursor="cursor-1",
-                    ),
+                    )
+                )
+            ),
+            Result(
+                stdout=json.dumps(
                     project_page(
                         [
                             project_item(
@@ -280,10 +288,10 @@ def test_fetch_project_items_reads_every_page_and_filters_other_repositories() -
                         ],
                         has_next=False,
                         end_cursor=None,
-                    ),
-                ]
-            )
-        )
+                    )
+                )
+            ),
+        ]
     )
 
     snapshot = fetch_project_items(BOARD, "board-token", runner=runner, now=NOW)
@@ -302,9 +310,46 @@ def test_fetch_project_items_reads_every_page_and_filters_other_repositories() -
         ),
         NOW,
     )
-    command, kwargs = runner.calls[0]
-    assert command[:4] == ["gh", "api", "graphql", "--paginate"]
-    assert kwargs["env"]["GH_TOKEN"] == "board-token"  # type: ignore[index]
+    assert len(runner.calls) == 2
+    first_command, first_kwargs = runner.calls[0]
+    second_command, second_kwargs = runner.calls[1]
+    assert first_command[:3] == ["gh", "api", "graphql"]
+    assert "--paginate" not in first_command
+    assert "--slurp" not in first_command
+    assert not any(part.startswith("endCursor=") for part in first_command)
+    assert "endCursor=cursor-1" in second_command
+    assert first_kwargs["env"]["GH_TOKEN"] == "board-token"  # type: ignore[index]
+    assert second_kwargs["env"]["GH_TOKEN"] == "board-token"  # type: ignore[index]
+    assert first_kwargs["timeout"] == second_kwargs["timeout"] == 60
+
+
+def test_shutdown_stops_project_pagination_before_the_next_page() -> None:
+    stopping = False
+    calls: list[list[str]] = []
+    first_page = project_page(
+        [project_item("PVTI_1")],
+        has_next=True,
+        end_cursor="next-page",
+    )
+
+    def runner(command, **_kwargs):
+        nonlocal stopping
+        calls.append(list(command))
+        if len(calls) > 1:
+            pytest.fail("shutdown allowed a second GraphQL page subprocess")
+        stopping = True
+        return Result(stdout=json.dumps(first_page))
+
+    with pytest.raises(GitHubReadStopped, match="stopped"):
+        fetch_project_items(
+            BOARD,
+            "read-token",
+            runner=runner,
+            now=NOW,
+            stop_requested=lambda: stopping,
+        )
+
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -455,22 +500,26 @@ def test_project_diff_silently_drops_rows_outside_the_current_board_allowlist(
                 )
             )
         ),
-        Result(
-            stdout=json.dumps(
-                [
+        [
+            Result(
+                stdout=json.dumps(
                     project_page(
                         [project_item("PVTI_new")],
                         has_next=True,
                         end_cursor="cursor-1",
-                    ),
+                    )
+                )
+            ),
+            Result(
+                stdout=json.dumps(
                     project_page(
                         [{"id": "PVTI_broken", "type": "ISSUE", "content": None}],
                         has_next=False,
                         end_cursor=None,
-                    ),
-                ]
-            )
-        ),
+                    )
+                )
+            ),
+        ],
         Result(
             stdout=json.dumps(
                 project_page(
@@ -601,7 +650,7 @@ def test_project_diff_silently_drops_rows_outside_the_current_board_allowlist(
 )
 def test_failed_project_fetch_preserves_the_prior_snapshot_and_success_clock(
     tmp_path: Path,
-    result: Result,
+    result: Result | list[Result],
 ) -> None:
     store = migrated(tmp_path)
     old = projection("PVTI_old", number=41, seen_at=EARLIER)

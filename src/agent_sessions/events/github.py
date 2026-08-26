@@ -187,6 +187,33 @@ query ProjectItems($owner:String!,$number:Int!,$endCursor:String){
   rateLimit { limit cost remaining resetAt }
 }
 """)
+_GRAPHQL_CONNECTION_PATHS = {
+    GraphQLOperation.UNRESOLVED_THREADS: (
+        "data",
+        "repository",
+        "pullRequest",
+        "reviewThreads",
+    ),
+    GraphQLOperation.ISSUE_REACTIONS: (
+        "data",
+        "repository",
+        "issue",
+        "comments",
+    ),
+    GraphQLOperation.COMMENT_REACTIONS: ("data", "node", "reactions"),
+    GraphQLOperation.OPEN_PULL_REQUEST_DISCOVERY: (
+        "data",
+        "repository",
+        "pullRequests",
+    ),
+    GraphQLOperation.CLOSING_ISSUES: (
+        "data",
+        "repository",
+        "pullRequest",
+        "closingIssuesReferences",
+    ),
+    GraphQLOperation.PROJECT_ITEMS: ("data", "user", "projectV2", "items"),
+}
 _SUPPORTED_PROJECT_ITEM_TYPES = frozenset({"ISSUE", "PULL_REQUEST"})
 _UNSUPPORTED_PROJECT_ITEM_TYPES = frozenset({"DRAFT_ISSUE", "REDACTED"})
 
@@ -274,31 +301,42 @@ class LiveTargetResolver:
         variables: tuple[tuple[str, str], ...],
         end_cursor: str = "",
     ) -> list[dict[str, JSONValue]]:
-        command = [
-            "gh",
-            "api",
-            "graphql",
-            "--paginate",
-            "--slurp",
-            "-f",
-            f"query={query.document}",
-        ]
-        for key, variable_value in variables:
-            command.extend(["-F", f"{key}={variable_value}"])
-        if end_cursor:
-            command.extend(["-F", f"endCursor={end_cursor}"])
-        response = self._read(command)
-        raw_pages: list[JSONValue] = (
-            response if isinstance(response, list) else [response]
-        )
         pages: list[dict[str, JSONValue]] = []
-        for raw_page in raw_pages:
-            page = self._dict(raw_page, subject)
+        cursor = end_cursor
+        while True:
+            command = [
+                "gh",
+                "api",
+                "graphql",
+                "-f",
+                f"query={query.document}",
+            ]
+            for key, variable_value in variables:
+                command.extend(["-F", f"{key}={variable_value}"])
+            if cursor:
+                command.extend(["-F", f"endCursor={cursor}"])
+            page = self._dict(self._read(command), subject)
             if page.get("errors"):
                 raise GitHubTransientError(f"GitHub returned incomplete {subject} data")
             pages.append(page)
-        if not pages:
-            raise GitHubTransientError(f"GitHub returned no {subject} pages")
+
+            current: JSONValue = page
+            for key in _GRAPHQL_CONNECTION_PATHS[query.operation]:
+                current = self._dict(current, subject).get(key)
+            connection = self._dict(current, subject)
+            page_info = self._dict(connection.get("pageInfo"), subject)
+            if page_info.get("hasNextPage") is False:
+                break
+            next_cursor = page_info.get("endCursor")
+            if (
+                page_info.get("hasNextPage") is not True
+                or not isinstance(next_cursor, str)
+                or not next_cursor
+            ):
+                raise GitHubTransientError(
+                    f"GitHub returned incomplete {subject} pagination"
+                )
+            cursor = next_cursor
         return pages
 
     def _connection_nodes(
