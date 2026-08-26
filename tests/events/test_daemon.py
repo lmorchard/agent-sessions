@@ -1,0 +1,159 @@
+from __future__ import annotations
+
+import asyncio
+import sqlite3
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from agent_sessions.events.pollers import PollRunResult
+from agent_sessions.events.store import QueueStore
+
+
+async def _wait_for(predicate, *, timeout: float = 1.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() >= deadline:
+            raise AssertionError("condition did not become true")
+        await asyncio.sleep(0.005)
+
+
+def _store_factory(path: Path, stores: list[QueueStore]):
+    def factory() -> QueueStore:
+        store = QueueStore.open(path, busy_timeout_ms=100)
+        stores.append(store)
+        return store
+
+    return factory
+
+
+@pytest.mark.anyio
+async def test_runtime_runs_each_poll_immediately_then_at_its_own_fixed_delay_with_a_new_closed_store(
+    tmp_path: Path,
+) -> None:
+    from agent_sessions.events.daemon import DaemonRuntime, ScheduledPoll
+
+    database = tmp_path / "events.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    stores: list[QueueStore] = []
+    projects_started: list[float] = []
+    reactions_started: list[float] = []
+
+    def projects(store: QueueStore, _now: datetime) -> PollRunResult:
+        assert store.connection is stores[-1].connection
+        projects_started.append(time.monotonic())
+        return PollRunResult(attempted=1)
+
+    def reactions(store: QueueStore, _now: datetime) -> PollRunResult:
+        reactions_started.append(time.monotonic())
+        return PollRunResult(attempted=1)
+
+    runtime = DaemonRuntime(
+        _store_factory(database, stores),
+        (
+            ScheduledPoll("projects", timedelta(milliseconds=40), projects),
+            ScheduledPoll("reactions", timedelta(milliseconds=70), reactions),
+        ),
+        lambda _name, _result: None,
+    )
+    async with runtime.lifespan(None):
+        await _wait_for(lambda: len(projects_started) >= 2 and len(reactions_started) >= 2)
+        assert runtime.ready()
+
+    assert projects_started[1] - projects_started[0] >= 0.035
+    assert reactions_started[1] - reactions_started[0] >= 0.065
+    assert len({id(store.connection) for store in stores}) == len(stores)
+    for store in stores:
+        with pytest.raises(sqlite3.ProgrammingError):
+            store.connection.execute("SELECT 1")
+
+
+@pytest.mark.anyio
+async def test_runtime_logs_result_failures_but_a_raised_pass_exception_makes_it_unready(
+    tmp_path: Path,
+) -> None:
+    from agent_sessions.events.daemon import DaemonRuntime, ScheduledPoll
+
+    database = tmp_path / "events.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    stores: list[QueueStore] = []
+    logged: list[tuple[str, PollRunResult]] = []
+    calls = 0
+
+    def transient(_store: QueueStore, _now: datetime) -> PollRunResult:
+        nonlocal calls
+        calls += 1
+        return PollRunResult(errors=("temporary source failure",))
+
+    def broken(_store: QueueStore, _now: datetime) -> PollRunResult:
+        raise RuntimeError("unexpected poll crash")
+
+    runtime = DaemonRuntime(
+        _store_factory(database, stores),
+        (
+            ScheduledPoll("transient", timedelta(milliseconds=20), transient),
+            ScheduledPoll("broken", timedelta(seconds=1), broken),
+        ),
+        lambda name, result: logged.append((name, result)),
+    )
+    async with runtime.lifespan(None):
+        await _wait_for(lambda: calls >= 2 and not runtime.ready())
+
+    assert len(logged) >= 2
+    assert all(name == "transient" and result.errors for name, result in logged)
+
+
+@pytest.mark.anyio
+async def test_runtime_shutdown_waits_for_an_inflight_bounded_pass(tmp_path: Path) -> None:
+    from agent_sessions.events.daemon import DaemonRuntime, ScheduledPoll
+
+    database = tmp_path / "events.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    stores: list[QueueStore] = []
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    loop = asyncio.get_running_loop()
+
+    def in_flight(_store: QueueStore, _now: datetime) -> PollRunResult:
+        loop.call_soon_threadsafe(entered.set)
+        while not release.is_set():
+            time.sleep(0.005)
+        return PollRunResult(attempted=1)
+
+    runtime = DaemonRuntime(
+        _store_factory(database, stores),
+        (ScheduledPoll("reactions", timedelta(seconds=1), in_flight),),
+        lambda _name, _result: None,
+    )
+    async with runtime.lifespan(None):
+        await entered.wait()
+        release.set()
+
+    assert len(stores) == 1
+
+
+def test_scheduled_polls_omit_projects_without_boards_but_keep_reactions() -> None:
+    from agent_sessions.events import cli
+    from agent_sessions.events.models import EventsConfig, PollingPolicy, ScanPolicy
+
+    loaded = EventsConfig(
+        database=Path("/tmp/events.sqlite3"),
+        busy_timeout_ms=100,
+        claim_limit=1,
+        claim_lease=timedelta(seconds=1),
+        retry_base=timedelta(seconds=1),
+        retry_maximum=timedelta(seconds=1),
+        max_body_bytes=1024,
+        delivery_retention=timedelta(days=1),
+        invalidation_retention=timedelta(days=1),
+        scan=ScanPolicy(timedelta(seconds=1), timedelta(seconds=1), timedelta(seconds=1)),
+        polling=PollingPolicy(timedelta(seconds=60), timedelta(seconds=60)),
+        repositories=(),
+        boards=(),
+    )
+
+    assert [poll.name for poll in cli._scheduled_polls(loaded, "read-token")] == [
+        "poll-reactions"
+    ]

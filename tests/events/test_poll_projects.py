@@ -12,6 +12,7 @@ from agent_sessions.events.models import (
     EventsConfig,
     Invalidation,
     PollFailure,
+    PollingPolicy,
     ProjectItemProjection,
     RepositoryConfig,
     RepositoryIdentity,
@@ -58,6 +59,7 @@ def config(path: Path, *, boards: tuple[BoardConfig, ...] = (BOARD,)) -> EventsC
         delivery_retention=timedelta(days=14),
         invalidation_retention=timedelta(days=30),
         scan=ScanPolicy(timedelta(minutes=5), timedelta(minutes=15), timedelta(hours=1)),
+        polling=PollingPolicy(timedelta(seconds=60), timedelta(seconds=60)),
         repositories=(repository(), repository(2, "other")),
         boards=boards,
     )
@@ -755,7 +757,7 @@ def test_project_worker_cannot_commit_after_an_unclaimed_lease_expires(
     assert store.poller_last_success_at("projects:owner/9") == EARLIER
 
 
-def test_poll_projects_cli_runs_one_pass_with_only_the_board_credential(
+def test_poll_projects_cli_runs_one_pass_with_only_the_shared_read_credential(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -769,13 +771,13 @@ def test_poll_projects_cli_runs_one_pass_with_only_the_board_credential(
     monkeypatch.setattr(cli.config, "load", lambda _path: loaded)
     monkeypatch.setattr(
         cli.credentials,
-        "resolve_board_credential",
-        lambda: "board-token",
+        "resolve_read_credential",
+        lambda: "read-token",
     )
     monkeypatch.setattr(
         cli.credentials,
-        "resolve_read_credential",
-        lambda: pytest.fail("Projects polling inspected the read credential"),
+        "resolve_board_credential",
+        lambda: pytest.fail("Projects polling inspected the board credential"),
     )
 
     def one_pass(_config, _store, token, *, worker_id, now):
@@ -786,11 +788,11 @@ def test_poll_projects_cli_runs_one_pass_with_only_the_board_credential(
     monkeypatch.setattr(cli.pollers, "poll_projects_once", one_pass)
 
     assert cli.main(["poll-projects", "--config", str(tmp_path / "events.toml")]) == 0
-    assert len(calls) == 1 and calls[0][0] == "board-token"
+    assert len(calls) == 1 and calls[0][0] == "read-token"
     assert "attempted=1" in capsys.readouterr().err
 
 
-def test_poll_projects_cli_never_logs_failed_credential_command_output(
+def test_poll_projects_cli_never_logs_failed_read_credential_command_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -803,7 +805,7 @@ def test_poll_projects_cli_never_logs_failed_credential_command_output(
     loaded = config(database)
     stdout_secret = "ghp_cli_stdout_secret"
     stderr_secret = "ghs_cli_stderr_secret"
-    resolve_board_credential = credentials.resolve_board_credential
+    resolve_read_credential = credentials.resolve_read_credential
 
     def failing_runner(_argv, **_kwargs):
         class Failure:
@@ -816,10 +818,10 @@ def test_poll_projects_cli_never_logs_failed_credential_command_output(
     monkeypatch.setattr(cli.config, "load", lambda _path: loaded)
     monkeypatch.setattr(
         cli.credentials,
-        "resolve_board_credential",
-        lambda: resolve_board_credential(
+        "resolve_read_credential",
+        lambda: resolve_read_credential(
             {
-                credentials.BOARD_TOKEN_VAR
+                credentials.READ_TOKEN_VAR
                 + credentials.CMD_SUFFIX: "credential-helper board"
             },
             runner=failing_runner,
@@ -828,7 +830,7 @@ def test_poll_projects_cli_never_logs_failed_credential_command_output(
 
     assert cli.main(["poll-projects", "--config", str(tmp_path / "events.toml")]) == 1
     logged = capsys.readouterr().err
-    assert credentials.BOARD_TOKEN_VAR + credentials.CMD_SUFFIX in logged
+    assert credentials.READ_TOKEN_VAR + credentials.CMD_SUFFIX in logged
     assert "exit" in logged and "17" in logged
     assert stdout_secret not in logged
     assert stderr_secret not in logged

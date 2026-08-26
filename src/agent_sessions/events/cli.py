@@ -16,6 +16,7 @@ from agent_sessions.driver import credentials
 
 from . import config, operations, pollers
 from . import logging as event_logging
+from .daemon import DaemonRuntime, ScheduledPoll
 from .store import QueueStore
 from .webhook import create_app
 
@@ -134,6 +135,35 @@ def _log_poll_result(command: str, result: pollers.PollRunResult) -> None:
     )
 
 
+def _scheduled_polls(loaded: config.EventsConfig, read_token: str) -> tuple[ScheduledPoll, ...]:
+    polls: list[ScheduledPoll] = []
+    if loaded.boards:
+        polls.append(
+            ScheduledPoll(
+                "poll-projects",
+                loaded.polling.projects_interval,
+                lambda store, now: pollers.poll_projects_once(
+                    loaded, store, read_token, worker_id=_worker_id("poll-projects"), now=now
+                ),
+            )
+        )
+    polls.append(
+        ScheduledPoll(
+            "poll-reactions",
+            loaded.polling.reactions_interval,
+            lambda store, now: pollers.poll_reactions_once(
+                loaded,
+                store,
+                read_token,
+                _reaction_bot_logins(),
+                worker_id=_worker_id("poll-reactions"),
+                now=now,
+            ),
+        )
+    )
+    return tuple(polls)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -149,10 +179,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         return operations.migrate(loaded.database, busy_timeout_ms=loaded.busy_timeout_ms)
     if args.command == "serve":
         webhook_secret = _secret_from_environment(parser)
+        try:
+            read_token = credentials.resolve_read_credential()
+        except RuntimeError as error:
+            event_logging.emit("serve", message=f"failed: {error}")
+            return 1
         store = QueueStore.open(loaded.database, busy_timeout_ms=loaded.busy_timeout_ms)
         store.register_repositories(item.identity for item in loaded.repositories)
+        runtime = DaemonRuntime(
+            lambda: QueueStore.open(loaded.database, busy_timeout_ms=loaded.busy_timeout_ms),
+            _scheduled_polls(loaded, read_token),
+            _log_poll_result,
+        )
         uvicorn.run(
-            create_app(config=loaded, store=store, webhook_secret=webhook_secret),
+            create_app(config=loaded, store=store, webhook_secret=webhook_secret, runtime=runtime),
             host="127.0.0.1",
             port=8080,
             workers=1,
@@ -163,11 +203,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         store.register_repositories(item.identity for item in loaded.repositories)
         now = datetime.now(UTC)
         try:
+            read_token = credentials.resolve_read_credential()
             if args.command == "poll-projects":
                 result = pollers.poll_projects_once(
                     loaded,
                     store,
-                    credentials.resolve_board_credential(),
+                    read_token,
                     worker_id=_worker_id(args.command),
                     now=now,
                 )
@@ -175,7 +216,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 result = pollers.poll_reactions_once(
                     loaded,
                     store,
-                    credentials.resolve_read_credential(),
+                    read_token,
                     _reaction_bot_logins(),
                     worker_id=_worker_id(args.command),
                     now=now,
@@ -185,6 +226,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.command.replace("-", "_"), message=f"failed: {error}"
             )
             return 1
+        finally:
+            store.close()
         _log_poll_result(args.command, result)
         return result.exit_code
     if args.command == "queue-status":

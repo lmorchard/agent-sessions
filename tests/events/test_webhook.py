@@ -17,6 +17,7 @@ from agent_sessions.events.models import (
     EnqueueResult,
     EventsConfig,
     Invalidation,
+    PollingPolicy,
     QueueBusy,
     QueueUnavailable,
     RepositoryConfig,
@@ -43,6 +44,7 @@ def config(database: Path, *, max_body_bytes: int = 1024) -> EventsConfig:
         delivery_retention=timedelta(days=1),
         invalidation_retention=timedelta(days=1),
         scan=ScanPolicy(timedelta(seconds=1), timedelta(seconds=1), timedelta(seconds=1)),
+        polling=PollingPolicy(timedelta(seconds=60), timedelta(seconds=60)),
         repositories=(RepositoryConfig(RepositoryIdentity(1, "owner", "repo", installation_id=10)),),
         boards=(),
     )
@@ -214,6 +216,32 @@ async def test_health_ready_and_documentation_routes_have_fixed_surface(tmp_path
 
 
 @pytest.mark.anyio
+async def test_readiness_includes_the_optional_background_runtime(tmp_path: Path) -> None:
+    from contextlib import asynccontextmanager
+
+    import httpx
+
+    from agent_sessions.events.webhook import create_app
+
+    class UnreadyRuntime:
+        @asynccontextmanager
+        async def lifespan(self, _app):
+            yield
+
+        def ready(self) -> bool:
+            return False
+
+    app = create_app(
+        config=config(tmp_path / "events.sqlite3"),
+        store=store_for(tmp_path),
+        webhook_secret=SECRET,
+        runtime=UnreadyRuntime(),
+    )
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/readyz")).status_code == 503
+
+
+@pytest.mark.anyio
 async def test_store_failures_return_service_unavailable(tmp_path: Path) -> None:
     from agent_sessions.events.webhook import create_app
 
@@ -307,6 +335,9 @@ invalidation_retention_days = 1
 quiet_period_seconds = 1
 interval_seconds = 1
 maximum_age_seconds = 1
+[polling]
+projects_interval_seconds = 60
+reactions_interval_seconds = 60
 [[repositories]]
 id = 1
 owner = "owner"
@@ -323,6 +354,7 @@ repository_ids = [1]
     monkeypatch.setenv("AGENT_SESSION_WEBHOOK_SECRET_FILE", str(secret))
     seen: dict[str, Any] = {}
     monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: seen.update(app=app, **kwargs))
+    monkeypatch.setattr("agent_sessions.events.cli.credentials.resolve_read_credential", lambda: "read-token")
     secret.chmod(0o644)
     with pytest.raises(SystemExit) as rejected:
         main(["serve", "--config", str(settings)])

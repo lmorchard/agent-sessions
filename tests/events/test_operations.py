@@ -49,6 +49,9 @@ invalidation_retention_days = 1
 quiet_period_seconds = 1
 interval_seconds = 1
 maximum_age_seconds = 1
+[polling]
+projects_interval_seconds = 60
+reactions_interval_seconds = 60
 {repositories}
 {boards}
 ''',
@@ -95,7 +98,6 @@ def _doctor_report(
         environ={} if environ is None else environ,
         runner=runner,
         read_credential_resolver=lambda _: "read-credential-value",
-        board_credential_resolver=lambda _: "board-credential-value",
     )
 
 
@@ -110,7 +112,6 @@ def test_migrate_creates_a_database_and_doctor_reports_its_schema(tmp_path: Path
         environ={},
         runner=_successful_doctor_runner,
         read_credential_resolver=lambda _: "read-credential-value",
-        board_credential_resolver=lambda _: "board-credential-value",
     ) == 0
     output = capsys.readouterr().out
     assert "[pass] sqlite-schema" in output
@@ -675,7 +676,6 @@ def test_doctor_checks_webhook_secret_without_disclosing_it(
         environ={"AGENT_SESSION_WEBHOOK_SECRET_FILE": str(secret_path)},
         runner=_successful_doctor_runner,
         read_credential_resolver=lambda _: "read-credential-value",
-        board_credential_resolver=lambda _: "board-credential-value",
     ) == (0 if expected_status == "pass" else 1)
     output = capsys.readouterr().out
 
@@ -702,7 +702,6 @@ def test_doctor_reports_malformed_stored_clocks_and_continues_independent_probes
         environ={},
         runner=_successful_doctor_runner,
         read_credential_resolver=lambda _: "read-credential-value",
-        board_credential_resolver=lambda _: "board-credential-value",
     ) == 1
     output = capsys.readouterr().out
 
@@ -819,6 +818,9 @@ invalidation_retention_days = 1
 quiet_period_seconds = 1
 interval_seconds = 1
 maximum_age_seconds = 1
+[polling]
+projects_interval_seconds = 60
+reactions_interval_seconds = 60
 [[repositories]]
 id = 1
 owner = "owner"

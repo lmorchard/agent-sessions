@@ -7,15 +7,16 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from .models import BoardConfig, EventsConfig, RepositoryConfig, RepositoryIdentity, ScanPolicy
+from .models import BoardConfig, EventsConfig, PollingPolicy, RepositoryConfig, RepositoryIdentity, ScanPolicy
 
 _TOP_LEVEL = {
     "database", "busy_timeout_ms", "claim_limit", "claim_lease_seconds", "retry_base_seconds",
     "retry_max_seconds", "max_body_bytes", "delivery_retention_days", "invalidation_retention_days",
-    "scan", "repositories", "boards",
+    "scan", "polling", "repositories", "boards",
 }
-_SCALAR = _TOP_LEVEL - {"scan", "repositories", "boards"}
+_SCALAR = _TOP_LEVEL - {"scan", "polling", "repositories", "boards"}
 _SCAN = {"quiet_period_seconds", "interval_seconds", "maximum_age_seconds"}
+_POLLING = {"projects_interval_seconds", "reactions_interval_seconds"}
 _REPOSITORY = {"id", "owner", "name", "installation_id"}
 _BOARD = {"owner", "number", "repository_ids"}
 
@@ -65,6 +66,11 @@ def load(path: Path) -> EventsConfig:
     scan_values = {name: _positive(scan_raw[name], name) for name in _SCAN}
     if scan_values["maximum_age_seconds"] < scan_values["interval_seconds"]:
         raise ValueError("maximum_age_seconds must be at least interval_seconds")
+    polling_raw = raw["polling"]
+    if not isinstance(polling_raw, dict):
+        raise ValueError("polling must be a table")
+    _expect_keys(polling_raw, _POLLING, "polling")
+    polling_values = {name: _positive(polling_raw[name], name) for name in _POLLING}
     repositories: list[RepositoryConfig] = []
     ids: set[int] = set()
     names: set[tuple[str, str]] = set()
@@ -100,5 +106,6 @@ def load(path: Path) -> EventsConfig:
         delivery_retention=timedelta(days=values["delivery_retention_days"]),
         invalidation_retention=timedelta(days=values["invalidation_retention_days"]),
         scan=ScanPolicy(timedelta(seconds=scan_values["quiet_period_seconds"]), timedelta(seconds=scan_values["interval_seconds"]), timedelta(seconds=scan_values["maximum_age_seconds"])),
+        polling=PollingPolicy(timedelta(seconds=polling_values["projects_interval_seconds"]), timedelta(seconds=polling_values["reactions_interval_seconds"])),
         repositories=tuple(repositories), boards=tuple(boards),
     )

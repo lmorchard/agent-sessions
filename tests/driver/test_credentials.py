@@ -6,7 +6,6 @@ the agent must not be able to write to GitHub, whatever the agent decides to run
 
 from __future__ import annotations
 
-import traceback
 from pathlib import Path
 
 import pytest
@@ -470,48 +469,25 @@ def test_read_credential_resolver_executes_only_the_read_command():
     assert runner.calls == [["security", "find-generic-password", "-s", "agent-read", "-w"]]
 
 
-def test_read_credential_resolver_mints_only_the_scoped_app_read_token(tmp_path: Path):
-    key_file = tmp_path / "key.pem"
-    key_file.write_text("fake-key-content")
-    minted: list[dict[str, str] | None] = []
-
-    def signing_runner(cmd: list[str], **kwargs):
-        class Result:
-            stdout = b"signature"
-
-        return Result()
-
-    def http_post(_installation_id, _jwt, permissions):
-        minted.append(permissions)
-        return "installation-read-token"
-
+def test_read_credential_resolver_never_inspects_app_or_write_variables():
     env = GuardedCredentialEnv(
-        {
-            credentials.APP_ID_VAR: "123456",
-            credentials.APP_INSTALLATION_ID_VAR: "789012",
-            credentials.APP_PRIVATE_KEY_FILE_VAR: str(key_file),
-        },
+        {},
         {
             credentials.BOARD_TOKEN_VAR,
             BOARD_CMD_VAR,
             credentials.WRITE_TOKEN_VAR,
             WRITE_CMD_VAR,
+            credentials.APP_ID_VAR,
+            credentials.APP_INSTALLATION_ID_VAR,
+            credentials.APP_PRIVATE_KEY_FILE_VAR,
+            "GH_APP_ID",
+            "GH_APP_INSTALLATION_ID",
+            "GH_APP_PRIVATE_KEY_FILE",
         },
     )
 
-    assert credentials.resolve_read_credential(
-        env, runner=signing_runner, http_post=http_post
-    ) == "installation-read-token"
-    assert minted == [
-        {
-            "checks": "read",
-            "statuses": "read",
-            "contents": "read",
-            "issues": "read",
-            "pull_requests": "read",
-            "discussions": "read",
-        }
-    ]
+    with pytest.raises(RuntimeError, match=credentials.READ_TOKEN_VAR):
+        credentials.resolve_read_credential(env)
 
 
 def test_read_credential_resolver_never_falls_back_to_a_broader_literal():
@@ -591,55 +567,6 @@ def test_scoped_credential_command_error_reports_only_its_failure_category(
     assert secret not in message
 
 
-def test_scoped_app_credential_failure_never_exposes_exception_content(tmp_path: Path):
-    key_file = tmp_path / "key.pem"
-    key_file.write_text("fake-key-content")
-    secret = "ghs_exception_secret_value"
-
-    def signing_runner(_cmd, **_kwargs):
-        raise RuntimeError(secret)
-
-    with pytest.raises(RuntimeError) as caught:
-        credentials.resolve_read_credential(
-            {
-                credentials.APP_ID_VAR: "123456",
-                credentials.APP_INSTALLATION_ID_VAR: "789012",
-                credentials.APP_PRIVATE_KEY_FILE_VAR: str(key_file),
-            },
-            runner=signing_runner,
-        )
-
-    assert credentials.READ_TOKEN_VAR in str(caught.value)
-    assert secret not in str(caught.value)
-    assert secret not in "".join(traceback.format_exception(caught.value))
-
-
-def test_scoped_app_empty_credential_names_the_variable_and_failure_category(
-    tmp_path: Path,
-):
-    key_file = tmp_path / "key.pem"
-    key_file.write_text("fake-key-content")
-
-    def signing_runner(_cmd, **_kwargs):
-        class Result:
-            stdout = b"signature"
-
-        return Result()
-
-    with pytest.raises(RuntimeError) as caught:
-        credentials.resolve_read_credential(
-            {
-                credentials.APP_ID_VAR: "123456",
-                credentials.APP_INSTALLATION_ID_VAR: "789012",
-                credentials.APP_PRIVATE_KEY_FILE_VAR: str(key_file),
-            },
-            runner=signing_runner,
-            http_post=lambda *_args: "",
-        )
-
-    message = str(caught.value)
-    assert credentials.READ_TOKEN_VAR in message
-    assert "empty" in message
 
 
 def test_a_token_can_come_from_a_command():

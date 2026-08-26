@@ -22,6 +22,7 @@ from agent_sessions.events.models import (
     ClaimedTarget,
     EventsConfig,
     Invalidation,
+    PollingPolicy,
     RepositoryConfig,
     RepositoryIdentity,
     ScanPolicy,
@@ -693,6 +694,7 @@ def config(database: Path, *, claim_limit: int = 25) -> EventsConfig:
         delivery_retention=timedelta(days=1),
         invalidation_retention=timedelta(days=1),
         scan=ScanPolicy(timedelta(minutes=5), timedelta(minutes=15), timedelta(hours=1)),
+        polling=PollingPolicy(timedelta(seconds=60), timedelta(seconds=60)),
         repositories=(REPOSITORY,),
         boards=(),
     )

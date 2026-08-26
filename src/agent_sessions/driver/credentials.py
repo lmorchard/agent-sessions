@@ -236,46 +236,14 @@ def resolve_read_credential(
     runner: CommandRunner | None = None,
     http_post: Callable[..., str] | None = None,
 ) -> str:
-    """Resolve only the installation-readable credential used by reaction polling."""
+    """Resolve the shared long-lived read PAT used by event processes."""
     src = os.environ if env is None else env
     command_runner = cast(CommandRunner, subprocess.run) if runner is None else runner
     token = _resolve_scoped_value(src, READ_TOKEN_VAR, command_runner)
     if token:
         return token
 
-    app_id = (src.get(APP_ID_VAR) or src.get("GH_APP_ID") or "").strip()
-    installation_id = (
-        src.get(APP_INSTALLATION_ID_VAR)
-        or src.get("GH_APP_INSTALLATION_ID")
-        or ""
-    ).strip()
-    private_key_file = (
-        src.get(APP_PRIVATE_KEY_FILE_VAR)
-        or src.get("GH_APP_PRIVATE_KEY_FILE")
-        or ""
-    ).strip()
-    if not (app_id and installation_id and private_key_file):
-        raise RuntimeError(
-            f"{READ_TOKEN_VAR}, {READ_TOKEN_VAR}{CMD_SUFFIX}, or complete GitHub App credentials are required"
-        )
-    try:
-        jwt_token = generate_app_jwt(app_id, private_key_file, runner=command_runner)
-        token = fetch_app_installation_token(
-            jwt_token,
-            installation_id,
-            permissions=READ_PERMISSIONS,
-            http_post=http_post,
-        ).strip()
-    except Exception as error:
-        raise RuntimeError(
-            f"{READ_TOKEN_VAR}: GitHub App credential mint failure "
-            f"({type(error).__name__})"
-        ) from None
-    if not token:
-        raise RuntimeError(
-            f"{READ_TOKEN_VAR}: GitHub App credential mint produced empty output"
-        )
-    return token
+    raise RuntimeError(f"{READ_TOKEN_VAR} or {READ_TOKEN_VAR}{CMD_SUFFIX} is required")
 
 
 def resolve_board_credential(

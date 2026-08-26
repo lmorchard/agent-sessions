@@ -917,7 +917,6 @@ def inspect_doctor(
     environ: Mapping[str, str] | None = None,
     runner: CommandRunner | None = None,
     read_credential_resolver: CredentialResolver | None = None,
-    board_credential_resolver: CredentialResolver | None = None,
 ) -> DoctorReport:
     """Run read-only configuration, SQLite, credential, and GitHub probes."""
     source_environ = os.environ if environ is None else environ
@@ -926,11 +925,6 @@ def inspect_doctor(
         credentials.resolve_read_credential
         if read_credential_resolver is None
         else read_credential_resolver
-    )
-    resolve_board = (
-        credentials.resolve_board_credential
-        if board_credential_resolver is None
-        else board_credential_resolver
     )
     try:
         loaded = config.load(config_path)
@@ -1000,18 +994,11 @@ def inspect_doctor(
                 )
             )
 
-    board_token, board_probe = _resolve_credential(
-        "board-credential",
-        source_environ,
-        resolve_board,
-        remedy="configure the board-readable credential and retry doctor",
-    )
-    probes.append(board_probe)
-    if board_token:
+    if read_token:
         probes.extend(
             _board_probes(
                 loaded,
-                token=board_token,
+                token=read_token,
                 environ=source_environ,
                 runner=command_runner,
             )
@@ -1024,13 +1011,13 @@ def inspect_doctor(
                         f"board-read:{board.key}",
                         "skip",
                         "board read was not attempted",
-                        "configure the board-readable credential and retry doctor",
+                        "configure the shared read credential and retry doctor",
                     ),
                     DoctorProbe(
                         f"board-fields:{board.key}",
                         "skip",
                         "Status and Priority fields were not verified",
-                        "configure the board-readable credential and retry doctor",
+                        "configure the shared read credential and retry doctor",
                     ),
                 )
             )
@@ -1044,14 +1031,12 @@ def doctor(
     environ: Mapping[str, str] | None = None,
     runner: CommandRunner | None = None,
     read_credential_resolver: CredentialResolver | None = None,
-    board_credential_resolver: CredentialResolver | None = None,
 ) -> int:
     report = inspect_doctor(
         config_path,
         environ=environ,
         runner=runner,
         read_credential_resolver=read_credential_resolver,
-        board_credential_resolver=board_credential_resolver,
     )
     for probe in report.probes:
         line = f"[{probe.status}] {probe.code}: {probe.message}"

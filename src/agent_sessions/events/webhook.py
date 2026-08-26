@@ -36,6 +36,12 @@ class WebhookStore(Protocol):
     def enqueue_webhook(self, delivery: VerifiedDelivery, invalidations: Iterable[Invalidation], *, now: datetime) -> EnqueueResult: ...
 
 
+class BackgroundRuntime(Protocol):
+    def lifespan(self, app: FastAPI): ...
+
+    def ready(self) -> bool: ...
+
+
 def _signature_is_valid(value: str) -> bool:
     return value.startswith("sha256=") and len(value) == 71 and all(character in _HEX for character in value[7:])
 
@@ -57,9 +63,20 @@ def _log(delivery: VerifiedDelivery | None, *, status: int, invalidation_count: 
     )
 
 
-def create_app(*, config: EventsConfig, store: WebhookStore, webhook_secret: bytes) -> FastAPI:
+def create_app(
+    *,
+    config: EventsConfig,
+    store: WebhookStore,
+    webhook_secret: bytes,
+    runtime: BackgroundRuntime | None = None,
+) -> FastAPI:
     """Create the receiver without opening sockets or resolving GitHub credentials."""
-    app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
+    app = FastAPI(
+        openapi_url=None,
+        docs_url=None,
+        redoc_url=None,
+        lifespan=None if runtime is None else runtime.lifespan,
+    )
     write_lock = asyncio.Lock()
 
     @app.get("/healthz")
@@ -72,7 +89,8 @@ def create_app(*, config: EventsConfig, store: WebhookStore, webhook_secret: byt
             health = await asyncio.to_thread(store.ready)
         except (QueueBusy, QueueUnavailable):
             return JSONResponse({"status": "unavailable"}, status_code=503)
-        return JSONResponse({"status": "ready"} if health.ready else {"status": "unavailable"}, status_code=200 if health.ready else 503)
+        ready = health.ready and (runtime is None or runtime.ready())
+        return JSONResponse({"status": "ready"} if ready else {"status": "unavailable"}, status_code=200 if ready else 503)
 
     @app.post("/github/webhook")
     async def github_webhook(request: Request) -> JSONResponse:

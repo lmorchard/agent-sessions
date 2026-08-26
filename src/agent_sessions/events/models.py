@@ -47,6 +47,12 @@ class ScanPolicy:
 
 
 @dataclass(frozen=True)
+class PollingPolicy:
+    projects_interval: timedelta
+    reactions_interval: timedelta
+
+
+@dataclass(frozen=True)
 class RepositoryConfig:
     identity: RepositoryIdentity
 
@@ -74,6 +80,7 @@ class EventsConfig:
     delivery_retention: timedelta
     invalidation_retention: timedelta
     scan: ScanPolicy
+    polling: PollingPolicy
     repositories: tuple[RepositoryConfig, ...]
     boards: tuple[BoardConfig, ...]
 

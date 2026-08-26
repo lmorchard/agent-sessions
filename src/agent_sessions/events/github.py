@@ -206,7 +206,9 @@ class LiveTargetResolver:
         env["GH_TOKEN"] = credential
         env["GITHUB_TOKEN"] = credential
         try:
-            result = self.runner(command, capture_output=True, text=True, env=env)
+            result = self.runner(command, capture_output=True, text=True, env=env, timeout=60)
+        except subprocess.TimeoutExpired as error:
+            raise GitHubTransientError("GitHub read timed out") from error
         except OSError as error:
             raise GitHubTransientError(f"GitHub command could not start: {error}") from error
         if result.returncode != 0:

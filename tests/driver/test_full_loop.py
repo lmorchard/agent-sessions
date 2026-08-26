@@ -1391,6 +1391,10 @@ quiet_period_seconds = 300
 interval_seconds = 900
 maximum_age_seconds = 3600
 
+[polling]
+projects_interval_seconds = 60
+reactions_interval_seconds = 60
+
 [[repositories]]
 id = 1
 owner = "owner"

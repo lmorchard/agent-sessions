@@ -82,6 +82,10 @@ class QueueStore:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.connection = connection
 
+    def close(self) -> None:
+        """Release this process-local connection after one poll pass."""
+        self.connection.close()
+
     @staticmethod
     def _connect(path: Path, busy_timeout_ms: int) -> sqlite3.Connection:
         connection = sqlite3.connect(path, isolation_level=None, check_same_thread=False)

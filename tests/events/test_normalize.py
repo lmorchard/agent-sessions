@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from agent_sessions.events.models import EventsConfig, RepositoryConfig, RepositoryIdentity, ScanPolicy
+from agent_sessions.events.models import EventsConfig, PollingPolicy, RepositoryConfig, RepositoryIdentity, ScanPolicy
 
 MISSING = object()
 CONTROL_PLANE_FIXTURES = json.loads(
@@ -30,6 +30,7 @@ def config() -> EventsConfig:
         delivery_retention=timedelta(days=1),
         invalidation_retention=timedelta(days=1),
         scan=ScanPolicy(timedelta(seconds=1), timedelta(seconds=1), timedelta(seconds=1)),
+        polling=PollingPolicy(timedelta(seconds=60), timedelta(seconds=60)),
         repositories=(
             RepositoryConfig(RepositoryIdentity(1, "owner", "repo", installation_id=10)),
             RepositoryConfig(RepositoryIdentity(2, "other", "repo", installation_id=10)),

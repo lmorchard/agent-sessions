@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -9,11 +10,14 @@ import pytest
 
 from agent_sessions.events.github import (
     ApprovalPredicateObservation,
+    GitHubTransientError,
+    LiveTargetResolver,
     fetch_approval_predicates,
 )
 from agent_sessions.events.models import (
     ApprovalWatch,
     EventsConfig,
+    PollingPolicy,
     RepositoryConfig,
     RepositoryIdentity,
     ScanPolicy,
@@ -29,6 +33,21 @@ REPOSITORY = RepositoryConfig(RepositoryIdentity(1, "owner", "repo", 99))
 
 def fixed_clock(value: datetime) -> Callable[[], datetime]:
     return lambda: value
+
+
+def test_github_reads_have_a_bounded_timeout_and_translate_expiry() -> None:
+    calls: list[dict[str, object]] = []
+
+    def timed_out(_command, **kwargs):
+        calls.append(kwargs)
+        raise subprocess.TimeoutExpired("gh api", 60)
+
+    resolver = LiveTargetResolver(read_token="read-token", runner=timed_out)
+
+    with pytest.raises(GitHubTransientError, match="timed out"):
+        resolver._read(["gh", "api", "repos/owner/repo"])
+    assert len(calls) == 1
+    assert calls[0]["timeout"] == 60
 
 
 class Result:
@@ -60,6 +79,7 @@ def config(path: Path) -> EventsConfig:
         delivery_retention=timedelta(days=14),
         invalidation_retention=timedelta(days=30),
         scan=ScanPolicy(timedelta(minutes=5), timedelta(minutes=15), timedelta(hours=1)),
+        polling=PollingPolicy(timedelta(seconds=60), timedelta(seconds=60)),
         repositories=(REPOSITORY,),
         boards=(),
     )

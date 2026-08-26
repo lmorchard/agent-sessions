@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
 from agent_sessions.events import config
+from agent_sessions.events.models import PollingPolicy
 
 
 def write_config(path: Path, text: str) -> Path:
@@ -27,6 +29,10 @@ invalidation_retention_days = 30
 quiet_period_seconds = 300
 interval_seconds = 900
 maximum_age_seconds = 3600
+
+[polling]
+projects_interval_seconds = 60
+reactions_interval_seconds = 60
 
 [[repositories]]
 id = 123456
@@ -60,6 +66,10 @@ def test_loads_the_shared_events_configuration(tmp_path: Path) -> None:
     assert loaded.repositories[0].identity.id == 123456
     assert loaded.boards[0].key == "lmorchard/9"
     assert loaded.scan.maximum_age.total_seconds() == 3600
+    assert loaded.polling == PollingPolicy(
+        projects_interval=timedelta(seconds=60),
+        reactions_interval=timedelta(seconds=60),
+    )
 
 
 @pytest.mark.parametrize(("owner", "name"), [("owner_name", "agent.sessions"), ("owner name", "repo@name"), ("@owner", "repo:branch")])
@@ -139,3 +149,29 @@ name = "repo"
     missing = VALID.replace("repository_ids = [123456]", "repository_ids = [999]")
     with pytest.raises(ValueError, match="unknown repository"):
         config.load(write_config(tmp_path / "missing.toml", missing))
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ("", "missing configuration key: polling"),
+        ("projects_interval_seconds = 0", "projects_interval_seconds"),
+        ("reactions_interval_seconds = false", "reactions_interval_seconds"),
+        ("unknown = 1", "unknown polling key"),
+    ],
+)
+def test_requires_strict_positive_polling_configuration(
+    tmp_path: Path, change: str, message: str
+) -> None:
+    if not change:
+        text = VALID.replace(
+            "\n[polling]\nprojects_interval_seconds = 60\nreactions_interval_seconds = 60\n",
+            "\n",
+        )
+    elif change.startswith("unknown"):
+        text = VALID.replace("reactions_interval_seconds = 60", "reactions_interval_seconds = 60\n" + change)
+    else:
+        key = change.split(" = ")[0]
+        text = VALID.replace(next(line for line in VALID.splitlines() if line.startswith(key)), change)
+    with pytest.raises(ValueError, match=message):
+        config.load(write_config(tmp_path / "events.toml", text))
