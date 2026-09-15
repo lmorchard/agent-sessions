@@ -112,6 +112,14 @@ def _worker_id(command: str) -> str:
 
 
 def _reaction_bot_logins(read_login: str) -> frozenset[str]:
+    """Deliberately built from the read login alone.
+
+    `tests/events/test_poll_reactions.py` asserts that this daemon reads neither
+    `DRIVER_GH_LOGIN` nor `DRIVER_BOT_LOGINS`, and refuses to inspect the board
+    credential -- the events service does not inherit the driver's identity
+    configuration. Operator-listed machine logins therefore need their own entry in
+    `events.toml` if they should count as bots here; see the note on issue #275.
+    """
     return credentials.bot_logins(credentials.Credentials(login=read_login))
 
 

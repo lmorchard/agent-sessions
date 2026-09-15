@@ -32,10 +32,9 @@ def fetch_board_json(board: str, *, env: dict[str, str] | None = None) -> list[d
             if env is None
             else env
         )
-        token = read_env.get("GH_TOKEN") or read_env.get("GITHUB_TOKEN") or ""
         items = fetch_board_items(
             board,
-            token=token,
+            env=read_env,
             runner=subprocess.run,
         )
         say(f"board {board}: read {len(items)} items (advisory only; does not gate)")
@@ -74,10 +73,9 @@ def get_board_metadata(
     )
     for attempt in range(retries):
         try:
-            token = read_env.get("GH_TOKEN") or read_env.get("GITHUB_TOKEN") or ""
             project = fetch_project_fields(
                 f"{owner}/{number}",
-                token=token,
+                env=read_env,
                 runner=subprocess.run,
             )
             project_id = project["id"]

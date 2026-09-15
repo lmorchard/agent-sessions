@@ -339,7 +339,11 @@ def test_driver_board_items_use_the_direct_graphql_snapshot_shape() -> None:
         )
     )
 
-    items = fetch_board_items("owner/9", token="read-token", runner=runner)
+    items = fetch_board_items(
+        "owner/9",
+        env={"GH_TOKEN": "read-token", "GITHUB_TOKEN": "read-token"},
+        runner=runner,
+    )
 
     assert items == [
         {

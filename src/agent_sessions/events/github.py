@@ -286,11 +286,25 @@ class LiveTargetResolver:
     def __init__(
         self,
         *,
-        read_token: str,
+        read_token: str = "",
+        env: dict[str, str] | None = None,
         runner: Callable[..., Any] | None = None,
         stop_requested: Callable[[], bool] | None = None,
     ) -> None:
+        """Take either a prepared environment or a token, and prefer the environment.
+
+        `env` is what `credentials.driver_env`/`board_env` produced: it has already
+        decided which token variables should be present and which should be absent, so
+        it is used as given. `read_token` is the narrower input for callers that only
+        ever had a token, and it is resolved against `os.environ` through
+        `credentials.env_with_token`, which applies the same fail-closed rule.
+
+        The distinction matters because the fallback base is `os.environ`, which has
+        decided nothing. Treating an absent token as "leave whatever is there" is how a
+        scrubbed environment used to turn back into the operator's ambient credential.
+        """
         self.read_token = read_token
+        self.base_env = None if env is None else dict(env)
         self.runner = subprocess.run if runner is None else runner
         self.stop_requested = (lambda: False) if stop_requested is None else stop_requested
 
@@ -299,24 +313,16 @@ class LiveTargetResolver:
         command: list[str],
         *,
         missing_is_permanent: bool = False,
-        token: str | None = None,
     ) -> JSONValue:
         if self.stop_requested():
             raise GitHubReadStopped("GitHub read stopped before starting a subprocess")
-        env = dict(os.environ)
-        credential = self.read_token if token is None else token
-        # Absent credential means *remove* the inherited one, never fall through to it.
-        # `credentials.driver_env` pops these vars when no read token is configured, and
-        # its docstring makes that the contract: "A missing read token removes inherited
-        # active credentials." Callers that flatten a scrubbed env down to a token string
-        # (`driver/board.py`) lose the pop, so the scrub has to survive here too -- with
-        # `dict(os.environ)` as the base, skipping the install would hand the child `gh`
-        # the operator's ambient token, which may be the write token.
-        for var in credentials.AGENT_TOKEN_VARS:
-            if credential:
-                env[var] = credential
-            else:
-                env.pop(var, None)
+        # A prepared environment is authoritative, including its absences. Only the
+        # token-only path has to be resolved, and it fails closed via `env_with_token`.
+        env = (
+            dict(self.base_env)
+            if self.base_env is not None
+            else credentials.env_with_token(dict(os.environ), self.read_token)
+        )
         try:
             result = self.runner(command, capture_output=True, text=True, env=env, timeout=60)
         except subprocess.TimeoutExpired as error:
@@ -783,16 +789,20 @@ def project_items_command(board: str) -> list[str]:
 def fetch_board_items(
     board: str,
     *,
-    token: str,
+    env: dict[str, str],
     runner: Callable[..., Any] | None = None,
     stop_requested: Callable[[], bool] | None = None,
 ) -> list[dict[str, JSONValue]]:
-    """Read a complete board snapshot without converting failures to emptiness."""
+    """Read a complete board snapshot without converting failures to emptiness.
+
+    Takes the caller's prepared environment rather than a token, so a scrubbed
+    environment stays scrubbed instead of being rebuilt from `os.environ`.
+    """
     if "/" not in board:
         raise GitHubTransientError("board identifier is malformed")
     owner, number = board.split("/", 1)
     resolver = LiveTargetResolver(
-        read_token=token,
+        env=env,
         runner=runner,
         stop_requested=stop_requested,
     )
@@ -886,14 +896,18 @@ def _driver_board_item(
 def fetch_project_fields(
     board: str,
     *,
-    token: str,
+    env: dict[str, str],
     runner: Callable[..., Any] | None = None,
 ) -> dict[str, JSONValue]:
-    """Read a complete Project field list through direct GraphQL."""
+    """Read a complete Project field list through direct GraphQL.
+
+    Takes the caller's prepared environment rather than a token, for the reason given
+    on `fetch_board_items`.
+    """
     if "/" not in board:
         raise GitHubTransientError("board identifier is malformed")
     owner, number = board.split("/", 1)
-    resolver = LiveTargetResolver(read_token=token, runner=runner)
+    resolver = LiveTargetResolver(env=env, runner=runner)
     pages = resolver._graphql_pages(
         _PROJECT_FIELDS_QUERY,
         subject="project fields",

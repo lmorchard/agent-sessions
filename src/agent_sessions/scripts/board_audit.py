@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -193,8 +194,13 @@ def collect(owner: str, project: int, repo: str) -> tuple[list[BoardItem], dict[
     """Fetch and normalize the bounded GitHub state required for an audit."""
     board = f"{owner}/{project}"
     try:
-        field_payload = fetch_project_fields(board, token="")
-        item_payload = fetch_board_items(board, token="")
+        # The operator's own environment, named rather than implied. This runs from
+        # `make board-audit`, not from a hosted run, so it reads with whatever
+        # credential the operator already has -- including `gh`'s stored login when no
+        # token variable is set. `token=""` used to express that by accident.
+        audit_env = dict(os.environ)
+        field_payload = fetch_project_fields(board, env=audit_env)
+        item_payload = fetch_board_items(board, env=audit_env)
     except GitHubError as error:
         raise AuditError(f"board query failed: {error}") from error
     field_records = bounded_records(

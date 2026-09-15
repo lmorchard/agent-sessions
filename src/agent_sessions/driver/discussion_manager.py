@@ -126,7 +126,19 @@ def get_or_create_daily_discussion(
         ["discussion", "list", "--repo", repo, "--category", category_name, "--json", "title,url"],
         env=read_env,
     )
-    if rc == 0 and stdout.strip():
+    # A failed list is not an empty list. Since the read and the create use different
+    # credentials, they can disagree -- a read credential that cannot list discussions
+    # alongside a write credential that can create them makes the fallthrough below
+    # create a fresh thread on *every* run. Absent is the only state that may create.
+    if rc != 0:
+        print(
+            f"discussion list failed for {repo}; not creating a duplicate "
+            f"(cannot distinguish absent from unreadable)",
+            file=sys.stderr,
+        )
+        return ""
+
+    if stdout.strip():
         try:
             data = json.loads(stdout)
             discussions = data if isinstance(data, list) else data.get("discussions", [])
@@ -136,7 +148,7 @@ def get_or_create_daily_discussion(
         except Exception:
             pass
 
-    # Create if not found
+    # Create if genuinely not found
     rc, stdout, _ = _run_gh_with_optional_env(
         ["discussion", "create", "--repo", repo, "--category", category_name, "--title", title, "--body", body],
         env=write_env,

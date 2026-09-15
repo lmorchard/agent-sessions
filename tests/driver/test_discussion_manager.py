@@ -127,6 +127,60 @@ def test_get_or_create_daily_discussion_uses_explicit_read_and_write_environment
     ]
 
 
+def test_a_failed_list_does_not_create_a_duplicate_discussion():
+    """A failed list is not an empty list.
+
+    Read and create use different credentials, so they can disagree: a read credential
+    that cannot list discussions alongside a write credential that can create them made
+    the create-if-not-found fallthrough mint a fresh `Lab Notebook` thread on *every*
+    run. Absent is the only state that may create.
+    """
+    calls = []
+
+    def mock_run_gh(args, *, env):
+        calls.append(args)
+        if "list" in args:
+            return 1, "", "HTTP 403: Resource not accessible by personal access token"
+        if "create" in args:
+            return 0, "https://github.com/owner/repo/discussions/12\n", ""
+        return 1, "", "error"
+
+    with patch(f"{MODULE_PATH}.run_gh", side_effect=mock_run_gh):
+        url = get_or_create_daily_discussion(
+            "owner/repo",
+            read_env={"GH_TOKEN": "read-token"},
+            write_env={"GH_TOKEN": "write-token"},
+        )
+
+    assert url == ""
+    assert not any("create" in args for args in calls), (
+        "an unreadable list must not reach the create call"
+    )
+
+
+def test_an_empty_list_still_creates():
+    """The guard must not block the case it was never about."""
+    created = []
+
+    def mock_run_gh(args, *, env):
+        if "list" in args:
+            return 0, "[]", ""
+        if "create" in args:
+            created.append(args)
+            return 0, "https://github.com/owner/repo/discussions/13\n", ""
+        return 1, "", "error"
+
+    with patch(f"{MODULE_PATH}.run_gh", side_effect=mock_run_gh):
+        url = get_or_create_daily_discussion(
+            "owner/repo",
+            read_env={"GH_TOKEN": "read-token"},
+            write_env={"GH_TOKEN": "write-token"},
+        )
+
+    assert url == "https://github.com/owner/repo/discussions/13"
+    assert len(created) == 1
+
+
 def test_post_start():
     calls = []
 

@@ -117,29 +117,84 @@ def test_present_read_credential_replaces_the_inherited_token(monkeypatch) -> No
         assert runner.env[var] == "READ-ONLY"
 
 
-def test_an_explicit_token_argument_also_replaces_the_inherited_token(monkeypatch) -> None:
-    """The `token=` override is how board reads arrive; it must not widen the boundary."""
+def test_a_supplied_environment_is_used_as_given(monkeypatch) -> None:
+    """The env came from `credentials.*_env`, which already decided what belongs."""
     for var in credentials.AGENT_TOKEN_VARS:
         monkeypatch.setenv(var, "AMBIENT-WRITE-TOKEN")
     runner = CapturingRunner()
 
-    LiveTargetResolver(read_token="", runner=runner)._read(
-        ["gh", "api", "graphql"], token="BOARD-TOKEN"
-    )
+    LiveTargetResolver(
+        env={"GH_TOKEN": "BOARD-TOKEN", "GITHUB_TOKEN": "BOARD-TOKEN", "PATH": "/usr/bin"},
+        runner=runner,
+    )._read(["gh", "api", "graphql"])
 
     assert runner.env is not None
     for var in credentials.AGENT_TOKEN_VARS:
         assert runner.env[var] == "BOARD-TOKEN"
+    assert runner.env["PATH"] == "/usr/bin"
 
 
-def test_an_empty_token_argument_scrubs_rather_than_inheriting(monkeypatch) -> None:
-    """`board.py` flattens a scrubbed env to `""`; that must not resolve to inherit."""
+def test_a_supplied_environments_absences_are_honoured(monkeypatch) -> None:
+    """This is the case `driver/board.py` produces when no read token is configured.
+
+    `credentials.driver_env` pops the token variables to fail closed. Flattening that
+    environment to a bare token string lost the distinction between "no token" and
+    "empty token", and rebuilding from `os.environ` reinstated the operator's ambient
+    credential -- possibly the write token. A supplied environment is now passed
+    through, so an absence stays an absence.
+    """
     for var in credentials.AGENT_TOKEN_VARS:
         monkeypatch.setenv(var, "AMBIENT-WRITE-TOKEN")
     runner = CapturingRunner()
 
-    LiveTargetResolver(read_token="", runner=runner)._read(["gh", "api", "graphql"], token="")
+    scrubbed = credentials.driver_env(dict(__import__("os").environ), credentials.Credentials())
+    assert all(var not in scrubbed for var in credentials.AGENT_TOKEN_VARS), (
+        "precondition: driver_env with no read token must scrub"
+    )
+
+    LiveTargetResolver(env=scrubbed, runner=runner)._read(["gh", "api", "graphql"])
 
     assert runner.env is not None
     for var in credentials.AGENT_TOKEN_VARS:
-        assert var not in runner.env
+        assert var not in runner.env, f"{var} leaked into the child environment"
+
+
+def test_env_with_token_installs_and_removes() -> None:
+    base = {"GH_TOKEN": "AMBIENT", "GITHUB_TOKEN": "AMBIENT", "PATH": "/bin"}
+
+    installed = credentials.env_with_token(base, "READ-ONLY")
+    removed = credentials.env_with_token(base, "")
+
+    assert all(installed[var] == "READ-ONLY" for var in credentials.AGENT_TOKEN_VARS)
+    assert all(var not in removed for var in credentials.AGENT_TOKEN_VARS)
+    assert installed["PATH"] == removed["PATH"] == "/bin"
+    assert base["GH_TOKEN"] == "AMBIENT", "must not mutate the caller's environment"
+
+
+def test_board_fetchers_pass_the_environment_through(monkeypatch) -> None:
+    """The regression that started this: an env reaching the child unflattened."""
+    from agent_sessions.events import github
+
+    for var in credentials.AGENT_TOKEN_VARS:
+        monkeypatch.setenv(var, "AMBIENT-WRITE-TOKEN")
+    seen: list[dict[str, str]] = []
+
+    def runner(command, **kwargs):  # noqa: ANN001, ANN003
+        seen.append(dict(kwargs["env"]))
+
+        class Completed:
+            returncode = 0
+            stdout = '{"data": {"user": {"projectV2": {"fields": {"nodes": [], '
+            stdout += '"pageInfo": {"hasNextPage": false, "endCursor": null}}}}}}'
+            stderr = ""
+
+        return Completed()
+
+    try:
+        github.fetch_project_fields("owner/9", env={"PATH": "/bin"}, runner=runner)
+    except Exception:  # noqa: BLE001 -- the payload shape is not what is under test
+        pass
+
+    assert seen, "the fetcher never invoked the runner"
+    for var in credentials.AGENT_TOKEN_VARS:
+        assert var not in seen[0], f"{var} leaked past an environment that omitted it"

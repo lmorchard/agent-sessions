@@ -708,7 +708,7 @@ def _board_probes(
         try:
             response = fetch_project_fields(
                 board.key,
-                token=token,
+                env=credentials.env_with_token(dict(environ), token),
                 runner=runner,
             )
         except ProjectFieldsIncomplete:

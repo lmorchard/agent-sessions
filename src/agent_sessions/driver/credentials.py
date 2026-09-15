@@ -497,6 +497,28 @@ def repository_write_env(
     return env
 
 
+def env_with_token(base_env: dict[str, str], token: str) -> dict[str, str]:
+    """`base_env` with `token` installed, or with the token variables *removed*.
+
+    The removal is the point. Every accessor in this module that omits a token does so
+    deliberately -- `driver_env`'s docstring calls it out -- but a caller that flattens
+    one of those environments down to a bare string loses the distinction, because an
+    absent token and an empty string are the same value. Rebuilding from `os.environ`
+    then silently reinstates whatever the operator happens to be carrying, which may be
+    the write token.
+
+    So callers that genuinely have only a token say so through here, and get the same
+    fail-closed rule the accessors apply.
+    """
+    env = dict(base_env)
+    for var in AGENT_TOKEN_VARS:
+        if token:
+            env[var] = token
+        else:
+            env.pop(var, None)
+    return env
+
+
 def board_env(base_env: dict[str, str], creds: Credentials) -> dict[str, str]:
     """Environment for executing gh project board operations."""
     env = dict(base_env)
