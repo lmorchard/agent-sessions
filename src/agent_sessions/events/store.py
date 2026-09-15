@@ -179,11 +179,35 @@ class QueueStore:
 
     @classmethod
     def open(cls, path: Path, *, busy_timeout_ms: int) -> "QueueStore":
-        connection = cls._connect(path, busy_timeout_ms)
+        # `_connect` has to be inside the translation, not before it. Measured: under a
+        # competing exclusive lock the statement that fails first is `_connect`'s
+        # `PRAGMA journal_mode = WAL`, not the schema SELECT below -- so contention used
+        # to escape `open()` as a raw `sqlite3.OperationalError` while every deliberate
+        # failure here spoke the queue's own vocabulary. `migrate` keeps `_connect`'s
+        # untranslated behaviour; only opening is reclassified.
+        try:
+            connection = cls._connect(path, busy_timeout_ms)
+        except sqlite3.Error as error:
+            translated = _queue_error(error)
+            if translated is not None:
+                raise translated from error
+            raise
         try:
             versions = [row[0] for row in connection.execute("SELECT version FROM schema_migrations")]
         except sqlite3.Error as error:
             connection.close()
+            # A *locked* database is not an unmigrated one. `migrate`'s `BEGIN EXCLUSIVE`
+            # outlasting `busy_timeout` reaches here, and reporting that as
+            # "database is not migrated" tells the operator to migrate a database that
+            # is already migrated -- and, because `IncompatibleSchema` is terminal while
+            # `QueueBusy` is retried, turns a lock wait into a hard stop.
+            #
+            # Only contention is reclassified. Everything else -- a missing
+            # `schema_migrations` table above all, which is what an unmigrated database
+            # actually looks like -- keeps the original meaning.
+            translated = _queue_error(error)
+            if isinstance(translated, QueueBusy):
+                raise translated from error
             raise IncompatibleSchema("database is not migrated") from error
         if versions != list(range(1, CURRENT_SCHEMA_VERSION + 1)) or not schema_shape_is_current(
             connection

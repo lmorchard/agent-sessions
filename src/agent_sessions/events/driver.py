@@ -275,7 +275,21 @@ def select_work(
         manual_scan = _full_scan(ctx, runtime, now=now, worker_id=worker_id)
         if manual_scan is not None:
             return manual_scan
-        return QueueSelection(None, None, (), (), (), False)
+        # The scan lease was held by another worker. It exists to stop two workers
+        # running the same *full scan*, not to arbitrate an explicit operator request,
+        # and mutual exclusion on the issue itself is the git-ref lock's job -- which
+        # this run still takes. Returning an empty selection here reported "nothing
+        # eligible; no runs attempted", which is the opposite of what happened, for up
+        # to the claim lease. So fall through and select, the way the hard-deadline path
+        # below already does when it cannot take the lease.
+        return QueueSelection(
+            lifecycle.select_queue(ctx, approval_watch_runtime=runtime),
+            None,
+            (),
+            (),
+            (),
+            True,
+        )
 
     state = _repository_state(runtime, now)
     if (

@@ -1586,3 +1586,66 @@ def test_retry_delay_never_returns_a_negative_delay() -> None:
 
     assert events_driver.retry_delay(base, maximum, -3) == base
     assert events_driver.retry_delay(base, timedelta(0), 5) == timedelta(0)
+
+
+# --- an explicit --issue is not denied by the scan lease -----------------------------
+#
+# `select_work` routed `--issue N` and `--retry N` through `_full_scan`, which returns
+# None when another worker holds the scan lease, and the manual path turned that into an
+# empty `QueueSelection`. The operator saw "nothing eligible; no runs attempted" -- the
+# opposite of what happened -- for up to `claim_lease`, 300s in the example config.
+#
+# The scan lease stops two workers running the same *full scan*. It is not the mutual
+# exclusion for working an issue; the git-ref lock is, and the run still takes it. The
+# hard-deadline path below already falls through when it cannot take the lease, so this
+# is the pattern being matched rather than invented.
+
+
+def test_an_explicit_issue_still_selects_when_the_scan_lease_is_held(
+    tmp_path: Path, monkeypatch
+) -> None:
+    current = runtime(tmp_path)
+    ctx = context(tmp_path)
+    ctx.issue = "101"
+    assert current.store.acquire_scan_lease(
+        1,
+        worker_id="another-worker",
+        lease_until=NOW + timedelta(minutes=5),
+        now=NOW,
+    )
+    selected: list[object] = []
+
+    def fake_select_queue(inner_ctx, **_kwargs):
+        selected.append(inner_ctx)
+        return SimpleNamespace(candidates=["101"], open_prs=[], board_item_ids={})
+
+    monkeypatch.setattr(events_driver.lifecycle, "select_queue", fake_select_queue)
+
+    result = select_work(ctx, current, now=NOW, worker_id="me")
+
+    assert selected, "the explicit request never reached selection"
+    assert result.selection is not None
+    assert result.selection.candidates == ["101"]
+    assert result.used_full_scan is True
+
+
+def test_a_queue_run_without_an_explicit_issue_still_respects_the_scan_lease(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Non-vacuity: the lease still governs the unattended path it was built for."""
+    current = runtime(tmp_path)
+    ctx = context(tmp_path)
+    assert current.store.acquire_scan_lease(
+        1,
+        worker_id="another-worker",
+        lease_until=NOW + timedelta(minutes=5),
+        now=NOW,
+    )
+    def fake_select_queue(inner_ctx, **_kwargs):
+        return SimpleNamespace(candidates=["999"], open_prs=[], board_item_ids={})
+
+    monkeypatch.setattr(events_driver.lifecycle, "select_queue", fake_select_queue)
+
+    result = select_work(ctx, current, now=NOW, worker_id="me")
+
+    assert result.used_full_scan is False, "a held lease must still block the full scan"

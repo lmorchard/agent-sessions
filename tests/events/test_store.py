@@ -495,3 +495,59 @@ def test_synthetic_invalidations_keep_source_provenance(tmp_path: Path) -> None:
     assert store.enqueue_synthetic("poller", "board:owner/9", (invalidation(),), now=NOW) == 1
     row = store.connection.execute("SELECT source_kind, source_key FROM invalidations").fetchone()
     assert tuple(row) == ("poller", "board:owner/9")
+
+
+# --- a locked queue is not an unmigrated one -----------------------------------------
+#
+# `open()` wrapped every `sqlite3.Error` from the `schema_migrations` SELECT into
+# `IncompatibleSchema("database is not migrated")`, including a transient lock -- which
+# `migrate`'s `BEGIN EXCLUSIVE` outlasting `busy_timeout` produces. That told the
+# operator to migrate an already-migrated database, and because `IncompatibleSchema` is
+# terminal while `QueueBusy` is retried, it turned a lock wait into a hard stop.
+
+
+def test_open_reports_contention_as_busy_not_as_an_unmigrated_schema(tmp_path) -> None:
+    from agent_sessions.events.models import QueueBusy
+
+    path = tmp_path / "events.sqlite3"
+    QueueStore.migrate(path, busy_timeout_ms=10)
+
+    # A plain write transaction is *not* enough: in WAL mode readers are not blocked,
+    # which is why the first attempt at this test passed against the unfixed code.
+    # An exclusive locking mode is what a competing migration holds, and it locks
+    # readers out too.
+    holder = sqlite3.connect(path, isolation_level=None)
+    holder.execute("PRAGMA busy_timeout = 10")
+    holder.execute("PRAGMA locking_mode = EXCLUSIVE")
+    holder.execute("BEGIN EXCLUSIVE")
+    holder.execute("INSERT INTO schema_migrations VALUES (99, 'now')")
+    try:
+        with pytest.raises(QueueBusy):
+            QueueStore.open(path, busy_timeout_ms=10)
+    finally:
+        holder.execute("ROLLBACK")
+        holder.close()
+
+
+def test_open_still_reports_an_unmigrated_database_as_incompatible(tmp_path) -> None:
+    """The branch that was already right, now covered so the narrowing cannot widen."""
+    path = tmp_path / "empty.sqlite3"
+    sqlite3.connect(path).close()
+
+    with pytest.raises(IncompatibleSchema):
+        QueueStore.open(path, busy_timeout_ms=10)
+
+
+def test_open_succeeds_once_the_lock_is_released(tmp_path) -> None:
+    """Non-vacuity: the busy verdict has to be transient, not a permanent refusal."""
+    path = tmp_path / "events.sqlite3"
+    QueueStore.migrate(path, busy_timeout_ms=10)
+
+    holder = sqlite3.connect(path, isolation_level=None)
+    holder.execute("PRAGMA locking_mode = EXCLUSIVE")
+    holder.execute("BEGIN EXCLUSIVE")
+    holder.execute("ROLLBACK")
+    holder.close()
+
+    store = QueueStore.open(path, busy_timeout_ms=10)
+    store.close()
