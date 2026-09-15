@@ -4,7 +4,7 @@ REPO   ?= lmorchard/decafclaw
 REPO_PATH ?= $(HOME)/devel/decafclaw
 BOARD  ?= lmorchard/6
 
-.PHONY: help doctor doctor-self check venv clean clean-venvs prune-state evidence board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly backend-permission-probe opencode-policy-contract lint typecheck
+.PHONY: help doctor doctor-self check venv clean clean-venvs prune-state prune-worktrees evidence board-audit driver-check driver-test gate-test park-test docs-check assertion-lint commit-lint guard-lint dry-run run loop watch watch-self run-self dry-run-self skill-readonly backend-permission-probe opencode-policy-contract lint typecheck
 
 help:
 	@echo "check            run every check -- the targets listed below, in one go"
@@ -17,6 +17,8 @@ help:
 	@echo "clean-venvs      remove per-worktree virtualenvs"
 	@echo "prune-state      drop old run dirs; dry run unless CONFIRM=1. WORKSPACES=1"
 	@echo "                 also prunes per-issue worktrees, skipping any that are dirty"
+	@echo "prune-worktrees  remove development worktrees whose PR merged; dry run unless"
+	@echo "                 CONFIRM=1. Keeps dirty ones; never deletes a branch"
 	@echo "evidence         what has actually run: phases, repos, outcomes, from the ledgers"
 	@echo "board-audit      audit this repo's live GitHub project (read-only)"
 	@echo "driver-check     scan the Bash compatibility launcher for merge commands"
@@ -167,6 +169,15 @@ KEEP_DAYS ?= 30
 prune-state:
 	@uv run python scripts/prune_run_state.py --keep-days $(KEEP_DAYS) \
 	  $(if $(WORKSPACES),--workspaces,) $(if $(CONFIRM),--confirm,)
+
+# The other pile: *development* worktrees, the ones a human made to work an issue. Dry run
+# by default; CONFIRM=1 to remove. The oracle is GitHub PR state, never ancestry -- this
+# repo squash-merges, so `git merge-base --is-ancestor` answers NO for nearly every merged
+# branch, and a by-hand pass on ancestry alone called 19 finished worktrees unmerged. Dirty
+# worktrees are kept and named. Branches are never deleted: `git worktree remove` discards
+# a checkout, so every commit survives and `git worktree add` brings the checkout back.
+prune-worktrees:
+	@uv run python scripts/prune_worktrees.py $(if $(CONFIRM),--confirm,)
 
 # The report CLAUDE.md tells you to cite instead of writing a number down. Reads every
 # per-repo runs.jsonl under the live state root; pass --repo owner/name or --state-dir to
