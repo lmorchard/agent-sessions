@@ -1051,3 +1051,189 @@ def test_cli_top_level_help_exposes_only_the_supported_commands(capsys) -> None:
         "migrate",
         "prune",
     }
+
+
+# --- doctor must not lie in either direction -----------------------------------------
+#
+# Two defects from the #275 review, and one correction to it. The review attributed
+# false corruption to the copied `-shm`; measured, that cannot happen -- the wal-index
+# header carries salts and a checksum that must match the WAL, and SQLite rebuilds it
+# when they do not. What was really reachable is the checkpoint race below, which turned
+# one vanished file into a hard failure of every database probe.
+
+
+def test_the_shm_is_never_copied_into_the_snapshot(tmp_path: Path, monkeypatch) -> None:
+    """Derived data. It is rebuilt for the copy, so copying it only adds disagreement."""
+    database = tmp_path / "events.sqlite3"
+    config_path = tmp_path / "events.toml"
+    _write_config(config_path, database)
+    operations.migrate(database, busy_timeout_ms=100)
+    Path(f"{database}-wal").write_bytes(b"")
+    Path(f"{database}-shm").write_bytes(b"")
+    copied: list[str] = []
+    real_copy = shutil.copy2
+
+    def tracking_copy(src, dst, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        copied.append(Path(src).name)
+        return real_copy(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(operations.shutil, "copy2", tracking_copy)
+
+    _doctor_report(config_path)
+
+    assert any(name.endswith(".sqlite3") for name in copied), copied
+    assert not any(name.endswith("-shm") for name in copied), copied
+
+
+def test_a_checkpoint_removing_the_wal_mid_copy_does_not_fail_every_probe(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The reachable half. `stat` found the WAL; a checkpoint removed it before the copy.
+
+    That raised `FileNotFoundError` out of the copy loop, and the `except OSError` handler
+    reported one hard `sqlite-open` failure -- dropping integrity, foreign keys, journal
+    mode, schema and every queue count behind a transient that had already resolved.
+    """
+    database = tmp_path / "events.sqlite3"
+    config_path = tmp_path / "events.toml"
+    _write_config(config_path, database)
+    operations.migrate(database, busy_timeout_ms=100)
+    Path(f"{database}-wal").write_bytes(b"")
+    real_copy = shutil.copy2
+
+    def vanishing_wal(src, dst, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        if str(src).endswith("-wal"):
+            raise FileNotFoundError(str(src))
+        return real_copy(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(operations.shutil, "copy2", vanishing_wal)
+
+    report = _doctor_report(config_path)
+
+    assert report.by_code("sqlite-open").status == "pass"
+    assert report.by_code("sqlite-schema").status == "pass"
+    assert report.by_code("sqlite-integrity").status == "pass"
+
+
+def test_doctor_reports_real_damage_after_the_retry(tmp_path: Path) -> None:
+    """The retry must not become a way to pass a genuinely corrupt database."""
+    database = tmp_path / "events.sqlite3"
+    config_path = tmp_path / "events.toml"
+    _write_config(config_path, database)
+    operations.migrate(database, busy_timeout_ms=100)
+    payload = bytearray(database.read_bytes())
+    payload[4096:8192] = b"\xde\xad\xbe\xef" * 1024
+    database.write_bytes(bytes(payload))
+
+    report = _doctor_report(config_path)
+
+    assert report.by_code("sqlite-integrity").status == "fail"
+    assert report.exit_code == 1
+
+
+# --- a broken credential helper is a failure, not a skip ------------------------------
+#
+# `exit_code` only fails on `fail`, so turning every resolver failure into a skip made
+# doctor exit 0 while the service could not authenticate at all.
+
+
+def _boom_resolver(_environ):  # noqa: ANN001, ANN202
+    raise RuntimeError("keychain refused: item not found")
+
+
+def test_a_configured_but_unresolvable_credential_fails_the_report(tmp_path: Path) -> None:
+    database = tmp_path / "events.sqlite3"
+    config_path = tmp_path / "events.toml"
+    _write_config(config_path, database)
+    operations.migrate(database, busy_timeout_ms=100)
+
+    report = operations.inspect_doctor(
+        config_path,
+        environ={"AGENT_GH_READ_TOKEN_CMD": "security find-generic-password -w"},
+        runner=_successful_doctor_runner,
+        read_credential_resolver=_boom_resolver,
+    )
+
+    probe = report.by_code("read-credential")
+    assert probe.status == "fail"
+    assert report.exit_code == 1
+    assert "RuntimeError" in probe.message
+    assert "keychain refused" not in probe.message, "the message can carry the secret"
+
+
+def test_an_unconfigured_credential_is_still_a_skip(tmp_path: Path) -> None:
+    """Nothing to resolve is not the same as resolution breaking."""
+    database = tmp_path / "events.sqlite3"
+    config_path = tmp_path / "events.toml"
+    _write_config(config_path, database)
+    operations.migrate(database, busy_timeout_ms=100)
+
+    report = operations.inspect_doctor(
+        config_path,
+        environ={},
+        runner=_successful_doctor_runner,
+        read_credential_resolver=_boom_resolver,
+    )
+
+    probe = report.by_code("read-credential")
+    assert probe.status == "skip"
+    assert report.exit_code == 0
+
+
+def test_a_whitespace_only_credential_variable_counts_as_unconfigured(
+    tmp_path: Path,
+) -> None:
+    """A variable holding only spaces is nothing configured, so it is a skip."""
+    database = tmp_path / "events.sqlite3"
+    config_path = tmp_path / "events.toml"
+    _write_config(config_path, database)
+    operations.migrate(database, busy_timeout_ms=100)
+
+    report = operations.inspect_doctor(
+        config_path,
+        environ={"AGENT_GH_READ_TOKEN": "   "},
+        runner=_successful_doctor_runner,
+        read_credential_resolver=lambda _: "  ",
+    )
+
+    assert report.by_code("read-credential").status == "skip"
+    assert report.exit_code == 0
+
+
+def test_a_configured_credential_resolving_to_nothing_fails(tmp_path: Path) -> None:
+    """Configured, resolver returned no error, and still produced no token.
+
+    A `_CMD` that exits 0 and prints nothing lands here, which is indistinguishable from
+    working right up until the first authenticated call.
+    """
+    database = tmp_path / "events.sqlite3"
+    config_path = tmp_path / "events.toml"
+    _write_config(config_path, database)
+    operations.migrate(database, busy_timeout_ms=100)
+
+    report = operations.inspect_doctor(
+        config_path,
+        environ={"AGENT_GH_READ_TOKEN_CMD": "printf ''"},
+        runner=_successful_doctor_runner,
+        read_credential_resolver=lambda _: "",
+    )
+
+    probe = report.by_code("read-credential")
+    assert probe.status == "fail"
+    assert report.exit_code == 1
+
+
+def test_a_resolvable_credential_still_passes(tmp_path: Path) -> None:
+    database = tmp_path / "events.sqlite3"
+    config_path = tmp_path / "events.toml"
+    _write_config(config_path, database)
+    operations.migrate(database, busy_timeout_ms=100)
+
+    report = operations.inspect_doctor(
+        config_path,
+        environ={"AGENT_GH_READ_TOKEN": "read-credential-value"},
+        runner=_successful_doctor_runner,
+        read_credential_resolver=lambda _: "read-credential-value",
+    )
+
+    assert report.by_code("read-credential").status == "pass"

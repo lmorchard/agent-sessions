@@ -176,6 +176,73 @@ def _query_one(connection: sqlite3.Connection, statement: str) -> Any:
     return None if row is None else row[0]
 
 
+def _copy_queue_snapshot(database: Path, wal_files: list[Path], target: Path) -> None:
+    """Copy the database and its WAL into `target`. Never the `-shm`.
+
+    The `-shm` is the wal-index: a derived cache, not data. SQLite rebuilds it for the
+    copy, so copying it buys nothing and omitting it removes a file that can disagree
+    with the WAL beside it.
+
+    **It is not, measured, a source of false corruption, and the review that prompted
+    this said otherwise.** A copied index cannot make a healthy database look damaged: the
+    wal-index header carries salts and a checksum that must match the WAL, and SQLite
+    rebuilds it when they do not. Verified by copying a database with a deliberately
+    corrupted `-shm` -- `integrity_check` returned `ok` and the schema was intact. So this
+    omission is hygiene, not the fix; the two changes below are the fix.
+
+    The WAL is copied best effort. A checkpoint can remove it between the `stat` that
+    found it and this copy, and in WAL mode the main file is always a valid database on
+    its own, so a vanished WAL is a *staler* snapshot rather than a failure. Previously
+    that race raised `FileNotFoundError` and dropped every database probe behind one hard
+    `sqlite-open` failure.
+
+    Nothing here opens the source, and that is a constraint rather than an oversight.
+    `VACUUM INTO` and `Connection.backup()` would give a genuinely atomic snapshot; both
+    were measured and both disqualify themselves, because each has to open the source and
+    a read-only open of a live WAL database rewrites the `-shm` read-marks -- and creates
+    a `-shm` where none existed. `test_doctor_does_not_mutate_an_existing_sqlite_source_set`
+    and `test_doctor_does_not_create_shm_for_a_valid_wal_only_source` forbid exactly that.
+    """
+    shutil.copy2(database, target / database.name)
+    for wal in wal_files:
+        try:
+            shutil.copy2(wal, target / wal.name)
+        except FileNotFoundError:
+            continue
+
+
+def _fresh_snapshot_integrity(database: Path, wal_files: list[Path]) -> bool:
+    """Take a second snapshot and re-run `integrity_check`. True only if it passes.
+
+    An unlocked copy can catch a checkpoint mid-flight, yielding a main file and a WAL
+    from either side of it. That is a *transient* inconsistency in the copy rather than
+    damage in the source, and one sample cannot tell them apart. So a first failure is
+    retried once from a fresh snapshot, and damage is reported only when it reproduces --
+    which is what damage does.
+
+    Stated honestly: this window was **not** reproduced. It is narrow and timing
+    dependent, and the cost of covering it is one extra copy on a path that has already
+    decided to report the most alarming result doctor can produce. Real damage still
+    fails, because it fails twice; `test_doctor_reports_real_damage_after_the_retry`
+    holds that end down.
+    """
+    with tempfile.TemporaryDirectory(prefix="agent-session-doctor-retry-") as retry_dir:
+        target = Path(retry_dir)
+        try:
+            _copy_queue_snapshot(database, wal_files, target)
+            connection = sqlite3.connect(
+                f"{(target / database.name).as_uri()}?mode=ro", isolation_level=None, uri=True
+            )
+        except (OSError, sqlite3.Error):
+            return False
+        try:
+            return [row[0] for row in connection.execute("PRAGMA integrity_check")] == ["ok"]
+        except sqlite3.Error:
+            return False
+        finally:
+            connection.close()
+
+
 def _sqlite_probes(loaded: EventsConfig) -> tuple[list[DoctorProbe], QueueStatus | None]:
     probes = [
         _database_path_probe(
@@ -183,7 +250,9 @@ def _sqlite_probes(loaded: EventsConfig) -> tuple[list[DoctorProbe], QueueStatus
         ),
         _database_path_probe(loaded.database, code="database-file", kind="file"),
     ]
-    sidecars: list[Path] = []
+    # Both sidecars are *reported* on; only the WAL is ever copied. See
+    # `_copy_queue_snapshot` for why the `-shm` is deliberately excluded.
+    wal_files: list[Path] = []
     for suffix, code in (("-wal", "database-wal"), ("-shm", "database-shm")):
         sidecar = Path(f"{loaded.database}{suffix}")
         try:
@@ -195,16 +264,15 @@ def _sqlite_probes(loaded: EventsConfig) -> tuple[list[DoctorProbe], QueueStatus
                 _database_path_probe(sidecar, code=code, kind="file")
             )
         else:
-            sidecars.append(sidecar)
+            if suffix == "-wal":
+                wal_files.append(sidecar)
             probes.append(
                 _database_path_probe(sidecar, code=code, kind="file")
             )
     snapshot = tempfile.TemporaryDirectory(prefix="agent-session-doctor-")
     snapshot_database = Path(snapshot.name) / loaded.database.name
     try:
-        shutil.copy2(loaded.database, snapshot_database)
-        for sidecar in sidecars:
-            shutil.copy2(sidecar, Path(snapshot.name) / sidecar.name)
+        _copy_queue_snapshot(loaded.database, wal_files, Path(snapshot.name))
     except OSError:
         snapshot.cleanup()
         probes.append(
@@ -244,7 +312,9 @@ def _sqlite_probes(loaded: EventsConfig) -> tuple[list[DoctorProbe], QueueStatus
             integrity = [
                 row[0] for row in connection.execute("PRAGMA integrity_check")
             ]
-            ready = integrity == ["ok"]
+            ready = integrity == ["ok"] or _fresh_snapshot_integrity(
+                loaded.database, wal_files
+            )
             probes.append(
                 DoctorProbe(
                     "sqlite-integrity",
@@ -485,6 +555,15 @@ def _success_clock_probes(
     return probes
 
 
+#: The credential is *configured* when either the value or its `_CMD` indirection is
+#: present. Used to tell "nothing to resolve" from "resolution broke", which is the
+#: difference between a skip and a failure.
+_READ_CREDENTIAL_VARS = (
+    credentials.READ_TOKEN_VAR,
+    credentials.READ_TOKEN_VAR + credentials.CMD_SUFFIX,
+)
+
+
 def _resolve_credential(
     code: str,
     environ: Mapping[str, str],
@@ -492,12 +571,42 @@ def _resolve_credential(
     *,
     remedy: str,
 ) -> tuple[str, DoctorProbe]:
+    """Resolve the read credential, distinguishing absent configuration from a break.
+
+    Every resolver failure used to become `status="skip"`, and `DoctorReport.exit_code`
+    only fails on `fail`. So a broken credential helper -- an unreadable key file, a
+    keychain that refuses, a `_CMD` that exits non-zero -- made every repository, board,
+    check-run and status probe report `skip`, nothing report `fail`, and
+    `agent-session-events doctor` exit **0** while the service could not authenticate at
+    all. A pre-startup check that passes when authentication is impossible is worse than
+    no check.
+
+    Absent configuration is still a skip: there is nothing to resolve and nothing broken.
+    Configured-but-unresolvable is a failure, and the exception type is named so the
+    operator can tell a missing file from a refused keychain. The type is all that is
+    reported -- a resolver failure can carry the secret in its message.
+    """
+    configured = any((environ.get(var) or "").strip() for var in _READ_CREDENTIAL_VARS)
     try:
         token = resolver(environ).strip()
-    except Exception:
+    except Exception as error:  # noqa: BLE001 -- doctor reports, it does not crash
+        if configured:
+            return "", DoctorProbe(
+                code,
+                "fail",
+                f"credential is configured but could not be resolved ({type(error).__name__})",
+                remedy,
+            )
         token = ""
     if not token:
-        return "", DoctorProbe(code, "skip", "credential is unavailable", remedy)
+        if configured:
+            return "", DoctorProbe(
+                code,
+                "fail",
+                "credential is configured but resolved to an empty value",
+                remedy,
+            )
+        return "", DoctorProbe(code, "skip", "credential is not configured", remedy)
     return token, DoctorProbe(
         code, "pass", "credential resolved without disclosure"
     )
