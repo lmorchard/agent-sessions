@@ -20,6 +20,8 @@ that is observable.
 
 from __future__ import annotations
 
+import json
+
 from agent_sessions.driver import credentials
 from agent_sessions.events.github import LiveTargetResolver, _is_confirmed_missing
 
@@ -184,7 +186,7 @@ def test_board_fetchers_pass_the_environment_through(monkeypatch) -> None:
 
         class Completed:
             returncode = 0
-            stdout = '{"data": {"user": {"projectV2": {"fields": {"nodes": [], '
+            stdout = '{"data": {"repositoryOwner": {"projectV2": {"fields": {"nodes": [], '
             stdout += '"pageInfo": {"hasNextPage": false, "endCursor": null}}}}}}'
             stderr = ""
 
@@ -260,3 +262,91 @@ def test_the_flag_is_read_from_the_document_not_a_list_of_names() -> None:
     """A name list beside the queries would be a second source of truth to drift."""
     assert _flag_for("query Q($owner:Int!){x}", "owner") == "-F"
     assert _flag_for("query Q($pr:String!){x}", "pr") == "-f"
+
+
+# --- boards must work for an organization owner, not only a user ---------------------
+#
+# Both project queries rooted at `user(login:$owner)` while `events/config.py` accepts
+# any owner. Verified live: `user(login:"cli")` returns `{"user": null}` with a NOT_FOUND
+# error, so an org-owned board degraded silently -- `fetch_board_json` logged UNREADABLE
+# and selection fell back to priority labels, `get_board_metadata` returned None so
+# `mark_board_in_progress` no-opped, and the Projects poller failed every interval. The
+# `gh project --owner` path this replaced handled both owner types.
+#
+# GraphQL cannot switch its root field on a value, so the queries now root at
+# `repositoryOwner`, which returns the `RepositoryOwner` interface, and spread a fragment
+# typed on `ProjectV2Owner`. Both User and Organization implement both interfaces, so one
+# document serves either owner with no duplicated selection set. Verified live against
+# both a user login and an organization login.
+
+
+def test_project_queries_are_owner_type_agnostic() -> None:
+    from agent_sessions.events.github import (
+        _PROJECT_FIELDS_QUERY,
+        _PROJECT_ITEMS_QUERY,
+    )
+
+    for query in (_PROJECT_ITEMS_QUERY, _PROJECT_FIELDS_QUERY):
+        document = query.document
+        assert "repositoryOwner(login:$owner)" in document, query.operation
+        assert "on ProjectV2Owner" in document, query.operation
+        assert "user(login:$owner)" not in document, query.operation
+
+
+def test_the_project_connection_paths_match_the_query_root() -> None:
+    """The path walks the response; if it disagrees with the root, every read fails."""
+    from agent_sessions.events.github import (
+        _GRAPHQL_CONNECTION_PATHS,
+        GraphQLOperation,
+    )
+
+    assert _GRAPHQL_CONNECTION_PATHS[GraphQLOperation.PROJECT_ITEMS] == (
+        "data",
+        "repositoryOwner",
+        "projectV2",
+        "items",
+    )
+    assert _GRAPHQL_CONNECTION_PATHS[GraphQLOperation.PROJECT_FIELDS] == (
+        "data",
+        "repositoryOwner",
+        "projectV2",
+        "fields",
+    )
+
+
+def test_an_organization_shaped_response_is_read_the_same_way() -> None:
+    """An Organization payload differs from a User one only by `__typename`."""
+    from agent_sessions.events import github
+
+    captured: list[list[str]] = []
+
+    def runner(command, **kwargs):  # noqa: ANN001, ANN003
+        captured.append(list(command))
+
+        class Completed:
+            returncode = 0
+            stdout = json.dumps(
+                {
+                    "data": {
+                        "repositoryOwner": {
+                            "__typename": "Organization",
+                            "projectV2": {
+                                "id": "PVT_org",
+                                "fields": {
+                                    "totalCount": 0,
+                                    "nodes": [],
+                                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                },
+                            },
+                        }
+                    }
+                }
+            )
+            stderr = ""
+
+        return Completed()
+
+    result = github.fetch_project_fields("someorg/4", env={"PATH": "/bin"}, runner=runner)
+
+    assert result["id"] == "PVT_org"
+    assert captured and "graphql" in captured[0]

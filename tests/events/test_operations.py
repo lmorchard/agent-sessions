@@ -80,7 +80,7 @@ def _successful_doctor_runner(
     elif command[:3] == ["gh", "api", "graphql"]:
         payload = {
             "data": {
-                "user": {
+                "repositoryOwner": {
                     "projectV2": {
                         "id": "PVT_1",
                         "fields": {
@@ -632,7 +632,7 @@ def test_doctor_skips_field_absence_when_the_board_field_list_is_incomplete(
                 json.dumps(
                     {
                         "data": {
-                            "user": {
+                            "repositoryOwner": {
                                 "projectV2": {
                                     "id": "PVT_1",
                                     "fields": {
@@ -701,7 +701,7 @@ def test_doctor_reads_project_fields_through_direct_graphql(tmp_path: Path) -> N
                 json.dumps(
                     {
                         "data": {
-                            "user": {
+                            "repositoryOwner": {
                                 "projectV2": {
                                     "id": "PVT_1",
                                     "fields": {

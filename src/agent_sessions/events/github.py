@@ -179,7 +179,12 @@ query ClosingIssues($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){
 """)
 _PROJECT_ITEMS_QUERY = GraphQLQuery(GraphQLOperation.PROJECT_ITEMS, """
 query ProjectItems($owner:String!,$number:Int!,$endCursor:String){
-  user(login:$owner){
+  repositoryOwner(login:$owner){
+    ...ProjectItemsBody
+  }
+  rateLimit { limit cost remaining resetAt }
+}
+fragment ProjectItemsBody on ProjectV2Owner {
     projectV2(number:$number){
       id
       items(first:100,after:$endCursor){
@@ -214,13 +219,16 @@ query ProjectItems($owner:String!,$number:Int!,$endCursor:String){
         pageInfo { hasNextPage endCursor }
       }
     }
-  }
-  rateLimit { limit cost remaining resetAt }
 }
 """)
 _PROJECT_FIELDS_QUERY = GraphQLQuery(GraphQLOperation.PROJECT_FIELDS, """
 query ProjectFields($owner:String!,$number:Int!,$endCursor:String){
-  user(login:$owner){
+  repositoryOwner(login:$owner){
+    ...ProjectFieldsBody
+  }
+  rateLimit { limit cost remaining resetAt }
+}
+fragment ProjectFieldsBody on ProjectV2Owner {
     projectV2(number:$number){
       id
       fields(first:100,after:$endCursor){
@@ -233,7 +241,6 @@ query ProjectFields($owner:String!,$number:Int!,$endCursor:String){
         pageInfo { hasNextPage endCursor }
       }
     }
-  }
 }
 """)
 _GRAPHQL_CONNECTION_PATHS = {
@@ -261,8 +268,8 @@ _GRAPHQL_CONNECTION_PATHS = {
         "pullRequest",
         "closingIssuesReferences",
     ),
-    GraphQLOperation.PROJECT_ITEMS: ("data", "user", "projectV2", "items"),
-    GraphQLOperation.PROJECT_FIELDS: ("data", "user", "projectV2", "fields"),
+    GraphQLOperation.PROJECT_ITEMS: ("data", "repositoryOwner", "projectV2", "items"),
+    GraphQLOperation.PROJECT_FIELDS: ("data", "repositoryOwner", "projectV2", "fields"),
 }
 _SUPPORTED_PROJECT_ITEM_TYPES = frozenset({"ISSUE", "PULL_REQUEST"})
 _UNSUPPORTED_PROJECT_ITEM_TYPES = frozenset({"DRAFT_ISSUE", "REDACTED"})
@@ -956,8 +963,8 @@ def fetch_project_fields(
     total_counts: set[int] = set()
     for page in pages:
         data = resolver._dict(page.get("data"), "project fields")
-        user = resolver._dict(data.get("user"), "project owner")
-        project = resolver._dict(user.get("projectV2"), "project")
+        owner_payload = resolver._dict(data.get("repositoryOwner"), "project owner")
+        project = resolver._dict(owner_payload.get("projectV2"), "project")
         project_id = project.get("id")
         connection = resolver._dict(project.get("fields"), "project fields")
         total_count = connection.get("totalCount")
@@ -1108,8 +1115,8 @@ def fetch_project_items(
                 or remaining <= 0
             ):
                 raise PollFailure("GitHub GraphQL rate limit is exhausted or malformed")
-            user = resolver._dict(data.get("user"), "project owner")
-            project = resolver._dict(user.get("projectV2"), "project")
+            owner_payload = resolver._dict(data.get("repositoryOwner"), "project owner")
+            project = resolver._dict(owner_payload.get("projectV2"), "project")
             items = resolver._dict(project.get("items"), "project items")
             page_info = resolver._dict(items.get("pageInfo"), "project pagination")
             if "hasNextPage" not in page_info or "endCursor" not in page_info:

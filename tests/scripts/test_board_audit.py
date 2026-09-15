@@ -394,7 +394,7 @@ def configure_gh_stub(tmp_path, monkeypatch, responses, failure=None):
                 }
                 nodes.append(node)
             response = {
-                "data": {"user": {"projectV2": {"id": "P1", "fields": {
+                "data": {"repositoryOwner": {"projectV2": {"id": "P1", "fields": {
                     "nodes": nodes,
                     "totalCount": response.get("totalCount", len(nodes)),
                     "pageInfo": {"hasNextPage": False, "endCursor": None},
@@ -437,7 +437,7 @@ def configure_gh_stub(tmp_path, monkeypatch, responses, failure=None):
                     },
                 })
             response = {
-                "data": {"user": {"projectV2": {"id": "P1", "items": {
+                "data": {"repositoryOwner": {"projectV2": {"id": "P1", "items": {
                     "nodes": nodes,
                     "pageInfo": {"hasNextPage": False, "endCursor": None},
                 }}}},

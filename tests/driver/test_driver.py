@@ -360,7 +360,7 @@ def test_mark_board_in_progress_retry_success(monkeypatch):
         stderr = ""
         stdout = json.dumps({
             "data": {
-                "user": {
+                "repositoryOwner": {
                     "projectV2": {
                         "id": "PVT_123",
                         "fields": {
@@ -431,7 +431,7 @@ def test_fetch_board_json_uses_direct_graphql_with_the_read_environment(monkeypa
             json.dumps(
                 {
                     "data": {
-                        "user": {
+                        "repositoryOwner": {
                             "projectV2": {
                                 "id": "PVT_1",
                                 "items": {
@@ -490,7 +490,7 @@ def test_mark_board_in_progress_failure_logs_stderr(monkeypatch):
         stderr = ""
         stdout = json.dumps({
             "data": {
-                "user": {
+                "repositoryOwner": {
                     "projectV2": {
                         "id": "PVT_123",
                         "fields": {

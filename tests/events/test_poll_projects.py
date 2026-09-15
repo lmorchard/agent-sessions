@@ -174,7 +174,7 @@ def project_page(
         items["pageInfo"] = page_info
     return {
         "data": {
-            "user": {"projectV2": {"id": "PVT_9", "items": items}},
+            "repositoryOwner": {"projectV2": {"id": "PVT_9", "items": items}},
             "rateLimit": {
                 "limit": 5000,
                 "cost": 1,

@@ -642,7 +642,7 @@ class FakeGitHub:
                 return graphql_result(
                     {
                         "data": {
-                            "user": {
+                            "repositoryOwner": {
                                 "projectV2": {
                                     "id": "PVT_kwHNVLfOAXqLIg",
                                     "items": {
@@ -663,7 +663,7 @@ class FakeGitHub:
                 return graphql_result(
                     {
                         "data": {
-                            "user": {
+                            "repositoryOwner": {
                                 "projectV2": {
                                     "id": "PVT_kwHNVLfOAXqLIg",
                                     "fields": {

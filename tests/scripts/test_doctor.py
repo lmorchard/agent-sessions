@@ -82,7 +82,7 @@ class FakeGh:
                 return result(1, "", "GraphQL: Could not resolve to a ProjectV2")
             return result(
                 0,
-                '{"data":{"user":{"projectV2":{"id":"P1","items":'
+                '{"data":{"repositoryOwner":{"projectV2":{"id":"P1","items":'
                 '{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}},'
                 '"rateLimit":{"remaining":4999,"resetAt":"2099-01-01T00:00:00Z"}}}',
             )
