@@ -1757,12 +1757,13 @@ def _queue_failure_types():
     import sqlite3
 
     from agent_sessions.events.models import (
+        ClaimLost,
         IncompatibleSchema,
         QueueBusy,
         QueueUnavailable,
     )
 
-    return (QueueBusy, QueueUnavailable, IncompatibleSchema, sqlite3.Error)
+    return (ClaimLost, QueueBusy, QueueUnavailable, IncompatibleSchema, sqlite3.Error)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1850,11 +1851,28 @@ def main(argv: list[str] | None = None) -> int:
             and queue_selection is not None
             and queue_selection.selected_claim is not None
         ):
+            from agent_sessions.events.models import ClaimLost
+
             selected_claim = queue_selection.selected_claim
             selected_store = queue_runtime.store
 
-            def acknowledge_selected_claim() -> bool:
-                return selected_store.acknowledge(selected_claim)
+            def acknowledge_selected_claim() -> None:
+                # `acknowledge` reports a lost claim by *returning False*, not by
+                # raising, and this return value used to be discarded -- `after_inflight`
+                # is typed to return `object` and only its exceptions were acted on. So a
+                # run whose generation was bumped mid-selection, or whose lease had been
+                # taken by another worker, carried on: it incremented attempts and spent
+                # the agent on work somebody else held, leaving a stale `lease_owner`
+                # behind until expiry.
+                #
+                # Raising puts it on the path the queue-failure handler already
+                # implements -- release the lock, fall back to a full scan, attempt
+                # nothing -- and on the path the inflight consumer already implements,
+                # which unlinks the marker before re-raising.
+                if not selected_store.acknowledge(selected_claim):
+                    raise ClaimLost(
+                        "the selected claim was reacquired by another worker"
+                    )
 
             after_inflight = acknowledge_selected_claim
         try:

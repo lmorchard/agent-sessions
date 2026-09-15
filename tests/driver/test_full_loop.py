@@ -1687,6 +1687,71 @@ def test_selected_ack_database_failure_falls_back_before_starting_one_agent(
     assert row["lease_owner"] is not None
 
 
+
+def test_a_claim_lost_to_another_worker_degrades_instead_of_running_on_it(
+    loop, monkeypatch
+):
+    """The defect itself: `acknowledge` returning False, not raising.
+
+    A raising `acknowledge` was already covered. Returning False was not, and it is the
+    branch the store actually takes when the generation was bumped mid-selection or the
+    lease was lost -- the conditional DELETE simply matches no row. The boolean was
+    discarded, so the run carried on: attempts incremented and the agent spent on work
+    another worker held.
+
+    The expected behaviour is the queue-failure path, the same one a raising
+    `acknowledge` takes: release, degrade, fall back to a full scan. The issue may well
+    still be eligible and get worked -- what must not happen is working it *on the stale
+    claim*.
+    """
+    database = loop.tmp_path / "claim-lost.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=100)
+    store = QueueStore.open(database, busy_timeout_ms=100)
+    store.register_repositories((RepositoryIdentity(1, "owner", "repo"),))
+    assert store.acquire_scan_lease(
+        1,
+        worker_id="seed",
+        lease_until=FROZEN + timedelta(minutes=1),
+        now=FROZEN,
+    )
+    store.finish_scan(1, worker_id="seed", succeeded=True, now=FROZEN)
+    store.enqueue_synthetic(
+        "test",
+        "claim-lost",
+        (Invalidation(1, "issue", "101", "test"),),
+        now=FROZEN,
+    )
+    settings = _events_config(database, busy_timeout_ms=100)
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent(stream=agent_stream(final="Fallback run."))
+    acknowledged: list[bool] = []
+
+    def lost(*_args, **_kwargs) -> bool:
+        acknowledged.append(False)
+        return False
+
+    monkeypatch.setattr(QueueStore, "acknowledge", lost)
+
+    code, out = loop.run(
+        gh,
+        agent=agent,
+        argv=["--events-config", str(settings)],
+    )
+
+    assert code == 0
+    assert acknowledged, "the acknowledge path was never reached"
+    assert not (loop.state_dir / "inflight.json").exists()
+    degraded = [
+        line
+        for line in loop.last_stderr.splitlines()
+        if '"event": "driver_queue_degraded"' in line
+    ]
+    assert len(degraded) == 1, loop.last_stderr
+
+
 def test_selected_ack_failure_at_attempt_two_does_not_loop_break_before_backend(
     loop, monkeypatch
 ):
@@ -2326,3 +2391,96 @@ def test_request_review_records_a_reviewer_request_and_spends_nothing(loop):
     assert row["phase"] == "request_review"
     assert row["cost_usd"] == 0.0
     assert row["session_id"] == "deterministic"
+
+
+def test_a_lost_claim_removes_the_marker_and_never_starts_the_backend(loop):
+    """`acknowledge` reports a lost claim by returning False, not by raising.
+
+    That return value was discarded -- `after_inflight` is typed to return `object` and
+    only its exceptions were acted on -- so a run whose generation was bumped
+    mid-selection, or whose lease another worker had taken, incremented attempts and
+    spent the agent on work it did not hold. `ClaimLost` puts it on the queue-failure
+    path that already releases the lock and falls back to a full scan.
+    """
+    from agent_sessions.events.models import ClaimLost
+
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent()
+    loop.monkeypatch.setattr("subprocess.run", gh.run)
+    loop.monkeypatch.setattr("requests.post", gh.requests_post)
+    loop.monkeypatch.setattr(agent_runner, "run_agent", agent)
+    ctx = agent_session_driver.preflight(
+        [
+            "--repo",
+            REPO,
+            "--repo-path",
+            str(loop.repo_path),
+            "--skill-dir",
+            str(loop.skill_dir),
+            "--state-dir",
+            str(loop.state_dir),
+        ]
+    )
+
+    def lost_claim() -> None:
+        raise ClaimLost("the selected claim was reacquired by another worker")
+
+    with pytest.raises(ClaimLost):
+        agent_session_driver.invoke_agent(
+            ctx,
+            "101",
+            "execute",
+            loop.repo_path,
+            [],
+            {},
+            after_inflight=lost_claim,
+        )
+
+    assert not ctx.inflight_file.exists()
+    assert agent.calls == []
+
+
+def test_claim_lost_is_routed_as_a_queue_failure():
+    """Otherwise the raise escapes `main` uncaught instead of degrading to a full scan."""
+    from agent_sessions.events.models import ClaimLost
+
+    assert ClaimLost in lifecycle._queue_failure_types()
+
+
+def test_a_kept_claim_still_proceeds(loop):
+    """Non-vacuity: acknowledging successfully must not be turned into a failure."""
+    gh = FakeGitHub(
+        issues=[issue(101, body=spec_body("auto-ok"), labels=["P1"])],
+        board_items=[board_item(101)],
+    )
+    agent = StubAgent()
+    loop.monkeypatch.setattr("subprocess.run", gh.run)
+    loop.monkeypatch.setattr("requests.post", gh.requests_post)
+    loop.monkeypatch.setattr(agent_runner, "run_agent", agent)
+    ctx = agent_session_driver.preflight(
+        [
+            "--repo",
+            REPO,
+            "--repo-path",
+            str(loop.repo_path),
+            "--skill-dir",
+            str(loop.skill_dir),
+            "--state-dir",
+            str(loop.state_dir),
+        ]
+    )
+
+    agent_session_driver.invoke_agent(
+        ctx,
+        "101",
+        "execute",
+        loop.repo_path,
+        [],
+        {},
+        after_inflight=lambda: None,
+    )
+
+    assert agent.calls, "a kept claim must reach the backend"

@@ -198,3 +198,65 @@ def test_board_fetchers_pass_the_environment_through(monkeypatch) -> None:
     assert seen, "the fetcher never invoked the runner"
     for var in credentials.AGENT_TOKEN_VARS:
         assert var not in seen[0], f"{var} leaked past an environment that omitted it"
+
+
+# --- GraphQL variables: -f for strings, -F only for Int ------------------------------
+#
+# `gh`'s two flags are not interchangeable and each is wrong for the other's type.
+# Verified live against the API in both directions:
+#
+#     -F s=12345  against String!  ->  Could not coerce value 12345 to String
+#     -f s=12345  against String!  ->  accepted
+#     -f n=9      against Int!     ->  Could not coerce value "9" to Int
+#     -F n=9      against Int!     ->  accepted
+#
+# Everything used to go out as `-F`, the typed flag, which coerces a numeric-looking
+# value to a number. `owner/2024` is a valid login, so an all-digits owner broke every
+# GraphQL read for that repository while the `gh issue view --repo` paths kept working.
+
+
+def _flag_for(document: str, name: str) -> str:
+    from agent_sessions.events.github import _graphql_variable_flag
+
+    return _graphql_variable_flag(document, name)
+
+
+DOCUMENT = (
+    "query Thing($owner:String!,$repo:String!,$pr:Int!,$comment:ID!,$endCursor:String){x}"
+)
+
+
+def test_string_and_id_variables_use_the_untyped_flag() -> None:
+    for name in ("owner", "repo", "comment", "endCursor"):
+        assert _flag_for(DOCUMENT, name) == "-f", name
+
+
+def test_int_variables_use_the_typed_flag() -> None:
+    """`-F` has to stay for these: `-f n=9` against `Int!` is rejected by the API."""
+    assert _flag_for(DOCUMENT, "pr") == "-F"
+    assert _flag_for("query Q($number:Int!){x}", "number") == "-F"
+    assert _flag_for("query Q($issue:Int!){x}", "issue") == "-F"
+
+
+def test_an_undeclared_variable_falls_back_to_the_untyped_flag() -> None:
+    """The safe direction: GitHub reports an unused variable, rather than silent coercion."""
+    assert _flag_for(DOCUMENT, "unheard_of") == "-f"
+
+
+def test_a_numeric_looking_owner_is_still_sent_as_a_string() -> None:
+    """The regression, at the level of the built command."""
+    from agent_sessions.events.github import _PROJECT_ITEMS_QUERY, _graphql_command
+
+    command = _graphql_command(
+        _PROJECT_ITEMS_QUERY, (("owner", "2024"), ("number", "9")), end_cursor="CUR"
+    )
+
+    assert command[command.index("owner=2024") - 1] == "-f"
+    assert command[command.index("number=9") - 1] == "-F"
+    assert command[command.index("endCursor=CUR") - 1] == "-f"
+
+
+def test_the_flag_is_read_from_the_document_not_a_list_of_names() -> None:
+    """A name list beside the queries would be a second source of truth to drift."""
+    assert _flag_for("query Q($owner:Int!){x}", "owner") == "-F"
+    assert _flag_for("query Q($pr:String!){x}", "pr") == "-f"

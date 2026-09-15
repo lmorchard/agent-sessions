@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -761,6 +762,37 @@ class LiveTargetResolver:
         raise GitHubPermanentError(f"unsupported target kind: {claim.target_kind}")
 
 
+#: Matches a GraphQL variable declaration in a query document: `$pr:Int!`, `$owner:String!`.
+_GRAPHQL_VARIABLE_DECLARATION = re.compile(r"\$(\w+)\s*:\s*(\w+)")
+
+
+def _graphql_variable_flag(document: str, name: str) -> str:
+    """`-F` for an `Int` variable, `-f` for everything else.
+
+    `gh`'s two flags are not interchangeable, and each is wrong for the other's type.
+    Verified live against the API, both directions:
+
+        -F s=12345  against String!  ->  Could not coerce value 12345 to String
+        -f s=12345  against String!  ->  accepted
+        -f n=9      against Int!     ->  Could not coerce value "9" to Int
+        -F n=9      against Int!     ->  accepted
+
+    Every variable used to go out as `-F`, the *typed* flag, which coerces a
+    numeric-looking value to a number. `owner`, `repo`, `comment` and `endCursor` are
+    `String`/`ID`, so an owner whose login is all digits -- `owner/2024` is a valid
+    login -- broke every GraphQL read for that repository while the `gh issue view
+    --repo` paths kept working, making the failure partial and confusing.
+
+    The type is read from the document's own declaration rather than from a list of
+    names kept beside it. A list would be a second source of truth that a new variable
+    could silently fall out of; here adding `$foo:Int!` to a query is sufficient. An
+    undeclared name falls back to `-f`, which is the safe direction: GitHub reports an
+    unused variable, rather than a string being silently turned into a number.
+    """
+    declared = dict(_GRAPHQL_VARIABLE_DECLARATION.findall(document))
+    return "-F" if declared.get(name, "").startswith("Int") else "-f"
+
+
 def _graphql_command(
     query: GraphQLQuery,
     variables: tuple[tuple[str, str], ...],
@@ -769,9 +801,11 @@ def _graphql_command(
 ) -> list[str]:
     command = ["gh", "api", "graphql", "-f", f"query={query.document}"]
     for key, value in variables:
-        command.extend(["-F", f"{key}={value}"])
+        command.extend([_graphql_variable_flag(query.document, key), f"{key}={value}"])
     if end_cursor:
-        command.extend(["-F", f"endCursor={end_cursor}"])
+        command.extend(
+            [_graphql_variable_flag(query.document, "endCursor"), f"endCursor={end_cursor}"]
+        )
     return command
 
 

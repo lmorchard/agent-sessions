@@ -192,6 +192,17 @@ class QueueUnavailable(RuntimeError):
     pass
 
 
+class ClaimLost(RuntimeError):
+    """The claim this run selected is no longer ours to work.
+
+    `QueueStore.acknowledge` is a conditional delete guarded on the claim's generation
+    and lease owner. It returns False -- without raising -- when the generation was
+    bumped mid-selection or the lease expired and another worker took it. That is a
+    normal race in a multi-worker deployment, not a database fault, so it gets its own
+    name rather than borrowing `QueueBusy`, whose subject is lock contention.
+    """
+
+
 class IncompatibleSchema(RuntimeError):
     pass
 
