@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -949,3 +950,41 @@ def test_poll_projects_cli_never_logs_failed_read_credential_command_output(
     assert "exit" in logged and "17" in logged
     assert stdout_secret not in logged
     assert stderr_secret not in logged
+
+
+def test_a_busy_queue_while_acquiring_the_board_lease_is_recorded_not_raised(
+    tmp_path: Path,
+) -> None:
+    """The projects half of the same classification fix.
+
+    `acquire_poller_lease` sat outside the pass's try, so contention with the driver's
+    own write transaction reached `DaemonRuntime._run` by raising -- where a raised
+    exception deliberately kills the poll task and makes the daemon unready. That signal
+    is reserved for a bug; a lock wait is a normal poll error and has to be recorded and
+    retried, which is what `docs/events.md` promises.
+    """
+    from agent_sessions.events.models import QueueBusy
+
+    inner = migrated(tmp_path)
+
+    class Busy:
+        def __getattr__(self, name: str):  # noqa: ANN204
+            if name == "acquire_poller_lease":
+                def fail(*_args, **_kwargs):
+                    raise QueueBusy("queue database is busy")
+
+                return fail
+            return getattr(inner, name)
+
+    result = poll_projects_once(
+        config(tmp_path / "events.sqlite3"),
+        cast(QueueStore, Busy()),
+        "read-token",
+        worker_id="w1",
+        now=NOW,
+        fetcher=lambda *_a: pytest.fail("the fetch must not run without a lease"),
+    )
+
+    assert result.errors and "busy" in result.errors[0]
+    assert result.attempted == 0
+    assert result.invalidations == 0

@@ -5,6 +5,7 @@ import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -668,3 +669,118 @@ def test_poll_reactions_cli_runs_one_pass_with_only_the_read_credential(
     assert "private-extra-bot" not in calls[0][1]
     assert resolved_logins == ["read-token"]
     assert "attempted=1" in capsys.readouterr().err
+
+
+# --- queue contention is a recorded error, never a raised one -------------------------
+#
+# `DaemonRuntime._run` lets a raised exception kill the poll task, which makes the daemon
+# unready. That is deliberate and asserted in `tests/events/test_daemon.py` -- it is the
+# fail-loud signal for a bug. But `list_watches` and `acquire_poller_lease` used to sit
+# outside the pass's try, so a three-second lock wait against the driver's own write
+# transaction reached the daemon by raising and was classified as a bug: the task died,
+# `ready()` returned False forever, and behind a readiness-gated proxy webhook ingestion
+# stopped until restart. `docs/events.md` promises the opposite for a normal poll error.
+#
+# The tests below pin both halves. Contention is recorded and the pass returns; a genuine
+# bug still propagates, so the fail-loud path is not widened into swallowing defects.
+
+
+class _Boom:
+    """A store whose watch listing or lease acquisition fails a chosen way."""
+
+    def __init__(self, inner: QueueStore, error: BaseException, *, on: str) -> None:
+        self._inner = inner
+        self._error = error
+        self._on = on
+
+    def __getattr__(self, name: str):  # noqa: ANN204
+        if name == self._on:
+            def fail(*_args, **_kwargs):
+                raise self._error
+
+            return fail
+        return getattr(self._inner, name)
+
+
+def _boom(inner: QueueStore, error: BaseException, *, on: str) -> QueueStore:
+    """A `_Boom` in the store's clothing. The cast is the usual test-double escape."""
+    return cast(QueueStore, _Boom(inner, error, on=on))
+
+
+def _watched(store: QueueStore) -> None:
+    store.upsert_watch(ApprovalWatch(REPOSITORY.identity.id, 42, "reaction", PARKED, None, None))
+
+
+def test_a_busy_queue_while_listing_watches_is_recorded_not_raised(tmp_path: Path) -> None:
+    store = migrated(tmp_path)
+    _watched(store)
+    from agent_sessions.events.models import QueueBusy
+
+    result = poll_reactions_once(
+        config(tmp_path / "events.sqlite3"),
+        _boom(store, QueueBusy("queue database is busy"), on="list_watches"),
+        "read-token",
+        BOTS,
+        worker_id="w1",
+        now=NOW,
+        fetcher=lambda *_a: (),
+    )
+
+    assert result.errors and "busy" in result.errors[0]
+    assert result.attempted == 0
+
+
+def test_a_locked_queue_while_listing_watches_is_recorded_not_raised(tmp_path: Path) -> None:
+    """Store *reads* bypass `_transaction`, so they raise sqlite3's own exception."""
+    import sqlite3
+
+    store = migrated(tmp_path)
+    _watched(store)
+
+    result = poll_reactions_once(
+        config(tmp_path / "events.sqlite3"),
+        _boom(store, sqlite3.OperationalError("database is locked"), on="list_watches"),
+        "read-token",
+        BOTS,
+        worker_id="w1",
+        now=NOW,
+        fetcher=lambda *_a: (),
+    )
+
+    assert result.errors and "locked" in result.errors[0]
+
+
+def test_a_busy_queue_while_acquiring_the_lease_is_recorded_not_raised(tmp_path: Path) -> None:
+    store = migrated(tmp_path)
+    _watched(store)
+    from agent_sessions.events.models import QueueBusy
+
+    result = poll_reactions_once(
+        config(tmp_path / "events.sqlite3"),
+        _boom(store, QueueBusy("queue database is busy"), on="acquire_poller_lease"),
+        "read-token",
+        BOTS,
+        worker_id="w1",
+        now=NOW,
+        fetcher=lambda *_a: (),
+    )
+
+    assert result.errors and "busy" in result.errors[0]
+    assert result.attempted == 0
+
+
+def test_a_genuine_bug_still_propagates_and_is_not_recorded(tmp_path: Path) -> None:
+    """The fail-loud path must stay open, or the daemon can never report a defect."""
+    store = migrated(tmp_path)
+    _watched(store)
+
+    with pytest.raises(AttributeError, match="programming error"):
+        poll_reactions_once(
+            config(tmp_path / "events.sqlite3"),
+            _boom(store, AttributeError("programming error"), on="list_watches"),
+            "read-token",
+            BOTS,
+            worker_id="w1",
+            now=NOW,
+            fetcher=lambda *_a: (),
+        )

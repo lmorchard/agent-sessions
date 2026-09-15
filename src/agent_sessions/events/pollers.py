@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -21,6 +22,8 @@ from .models import (
     JSONValue,
     PollFailure,
     ProjectItemProjection,
+    QueueBusy,
+    QueueUnavailable,
     RepositoryConfig,
 )
 from .store import QueueStore
@@ -106,6 +109,27 @@ def diff_project_snapshot(
     return tuple(invalidations.values())
 
 
+#: Queue conditions that are *normal* for a poll pass: contention with the driver's own
+#: write transaction, or a momentarily unavailable database. They have to be recorded
+#: and retried after the interval, which is what `docs/events.md` promises.
+#:
+#: The distinction is load-bearing rather than stylistic. `DaemonRuntime._run` lets a
+#: *raised* exception kill the poll task, which makes the daemon unready -- a deliberate
+#: fail-loud signal reserved for a bug, asserted in
+#: `tests/events/test_daemon.py::test_runtime_logs_result_failures_but_a_raised_pass_exception_makes_it_unready`.
+#: So anything reaching the daemon by raising is classified as a bug, and a three-second
+#: lock wait arriving that way became permanent unreadiness behind a readiness-gated
+#: proxy. Recording it keeps the classification honest in both directions: bugs still
+#: raise, still kill the task, and still unready the service.
+#:
+#: `sqlite3.Error` belongs here because the store's *read* methods query
+#: `self.connection` directly rather than through `_transaction`, so unlike its writes
+#: they raise sqlite3's own exceptions rather than the queue vocabulary. That is the
+#: house pattern for reads, not an oversight in one method -- do not narrow this tuple
+#: to the queue types without changing that first.
+QUEUE_POLL_CONDITIONS = (QueueBusy, QueueUnavailable, sqlite3.Error)
+
+
 def poll_projects_once(
     config: EventsConfig,
     store: QueueStore,
@@ -124,12 +148,18 @@ def poll_projects_once(
         if stop_requested():
             break
         source_key = f"projects:{board.key}"
-        if not store.acquire_poller_lease(
-            source_key,
-            worker_id=worker_id,
-            lease_until=now + config.claim_lease,
-            now=now,
-        ):
+        try:
+            leased = store.acquire_poller_lease(
+                source_key,
+                worker_id=worker_id,
+                lease_until=now + config.claim_lease,
+                now=now,
+            )
+        except QUEUE_POLL_CONDITIONS as error:
+            # No lease was taken, so there is nothing to release.
+            errors.append(f"{source_key}: {error}")
+            continue
+        if not leased:
             skipped += 1
             continue
         attempted += 1
@@ -215,16 +245,22 @@ def poll_reactions_once(
         if stop_requested():
             break
         repository_id = repository.identity.id
-        watches = store.list_watches(repository_id)
-        if not watches:
-            continue
         source_key = f"reactions:{repository_id}"
-        if not store.acquire_poller_lease(
-            source_key,
-            worker_id=worker_id,
-            lease_until=now + config.claim_lease,
-            now=now,
-        ):
+        try:
+            watches = store.list_watches(repository_id)
+            if not watches:
+                continue
+            leased = store.acquire_poller_lease(
+                source_key,
+                worker_id=worker_id,
+                lease_until=now + config.claim_lease,
+                now=now,
+            )
+        except QUEUE_POLL_CONDITIONS as error:
+            # No lease was taken, so there is nothing to release.
+            errors.append(f"{source_key}: {error}")
+            continue
+        if not leased:
             skipped += 1
             continue
         attempted += 1
