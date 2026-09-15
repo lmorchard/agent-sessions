@@ -83,6 +83,14 @@ class EventsConfig:
     polling: PollingPolicy
     repositories: tuple[RepositoryConfig, ...]
     boards: tuple[BoardConfig, ...]
+    #: Extra logins the reaction poller treats as machines, lowercased and deduped.
+    #: Optional and additive: `credentials.ALWAYS_BOT_LOGINS` and the daemon's own read
+    #: login are always included, so an absent key leaves the previous composition.
+    #:
+    #: Configured *here* rather than read from the driver's `DRIVER_BOT_LOGINS`, because
+    #: `tests/events/test_poll_reactions.py` asserts this daemon inherits none of the
+    #: driver's identity configuration. It has its own config file; this is that file.
+    bot_logins: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

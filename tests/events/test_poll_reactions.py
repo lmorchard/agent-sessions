@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -287,6 +288,13 @@ def test_a_human_thumbs_up_strictly_after_park_satisfies_the_predicate() -> None
 def test_reaction_observations_are_silent_first_then_emit_only_on_changes(
     tmp_path: Path,
 ) -> None:
+    """Silent first *because the first value here is False*, not because it is first.
+
+    The sequence below starts unapproved, which is the ordinary case: nothing has
+    happened yet. A fresh watch whose first observation is already True is a different
+    case and does invalidate -- see
+    `test_a_first_poll_seeing_approval_invalidates_immediately`.
+    """
     store = migrated(tmp_path)
     store.upsert_watch(watch())
     values = iter((False, False, True, False))
@@ -784,3 +792,133 @@ def test_a_genuine_bug_still_propagates_and_is_not_recorded(tmp_path: Path) -> N
             now=NOW,
             fetcher=lambda *_a: (),
         )
+
+
+# --- configured machine logins reach the poller, the driver's env still does not ------
+#
+# `bot_logins` is what `_approval_predicate` uses to decide whether an actor is a human,
+# and that decision can unpark an issue awaiting human judgment -- so a machine login
+# missing from the set is a machine that can approve. The set now comes from this
+# service's own `events.toml`, which is what keeps the boundary above intact:
+# `test_poll_reactions_cli_runs_one_pass_with_only_the_read_credential` still asserts
+# that `DRIVER_BOT_LOGINS` and `DRIVER_GH_LOGIN` are not read, and it is unchanged.
+
+
+def test_configured_bot_logins_reach_the_reaction_poller(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent_sessions.events import cli
+
+    database = tmp_path / "events.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=250)
+    loaded = replace(config(database), bot_logins=("renovate", "ci-account"))
+    calls: list[frozenset[str]] = []
+    monkeypatch.setattr(cli.config, "load", lambda _path: loaded)
+    monkeypatch.setattr(cli.credentials, "resolve_read_credential", lambda: "read-token")
+    monkeypatch.setattr(cli.credentials, "resolve_read_login", lambda _token: "agent-reader")
+    monkeypatch.setenv("DRIVER_BOT_LOGINS", "should-not-be-read")
+
+    def one_pass(_config, _store, _token, bot_logins, *, worker_id, now):
+        calls.append(bot_logins)
+        return PollRunResult(attempted=1, invalidations=0)
+
+    monkeypatch.setattr(cli.pollers, "poll_reactions_once", one_pass)
+
+    assert cli.main(["--config", str(tmp_path / "events.toml"), "poll-reactions"]) == 0
+
+    assert len(calls) == 1
+    honoured = calls[0]
+    assert "renovate" in honoured and "ci-account" in honoured
+    assert "agent-reader" in honoured, "the daemon's own login must stay a machine"
+    assert "github-actions[bot]" in honoured, "the always-bots must stay included"
+    assert "should-not-be-read" not in honoured, "the driver's env is still not read"
+
+
+def test_the_honoured_machine_logins_are_disclosed_at_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The set is opt-in, so an operator needs to see the belief without reading source."""
+    from agent_sessions.events import cli
+
+    database = tmp_path / "events.sqlite3"
+    QueueStore.migrate(database, busy_timeout_ms=250)
+    loaded = replace(config(database), bot_logins=("renovate",))
+    monkeypatch.setattr(cli.config, "load", lambda _path: loaded)
+    monkeypatch.setattr(cli.credentials, "resolve_read_credential", lambda: "read-token")
+    monkeypatch.setattr(cli.credentials, "resolve_read_login", lambda _token: "agent-reader")
+    monkeypatch.setattr(
+        cli.pollers,
+        "poll_reactions_once",
+        lambda *_a, **_k: PollRunResult(attempted=0),
+    )
+
+    assert cli.main(["--config", str(tmp_path / "events.toml"), "poll-reactions"]) == 0
+
+    err = capsys.readouterr().err
+    assert "machine logins honoured" in err
+    assert "renovate" in err
+
+
+def test_a_first_poll_seeing_approval_invalidates_immediately(tmp_path: Path) -> None:
+    """The finding-7 fix at the poller level, where the cost was actually paid.
+
+    A watch is created with `last_value=None` on every fresh park, and the predicate is
+    scoped to after `parked_at` -- so a True first observation means a human acted in the
+    window between the park and this poll. Treating None as "unknown" swallowed it: the
+    first pass stored True and enqueued nothing, and every later pass was True->True, so
+    the polling path never signalled the approval at all. It was found only by the next
+    quiet-period or hard-deadline full scan, which is the latency this feature exists to
+    remove.
+
+    The bot half of the same decision is covered upstream by
+    `test_approval_predicate_requires_non_bot_activity_strictly_after_park`: a bot's
+    reaction never reaches this point as True.
+    """
+    store = migrated(tmp_path)
+    store.upsert_watch(watch())
+    assert store.list_watches(1)[0].last_value is None, "precondition: a fresh park"
+
+    outcome = poll_reactions_once(
+        config(tmp_path / "events.sqlite3"),
+        store,
+        "read-token",
+        BOTS,
+        worker_id="reactions",
+        now=NOW,
+        fetcher=lambda _repository, watches, _token, _bots: tuple(
+            ApprovalPredicateObservation(item, True) for item in watches
+        ),
+        clock=lambda: NOW,
+    )
+
+    assert outcome.invalidations == 1
+    assert store.connection.execute(
+        "SELECT source_kind FROM invalidations ORDER BY id"
+    ).fetchall()[0][0] == "reaction_observation"
+    assert store.list_watches(1)[0].last_value is True
+
+
+def test_a_first_poll_seeing_no_approval_stays_quiet(tmp_path: Path) -> None:
+    """Non-vacuity: the common case must not enqueue an invalidation per parked issue."""
+    store = migrated(tmp_path)
+    store.upsert_watch(watch())
+
+    outcome = poll_reactions_once(
+        config(tmp_path / "events.sqlite3"),
+        store,
+        "read-token",
+        BOTS,
+        worker_id="reactions",
+        now=NOW,
+        fetcher=lambda _repository, watches, _token, _bots: tuple(
+            ApprovalPredicateObservation(item, False) for item in watches
+        ),
+        clock=lambda: NOW,
+    )
+
+    assert outcome.invalidations == 0
+    assert store.connection.execute("SELECT count(*) FROM invalidations").fetchone()[0] == 0

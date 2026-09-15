@@ -12,9 +12,14 @@ from .models import BoardConfig, EventsConfig, PollingPolicy, RepositoryConfig, 
 _TOP_LEVEL = {
     "database", "busy_timeout_ms", "claim_limit", "claim_lease_seconds", "retry_base_seconds",
     "retry_max_seconds", "max_body_bytes", "delivery_retention_days", "invalidation_retention_days",
-    "scan", "polling", "repositories", "boards",
+    "scan", "polling", "repositories", "boards", "bot_logins",
 }
-_SCALAR = _TOP_LEVEL - {"scan", "polling", "repositories", "boards"}
+#: Absent means "no extra machine logins", not a malformed file. Registered as optional
+#: because `_expect_keys` is strict in both directions -- an unregistered key is rejected
+#: and a registered-but-mandatory one would break every existing configuration,
+#: including the shipped example.
+_OPTIONAL_TOP_LEVEL = {"bot_logins"}
+_SCALAR = _TOP_LEVEL - {"scan", "polling", "repositories", "boards", "bot_logins"}
 _SCAN = {"quiet_period_seconds", "interval_seconds", "maximum_age_seconds"}
 _POLLING = {"projects_interval_seconds", "reactions_interval_seconds"}
 _REPOSITORY = {"id", "owner", "name", "installation_id"}
@@ -48,10 +53,28 @@ def _table_array(value: Any, name: str) -> list[dict[str, Any]]:
     return value
 
 
+def _bot_logins(raw: dict[str, Any]) -> tuple[str, ...]:
+    """Extra machine logins, lowercased and deduped with order preserved.
+
+    Comparison downstream is case-folded, so normalising here means an operator writing
+    `Renovate` is not silently ignored. A present-but-empty list is accepted: it says
+    "no extras", which is a meaningful thing to write down deliberately.
+    """
+    value = raw.get("bot_logins", [])
+    if not isinstance(value, list):
+        raise ValueError("bot_logins must be a list of login strings")
+    seen: dict[str, None] = {}
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError("bot_logins entries must be non-empty strings")
+        seen.setdefault(item.strip().lower(), None)
+    return tuple(seen)
+
+
 def load(path: Path) -> EventsConfig:
     with path.open("rb") as handle:
         raw = tomllib.load(handle)
-    _expect_keys(raw, _TOP_LEVEL, "configuration")
+    _expect_keys(raw, _TOP_LEVEL, "configuration", optional=_OPTIONAL_TOP_LEVEL)
     database_value = raw["database"]
     if not isinstance(database_value, str):
         raise ValueError("database must be an absolute path string")
@@ -115,4 +138,5 @@ def load(path: Path) -> EventsConfig:
         scan=ScanPolicy(timedelta(seconds=scan_values["quiet_period_seconds"]), timedelta(seconds=scan_values["interval_seconds"]), timedelta(seconds=scan_values["maximum_age_seconds"])),
         polling=PollingPolicy(timedelta(seconds=polling_values["projects_interval_seconds"]), timedelta(seconds=polling_values["reactions_interval_seconds"])),
         repositories=tuple(repositories), boards=tuple(boards),
+        bot_logins=_bot_logins(raw),
     )

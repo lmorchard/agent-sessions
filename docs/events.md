@@ -161,6 +161,37 @@ Configure the webhook endpoint for these events:
 Projects and reactions have no usable webhook input for this queue. The daemon polls configured
 Projects V2 boards and active approval watches with the shared read credential.
 
+### Machine logins
+
+An approval watch asks one question: has a human commented or added a thumbs-up **since the issue
+was parked**. A `true` answer enqueues an invalidation, and the driver can then unpark the issue. So
+the daemon must know which accounts are machines, or a bot's thumbs-up reads as human approval.
+
+Three accounts are always machines: `github-actions`, `github-actions[bot]`, and `agent-session`.
+The daemon's own read login is added to that set. List any other machine account in
+`events.toml`:
+
+```toml
+bot_logins = ["renovate", "ci-account"]
+```
+
+Place the key before the first table. TOML scopes a bare key to the table above it.
+
+The key is optional. An absent key means no extra machine accounts, so an existing file keeps
+working. Entries are compared without case.
+
+The daemon does not read the driver's `DRIVER_BOT_LOGINS`. It uses its own configuration file,
+because it runs as a separate service with a separate identity.
+
+At start, each reaction command prints the accounts it treats as machines:
+
+```text
+{"event": "poll_reactions", "message": "machine logins honoured: agent-reader, agent-session, github-actions, github-actions[bot], renovate"}
+```
+
+Read that line after you change the key. An unlisted machine account can approve, and the printed
+list is how you check before it happens.
+
 ## Migration, status, and recovery
 
 If the host used the preview topology, stop these retired units through the approved host procedure:

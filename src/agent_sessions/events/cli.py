@@ -111,16 +111,37 @@ def _worker_id(command: str) -> str:
     return f"{socket.gethostname()}:{os.getpid()}:{command}"
 
 
-def _reaction_bot_logins(read_login: str) -> frozenset[str]:
-    """Deliberately built from the read login alone.
+def _reaction_bot_logins(read_login: str, extra: tuple[str, ...] = ()) -> frozenset[str]:
+    """Machine logins for the reaction poller: always-bots, this daemon, plus config.
 
-    `tests/events/test_poll_reactions.py` asserts that this daemon reads neither
-    `DRIVER_GH_LOGIN` nor `DRIVER_BOT_LOGINS`, and refuses to inspect the board
-    credential -- the events service does not inherit the driver's identity
-    configuration. Operator-listed machine logins therefore need their own entry in
-    `events.toml` if they should count as bots here; see the note on issue #275.
+    Deliberately built from *this service's* inputs. `tests/events/test_poll_reactions.py`
+    asserts the daemon reads neither `DRIVER_GH_LOGIN` nor `DRIVER_BOT_LOGINS` and refuses
+    to inspect the board credential -- it does not inherit the driver's identity
+    configuration. So `extra` arrives from `events.toml`'s `bot_logins`, which is this
+    service's own configuration file, and the boundary holds.
+
+    Why completeness matters rather than being a nicety: this set is what
+    `_approval_predicate` uses to decide whether an actor is a human, and that decision
+    can unpark an issue awaiting human judgment. A machine login missing from here is a
+    machine that can approve.
     """
-    return credentials.bot_logins(credentials.Credentials(login=read_login))
+    return credentials.bot_logins(
+        credentials.Credentials(login=read_login, extra_bot_logins=extra)
+    )
+
+
+def _disclose_bot_logins(command: str, logins: frozenset[str]) -> None:
+    """Say which logins count as machines, once, at start.
+
+    The set is opt-in, so an operator with an unlisted machine user otherwise finds out
+    by being wrongly unparked. Printing the belief does not close that, but it makes it
+    checkable without reading source -- the same reason `docs-check` prints "no claims
+    found to check" rather than staying silent.
+    """
+    event_logging.emit(
+        command.replace("-", "_"),
+        message=f"machine logins honoured: {', '.join(sorted(logins))}",
+    )
 
 
 def _log_poll_result(command: str, result: pollers.PollRunResult) -> None:
@@ -190,11 +211,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             read_token = credentials.resolve_read_credential()
             bot_logins = _reaction_bot_logins(
-                credentials.resolve_read_login(read_token)
+                credentials.resolve_read_login(read_token), loaded.bot_logins
             )
         except RuntimeError as error:
             event_logging.emit("serve", message=f"failed: {error}")
             return 1
+        _disclose_bot_logins("serve", bot_logins)
         store = QueueStore.open(loaded.database, busy_timeout_ms=loaded.busy_timeout_ms)
         store.register_repositories(item.identity for item in loaded.repositories)
         runtime = DaemonRuntime(
@@ -225,8 +247,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             else:
                 bot_logins = _reaction_bot_logins(
-                    credentials.resolve_read_login(read_token)
+                    credentials.resolve_read_login(read_token), loaded.bot_logins
                 )
+                _disclose_bot_logins(args.command, bot_logins)
                 result = pollers.poll_reactions_once(
                     loaded,
                     store,

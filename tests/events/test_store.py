@@ -356,7 +356,10 @@ def test_leases_watches_snapshots_and_pruning_preserve_live_tables(tmp_path: Pat
     assert store.acquire_poller_lease("board", worker_id="poll", lease_until=NOW + timedelta(minutes=1), now=NOW)
     watch = ApprovalWatch(1, 42, "approved", NOW)
     store.upsert_watch(watch)
-    assert not store.record_watch_observation(watch, value=True, observed_at=NOW)
+    # First observation of approval now invalidates -- see
+    # `test_a_first_observation_of_approval_invalidates` for why. This test is about the
+    # live tables surviving a prune, so the verdict is incidental here.
+    assert store.record_watch_observation(watch, value=True, observed_at=NOW)
     watch = store.list_watches(1)[0]
     assert store.record_watch_observation(watch, value=False, observed_at=NOW + timedelta(seconds=1))
     projection = ProjectItemProjection("owner/9", "item", 1, "issue", 42, "Ready", None, NOW)
@@ -370,13 +373,22 @@ def test_leases_watches_snapshots_and_pruning_preserve_live_tables(tmp_path: Pat
 
 
 def test_watches_list_remove_and_only_invalidate_on_a_changed_observation(tmp_path: Path) -> None:
+    """Amended deliberately: the first observation of approval is a change.
+
+    As written by debcce0 this asserted that a fresh watch observing True enqueues
+    nothing. That reads as "only invalidate on a change" and is the right instinct, but
+    it treated None as *unknown* when the predicate's since-park scoping makes it *no
+    approval yet* -- so the transition being suppressed was the approval arriving, which
+    is the event the reaction poller exists to catch. The repeated-observation and
+    withdrawal cases below are unchanged.
+    """
     store = migrated(tmp_path)
     first = ApprovalWatch(1, 42, "approved", NOW)
     second = ApprovalWatch(1, 43, "approved", NOW)
     store.upsert_watch(first)
     store.upsert_watch(second)
     assert tuple(watch.issue_number for watch in store.list_watches(1)) == (42, 43)
-    assert not store.record_watch_observation(first, value=True, observed_at=NOW)
+    assert store.record_watch_observation(first, value=True, observed_at=NOW)
     first = store.list_watches(1)[0]
     assert not store.record_watch_observation(first, value=True, observed_at=NOW + timedelta(seconds=1))
     first = store.list_watches(1)[0]
@@ -551,3 +563,79 @@ def test_open_succeeds_once_the_lock_is_released(tmp_path) -> None:
 
     store = QueueStore.open(path, busy_timeout_ms=10)
     store.close()
+
+
+# --- an unobserved watch means "no approval seen yet" --------------------------------
+#
+# `_approval_predicate` gates every comment and reaction through `_human_actor_after(...,
+# watch.parked_at, ...)`, so a watch's value is False immediately after a park and turns
+# True exactly when a human acts *after* it. `last_value` starts as None for each fresh
+# park.
+#
+# Treating None as "no information" therefore suppressed the one transition the feature
+# exists to detect: the first observation recorded True and enqueued nothing, and every
+# later poll was True->True. Via the polling path an approval was never signalled at all,
+# only ever found by a full scan. Meanwhile True->False -- approval *withdrawn* -- was
+# the single transition that did invalidate, which is inverted.
+#
+# So None is read as False: not "unknown", but "no approval yet", which is what
+# since-park scoping already means. Note that `last_value != value` alone would be
+# wrong -- `None != False` is true in Python, so every parked issue would enqueue a
+# spurious invalidation on its first quiet poll.
+
+
+def test_a_first_observation_of_approval_invalidates(tmp_path: Path) -> None:
+    store = migrated(tmp_path)
+    watch = ApprovalWatch(1, 42, "approved", NOW)
+    store.upsert_watch(watch)
+
+    assert store.record_watch_observation(watch, value=True, observed_at=NOW) is True
+
+
+def test_a_first_observation_of_no_approval_is_quiet(tmp_path: Path) -> None:
+    """The common case on every park: nothing has happened, so nothing is signalled."""
+    store = migrated(tmp_path)
+    watch = ApprovalWatch(1, 42, "approved", NOW)
+    store.upsert_watch(watch)
+
+    assert not store.record_watch_observation(watch, value=False, observed_at=NOW)
+
+
+def test_approval_arriving_after_a_quiet_poll_invalidates(tmp_path: Path) -> None:
+    store = migrated(tmp_path)
+    watch = ApprovalWatch(1, 42, "approved", NOW)
+    store.upsert_watch(watch)
+    assert not store.record_watch_observation(watch, value=False, observed_at=NOW)
+    watch = store.list_watches(1)[0]
+
+    assert store.record_watch_observation(
+        watch, value=True, observed_at=NOW + timedelta(seconds=1)
+    )
+
+
+def test_a_repeated_approval_is_quiet(tmp_path: Path) -> None:
+    store = migrated(tmp_path)
+    watch = ApprovalWatch(1, 42, "approved", NOW)
+    store.upsert_watch(watch)
+    assert store.record_watch_observation(watch, value=True, observed_at=NOW)
+    watch = store.list_watches(1)[0]
+
+    assert not store.record_watch_observation(
+        watch, value=True, observed_at=NOW + timedelta(seconds=1)
+    )
+
+
+def test_a_fresh_park_can_signal_again(tmp_path: Path) -> None:
+    """`upsert_watch` resets `last_value` when `parked_at` changes, so a re-park re-arms."""
+    store = migrated(tmp_path)
+    store.upsert_watch(ApprovalWatch(1, 42, "approved", NOW))
+    assert store.record_watch_observation(
+        store.list_watches(1)[0], value=True, observed_at=NOW
+    )
+
+    later = NOW + timedelta(hours=1)
+    store.upsert_watch(ApprovalWatch(1, 42, "approved", later))
+    watch = store.list_watches(1)[0]
+    assert watch.last_value is None, "a new park must clear the previous observation"
+
+    assert store.record_watch_observation(watch, value=True, observed_at=later)

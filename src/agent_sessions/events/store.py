@@ -427,7 +427,20 @@ class QueueStore:
         expected_checked_at = (
             None if watch.last_checked_at is None else _stamp(watch.last_checked_at)
         )
-        changed = watch.last_value is not None and watch.last_value != value
+        # An unobserved watch means "no approval seen yet", not "unknown". The predicate
+        # is scoped to *after* `parked_at`, so a fresh park is False by construction and
+        # turns True exactly when a human acts -- which makes None->True the arrival of
+        # approval, the one transition this whole path exists to detect. Reading None as
+        # "no information" suppressed it: the first poll stored True and enqueued
+        # nothing, every later poll was True->True, and the approval was only ever found
+        # by a full scan. The only transition that did invalidate was True->False,
+        # approval *withdrawn*, which is inverted.
+        #
+        # `watch.last_value != value` alone would be wrong: `None != False` is true, so
+        # every parked issue would enqueue a spurious invalidation on its first quiet
+        # poll. Coercing None to False is what makes the first *quiet* poll silent and
+        # the first *approving* poll loud.
+        changed = bool(watch.last_value) != value
         cursor = db.execute(
             """UPDATE poll_watches SET last_value=?,last_checked_at=?
             WHERE repository_id=? AND issue_number=? AND predicate=? AND parked_at=?

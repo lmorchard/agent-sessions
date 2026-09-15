@@ -10,6 +10,12 @@ max_body_bytes = 1048576
 delivery_retention_days = 14
 invalidation_retention_days = 30
 
+# Extra accounts the reaction poller treats as machines, so their thumbs-up does not read
+# as human approval. `github-actions`, `github-actions[bot]`, `agent-session` and the
+# daemon's own read login are always included. Optional; an absent key means no extras.
+# Must appear before the first table -- TOML scopes a bare key to the table above it.
+# bot_logins = ["EXAMPLE_MACHINE_ACCOUNT"]
+
 [scan]
 quiet_period_seconds = 300
 interval_seconds = 900
