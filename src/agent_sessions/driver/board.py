@@ -28,7 +28,7 @@ def fetch_board_json(board: str, *, env: dict[str, str] | None = None) -> list[d
         return []
     try:
         read_env = (
-            credentials.driver_env(dict(os.environ), credentials.resolve())
+            credentials.board_read_env(dict(os.environ), credentials.resolve())
             if env is None
             else env
         )
@@ -67,7 +67,7 @@ def get_board_metadata(
     owner, number = board.split("/", 1)
     last_err = ""
     read_env = (
-        credentials.driver_env(dict(os.environ), credentials.resolve())
+        credentials.board_read_env(dict(os.environ), credentials.resolve())
         if env is None
         else env
     )

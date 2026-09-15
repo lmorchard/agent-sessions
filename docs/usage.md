@@ -398,8 +398,13 @@ should live outside the repository; `~/.config/agent-session/` is the convention
 routes around the fine-grained-PAT resource-owner limit described above, because an App is installed
 per repository rather than owned by a user.
 
-There is a fourth credential variable, `DRIVER_GH_BOARD_TOKEN`, which falls back to the write token
-and exists for the separate ProjectsV2 grant described above.
+There is a fourth credential variable, `DRIVER_GH_BOARD_TOKEN`, which exists for the separate
+ProjectsV2 grant described above. **Its fallback differs by direction, deliberately.** A board
+*mutation* — moving a card — falls back to the write token, which already has to be write-capable.
+A board *read* falls back to the **read** token and never to write, because performing a read with
+a write-capable credential weakens the split for no benefit. So set it when your read token is a
+fine-grained PAT and the board is somebody else's: reads keep working, and the read path gains
+nothing it could not already do. `credentials.board_read_token` is the one place that rule lives.
 
 These three, by contrast, are **not** built:
 

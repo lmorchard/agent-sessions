@@ -811,3 +811,51 @@ def test_apply_driver_env_installs_the_read_token_as_the_active_default():
     credentials.apply_driver_env(credentials.resolve(base), target)
     assert target["GH_TOKEN"] == READ
     assert target["GITHUB_TOKEN"] == READ
+
+
+# --- board reads: board token, else read, never write --------------------------------
+#
+# Decided on #275. `board_env` is the mutation environment and falls back to the write
+# token, which is right for moving a card. A read must not inherit that fallback: the
+# whole point of the split is that a read-shaped operation cannot mutate, and ProjectsV2
+# needing its own grant is not a reason to hand reads a write-capable credential.
+
+
+def test_board_read_prefers_the_board_token() -> None:
+    creds = credentials.Credentials(
+        read_token="read", write_token="write", board_token="board"
+    )
+    assert credentials.board_read_token(creds) == "board"
+
+
+def test_board_read_falls_back_to_the_read_token() -> None:
+    creds = credentials.Credentials(read_token="read", write_token="write")
+    assert credentials.board_read_token(creds) == "read"
+
+
+def test_board_read_never_falls_back_to_the_write_token() -> None:
+    """The asymmetry with `board_env`, asserted so it cannot quietly converge."""
+    creds = credentials.Credentials(write_token="write")
+
+    assert credentials.board_read_token(creds) == ""
+    assert credentials.board_env({}, creds)["GH_TOKEN"] == "write"
+
+
+def test_board_read_env_installs_the_chosen_credential() -> None:
+    creds = credentials.Credentials(read_token="read", board_token="board")
+
+    env = credentials.board_read_env({"PATH": "/bin", "GH_TOKEN": "ambient"}, creds)
+
+    for var in credentials.AGENT_TOKEN_VARS:
+        assert env[var] == "board"
+    assert env["PATH"] == "/bin"
+
+
+def test_board_read_env_fails_closed_when_neither_credential_is_set() -> None:
+    env = credentials.board_read_env(
+        {"GH_TOKEN": "ambient-write", "GITHUB_TOKEN": "ambient-write"},
+        credentials.Credentials(write_token="write"),
+    )
+
+    for var in credentials.AGENT_TOKEN_VARS:
+        assert var not in env, f"{var} survived with no read or board credential"

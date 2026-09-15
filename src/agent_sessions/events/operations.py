@@ -924,10 +924,20 @@ def inspect_doctor(
             )
 
     if read_token:
+        # Probe the credential a board read will actually use, not merely the read
+        # token. Otherwise doctor warns that the board is unreadable on a deployment
+        # where `DRIVER_GH_BOARD_TOKEN` is configured and the runtime reads it fine --
+        # a false warning about the one path doctor exists to reassure you about.
+        try:
+            board_token = credentials.resolve_board_credential(
+                source_environ, runner=command_runner
+            )
+        except RuntimeError:
+            board_token = read_token
         probes.extend(
             _board_probes(
                 loaded,
-                token=read_token,
+                token=board_token,
                 environ=source_environ,
                 runner=command_runner,
             )

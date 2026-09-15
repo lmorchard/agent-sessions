@@ -354,7 +354,7 @@ def select_work(
         try:
             current_board_items = fetch_board_items(
                 ctx.board,
-                env=credentials.driver_env(dict(os.environ), ctx.creds),
+                env=credentials.board_read_env(dict(os.environ), ctx.creds),
             )
         except GitHubTransientError as error:
             for current_claim in claims:

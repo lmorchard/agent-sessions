@@ -519,6 +519,28 @@ def env_with_token(base_env: dict[str, str], token: str) -> dict[str, str]:
     return env
 
 
+def board_read_token(creds: Credentials) -> str:
+    """The credential a board *read* should use: the board token, else the read token.
+
+    Never the write token. `board_env` is the *mutation* environment and does fall back
+    to write, which is correct for moving a card and wrong for looking at one -- a read
+    performed with a write-capable credential is a containment weakening that buys
+    nothing.
+
+    The board token exists because ProjectsV2 is GraphQL-only and resource-owner scoped,
+    so a fine-grained PAT cannot see a project owned by somebody else at any permission
+    setting. An operator whose read token is fine-grained configures
+    `DRIVER_GH_BOARD_TOKEN` and the board stays readable, without widening what the read
+    path is allowed to do.
+    """
+    return creds.board_token or creds.read_token
+
+
+def board_read_env(base_env: dict[str, str], creds: Credentials) -> dict[str, str]:
+    """`base_env` prepared for reading a board, failing closed when neither is set."""
+    return env_with_token(base_env, board_read_token(creds))
+
+
 def board_env(base_env: dict[str, str], creds: Credentials) -> dict[str, str]:
     """Environment for executing gh project board operations."""
     env = dict(base_env)
