@@ -66,8 +66,13 @@ venv:
 
 check-parallel: gate-test events-test skill-readonly docs-check assertion-lint commit-lint lint typecheck
 
+# No `-q` here. `pyproject.toml` already sets `addopts = "-q"`, so passing it again makes
+# pytest `-qq`, which suppresses the summary line -- the target then passed 306 tests and
+# printed no count at all. An empty run still fails loudly (`-qq` prints `no tests ran` and
+# exits non-zero), so this was never a false green; what it cost is the ability to tell 306
+# tests from 3. `--quiet` belongs to `uv run`, which is a different flag on a different tool.
 events-test:
-	@uv run --quiet pytest -q tests/events
+	@uv run --quiet pytest tests/events
 
 lint:
 	@uv run ruff check .
