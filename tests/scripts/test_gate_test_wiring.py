@@ -43,8 +43,10 @@ pytestmark = pytest.mark.xdist_group(name="gate_wiring")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-#: Set only on the `make gate-test` subprocess C2 spawns. Nothing else in the repo
-#: sets or reads it; if you see it in an environment, a C2 run is in progress.
+#: Set on any nested pytest run that would otherwise re-enter this module: the
+#: `make gate-test` subprocess C2 spawns, `docs_check.live_bash_assertions()`'s
+#: collection probe, and the concurrent load in `tests/scripts/test_docs_check.py`.
+#: If you see it in an environment, one of those is in progress.
 INNER_RUN_ENV = "AGENT_SESSIONS_GATE_TEST_WIRING_INNER_RUN"
 
 #: The globs the criteria are written against.

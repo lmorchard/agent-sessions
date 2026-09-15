@@ -131,7 +131,7 @@ table's own column and not in a sentence above it.)*
 
 ### 2. A null must never render as a positive
 
-**Nine instances**, and it keeps arriving through a different door.
+**Ten instances**, and it keeps arriving through a different door.
 
 1. **`clean` vs `clean-by-substitute`** — the tamper vocabulary had no way to say *there was
    nothing to diff*, so a null rendered as a pass (move 2).
@@ -192,7 +192,37 @@ table's own column and not in a sentence above it.)*
    `.claude/worktrees/`: [#80](https://github.com/lmorchard/agent-sessions/issues/80). Fixing the
    reader did not fix the writer, and nothing connected them.
 
-**Instance 9 is the one to sit with.** The other eight are checks that reported a wrong *value*; this
+10. **`docs-check`'s assertion-count probe skipped on every run it ever made, and announced it.**
+    `live_bash_assertions()` handed two literal glob strings to `subprocess.run`, which takes an
+    argument *list* and so never invokes a shell; pytest read `tests/driver/test_*.py` as a filename
+    and exited 4. Independently, its second argument still named `scripts/test_*.py` — a directory
+    [#257](https://github.com/lmorchard/agent-sessions/issues/257)/[#258](https://github.com/lmorchard/agent-sessions/issues/258)
+    had emptied of tests, so even a working expansion would have measured half the suite and reported
+    it as verified. A `returncode not in (0, 5)` guard folded both into `None`, and an argv that
+    collected nothing skipped exactly as quietly as one that crashed. Tracked as
+    [#249](https://github.com/lmorchard/agent-sessions/issues/249).
+
+    **This is the instance that already carried its own warning label, and survived anyway.** The
+    output read `SKIP  assertion counts: could not run make gate-test (NOT verified -- this is a
+    skip, not a pass)` — the module's docstring names this exact class, and its author wrote the
+    disclaimer in capitals. It printed on every run, interleaved into `make check`'s parallel output
+    above a green aggregate, and the aggregate is what anyone reads. So: **a skip that says "this is
+    not a pass" is still invisible while the exit code says pass.** The closure is not better
+    wording; it is that the skip is now a *test failure* in `tests/scripts/test_docs_check.py`, so
+    the thing that reads it is `make check` rather than a person.
+
+    **The obvious fix would have reintroduced it intermittently, and instance 9 is what said
+    so.** Expanding the globs with `Path.glob` picks up the transient
+    `test_zz_gate_wiring_probe_*.py` that the wiring suite's C2 writes into
+    `tests/scripts/` and then deletes — and `make check` runs `gate-test` and `docs-check` in
+    parallel, so the filename handed to pytest can vanish between the two. Reproduced by
+    creating such a file and watching `Path.glob` return it. The wiring suite already filters
+    that literal in two places; a third copy is the name-list shape instance 9 was resolved by
+    abandoning. So the probe asks `git ls-files` instead: *tracked* is what "part of the
+    committed suite" means, it excludes a future transient without being told its name, and it
+    makes the count describe the committed suite rather than the reader's scratch files.
+
+**Instance 9 is the one to sit with.** The eight before it are checks that reported a wrong *value*; this
 is a detector reporting a correct value about an empty set. It was found by an unattended run
 establishing a baseline, which described its own green result as *"my green baseline for that target
 meant nothing"* — a run catching a defect in the infrastructure grading it. **The generalisable

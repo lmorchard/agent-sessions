@@ -1,4 +1,9 @@
 
+import os
+import re
+import signal
+import subprocess
+
 import pytest
 
 from agent_sessions.scripts import docs_check
@@ -390,3 +395,308 @@ def test_partition_accepts_a_multi_source_facade_when_one_source_is_named(policy
     docs_check.check_partition()
 
     assert docs_check.failures == []
+
+
+# --- issue #249: the assertion-count probe must run, and must say which of three
+#     things happened -------------------------------------------------------------
+#
+# The probe had two independent path bugs, either of which alone kept it permanently
+# skipping. It passed literal glob strings to `subprocess.run`, which never invokes a
+# shell, so pytest saw `*` as a filename and exited 4; and its second argument still
+# named `scripts/test_*.py`, which #257/#258 emptied of tests. `returncode not in
+# (0, 5)` then turned both into `None`, and `None` prints as a skip.
+#
+# Three outcomes have to stay distinguishable, because the failure that hid here for
+# months was two of them collapsing into one:
+#
+#   1. the probe could not run              -> `None`  -> an explicit skip line
+#   2. the probe ran and found no claims    -> a count -> the disclosed-zero line
+#   3. the probe ran and a claim disagrees  -> a count -> a failure
+#
+# Outcome 2 is what the maintained docs currently produce, and it is the correct
+# result rather than an unfinished one: every `N assertions` string in the repo lives
+# under `FROZEN`. So these tests grade the probe, not the count.
+
+#: Set on the `make gate-test` this module spawns as concurrent load. Without it, that
+#: inner run would reach this module again and spawn its own load, without bound.
+CONCURRENCY_INNER_RUN_ENV = "AGENT_SESSIONS_DOCS_CHECK_CONCURRENCY_INNER_RUN"
+
+_GLOB_ARG = re.compile(r"\btests/\S*test_\*\.py")
+
+_inner = pytest.mark.skipif(
+    os.environ.get(CONCURRENCY_INNER_RUN_ENV) == "1",
+    reason=f"{CONCURRENCY_INNER_RUN_ENV} is set: this is the inner load run.",
+)
+
+
+@pytest.fixture
+def clean_skips():
+    """`docs_check` accumulates into module-level lists; don't inherit another test's."""
+    docs_check.failures.clear()
+    docs_check.skips.clear()
+    yield
+    docs_check.failures.clear()
+    docs_check.skips.clear()
+
+
+def _load_env() -> dict:
+    """Environment for a nested `make gate-test` used purely as concurrent load."""
+    env = os.environ.copy()
+    for var in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL"):
+        env.pop(var, None)
+    env[CONCURRENCY_INNER_RUN_ENV] = "1"
+    # The wiring suite's own guard. Its C2 writes a probe test file into the working
+    # tree, and this load gets killed mid-run -- so leaving C2 enabled would risk
+    # abandoning that file in `tests/scripts/`, where every later run would collect it.
+    env["AGENT_SESSIONS_GATE_TEST_WIRING_INNER_RUN"] = "1"
+    return env
+
+
+def _kill_group(load: subprocess.Popen) -> None:
+    """Tear down the concurrent load without ever raising.
+
+    This runs in a `finally`, so an exception here would *replace* the assertion the
+    test exists to make -- a real failure would surface as a `ProcessLookupError` from
+    cleanup. Every step is therefore best-effort, including the `SIGKILL` escalation:
+    the process can exit between `wait()` timing out and the signal being sent, and the
+    group can already be reaped, both of which are the outcome being asked for anyway.
+    """
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(os.getpgid(load.pid), sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        try:
+            load.wait(timeout=30)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def test_the_probe_globs_match_the_gate_test_recipe():
+    """Derived from the Makefile, never restated -- that equality is what broke.
+
+    The probe's second argument outlived the directory it named because nothing
+    compared the two. Reading the recipe at run time means the next move of the suite
+    fails here loudly instead of degrading the probe into a silent skip.
+    """
+    proc = subprocess.run(
+        ["make", "-n", "--no-print-directory", "gate-test"],
+        cwd=docs_check.ROOT,
+        env=_load_env(),
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, f"`make -n gate-test` exited {proc.returncode}: {proc.stderr}"
+
+    recipe_globs = set(_GLOB_ARG.findall(proc.stdout))
+    assert recipe_globs, f"parsed no test globs out of the gate-test recipe:\n{proc.stdout}"
+    assert recipe_globs == set(docs_check.GATE_TEST_GLOBS), (
+        "docs_check.GATE_TEST_GLOBS has drifted from the `make gate-test` recipe; the "
+        f"recipe runs {sorted(recipe_globs)}, the probe measures "
+        f"{sorted(docs_check.GATE_TEST_GLOBS)}"
+    )
+
+
+def test_gate_test_files_hands_pytest_real_paths():
+    paths = docs_check.gate_test_files()
+
+    assert paths, "the gate-test globs matched no files"
+    assert not [p for p in paths if "*" in p], (
+        f"an unexpanded glob would reach pytest as a literal filename: {paths}"
+    )
+    assert all((docs_check.ROOT / p).is_file() for p in paths)
+    for prefix in ("tests/driver/", "tests/scripts/"):
+        assert any(p.startswith(prefix) for p in paths), f"no files from {prefix}"
+
+
+def test_gate_test_files_is_empty_when_a_real_repo_matches_nothing(tmp_path, monkeypatch):
+    """A repo git can read, with no test files in it -- not the no-repo case below.
+
+    Kept distinct on purpose: both return `[]`, and if this one leaned on tmp_path not
+    being a git checkout it would pass for the wrong reason and stop grading the glob.
+    """
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "readme.md").write_text("no tests here\n", encoding="utf-8")
+    subprocess.run(["git", "add", "docs"], cwd=tmp_path, check=True, capture_output=True)
+    monkeypatch.setattr(docs_check, "ROOT", tmp_path)
+
+    assert docs_check.gate_test_files() == []
+
+
+def _scratch_suite(root):
+    """A throwaway repo shaped like this one's test layout, with one file left untracked.
+
+    `isolate_git_config` in `tests/conftest.py` already supplies an identity and cuts the
+    operator's global config out, so `git init` here needs no further setup. Nothing is
+    committed: `git ls-files` reads the index, so staging is enough to make a file
+    tracked, and skipping the commit keeps this fast.
+    """
+    for d in ("tests/driver", "tests/scripts"):
+        (root / d).mkdir(parents=True)
+    tracked = root / "tests" / "driver" / "test_real.py"
+    tracked.write_text("def test_x():\n    assert True\n", encoding="utf-8")
+    (root / "tests" / "scripts" / "test_also_real.py").write_text(
+        "def test_y():\n    assert True\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "add", "tests"], cwd=root, check=True, capture_output=True)
+
+    # Written *after* `git add`, so it is untracked -- the shape of C2's transient probe.
+    untracked = root / "tests" / "scripts" / "test_zz_gate_wiring_probe_1234_abcd.py"
+    untracked.write_text("def test_z():\n    assert False\n", encoding="utf-8")
+    return untracked
+
+
+def test_gate_test_files_excludes_an_untracked_file(tmp_path, monkeypatch):
+    """The parallel race, at the unit where it is decidable.
+
+    `tests/scripts/test_gate_test_wiring.py`'s C2 writes a real
+    `test_zz_gate_wiring_probe_*.py` into `tests/scripts/` and deletes it again, while
+    `make check` runs `gate-test` and `docs-check` at the same time. A filesystem glob
+    returns that file, C2 removes it, and the name this probe hands pytest no longer
+    exists -- exit 4, `None`, and #249's skip is back intermittently.
+
+    Asserted through *untracked-ness* rather than the probe's filename. The wiring suite
+    already matches the literal `test_zz_gate_wiring_probe` in two places, and
+    `findings.md` defect class 2 instance 9 is this repo paying for a name list twice in
+    one day. A future transient with a different name is covered here without being
+    named; `_scratch_suite` uses C2's spelling only so the case is recognisable.
+    """
+    untracked = _scratch_suite(tmp_path)
+    monkeypatch.setattr(docs_check, "ROOT", tmp_path)
+
+    files = docs_check.gate_test_files()
+
+    assert files == ["tests/driver/test_real.py", "tests/scripts/test_also_real.py"], (
+        "gate_test_files() should return the tracked suite, sorted"
+    )
+    assert untracked.is_file(), "the fixture should still be on disk -- exclusion is the point"
+
+
+def test_gate_test_files_excludes_a_tracked_file_deleted_from_disk(tmp_path, monkeypatch):
+    """`git ls-files` lists the index, so a staged-then-deleted path is still tracked.
+
+    Handing pytest a filename that is not there is the same exit 4 the untracked probe
+    causes, reached from the opposite direction.
+    """
+    _scratch_suite(tmp_path)
+    monkeypatch.setattr(docs_check, "ROOT", tmp_path)
+    (tmp_path / "tests" / "driver" / "test_real.py").unlink()
+
+    assert docs_check.gate_test_files() == ["tests/scripts/test_also_real.py"]
+
+
+def test_gate_test_files_is_empty_outside_a_git_repository(tmp_path, monkeypatch):
+    """No repo, no answer -- and `live_bash_assertions()` turns that into a skip.
+
+    Honest rather than convenient: a probe that cannot find the committed suite must not
+    report a count for whatever files happen to be lying around.
+    """
+    (tmp_path / "tests" / "driver").mkdir(parents=True)
+    (tmp_path / "tests" / "driver" / "test_real.py").write_text("def test_x():\n    pass\n")
+    monkeypatch.setattr(docs_check, "ROOT", tmp_path)
+
+    assert docs_check.gate_test_files() == []
+
+
+def test_the_probe_reports_none_when_the_globs_collect_nothing(tmp_path, monkeypatch):
+    """The third state, pinned: an argv collecting nothing is a skip, not a zero.
+
+    Before the fix this reached pytest and came back exit 5, which the old
+    `not in (0, 5)` guard waved through to a `None` produced two lines later by the
+    count regex finding nothing -- the same `None` a crash produces. It still returns
+    `None`, deliberately; what must not happen is it returning `0` and having
+    `check_counts` grade real claims against an empty suite.
+    """
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
+    monkeypatch.setattr(docs_check, "ROOT", tmp_path)
+
+    assert docs_check.live_bash_assertions() is None
+
+
+def test_the_probe_returns_a_count():
+    actual = docs_check.live_bash_assertions()
+
+    assert actual is not None, (
+        "live_bash_assertions() returned None: the assertion-count check is skipping, "
+        "which is issue #249's defect"
+    )
+    assert actual > 0
+
+
+@_inner
+def test_the_probe_returns_a_count_while_gate_test_runs():
+    """`make check` runs `docs-check` and `gate-test` in parallel; so does this.
+
+    Concurrency turned out not to be the cause -- the two path bugs reproduce under the
+    standalone target too -- but it is the condition the defect was observed in, so it
+    stays covered. The load is killed as soon as the probe answers; the property is the
+    overlap, not the full suite.
+    """
+    load = subprocess.Popen(
+        ["make", "gate-test"],
+        cwd=docs_check.ROOT,
+        env=_load_env(),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        actual = docs_check.live_bash_assertions()
+        still_running = load.poll() is None
+    finally:
+        _kill_group(load)
+
+    assert still_running, (
+        "the concurrent `make gate-test` had already exited when the probe returned, "
+        "so this run did not actually test the overlap"
+    )
+    assert actual is not None, (
+        "live_bash_assertions() returned None while gate-test was running: the "
+        "assertion-count check skips under the parallel gate"
+    )
+    assert actual > 0
+
+
+def test_check_counts_does_not_skip(clean_skips, capsys):
+    """C2/C3's property, at the unit the criteria name.
+
+    `make check` and `make docs-check` both reduce to this: after `check_counts`, there
+    is no assertion-count entry in `skips`. What is printed instead is the disclosed
+    zero, and that distinction is asserted rather than assumed -- silence here would be
+    indistinguishable from a pass.
+    """
+    docs_check.check_counts()
+
+    assert not [s for s in docs_check.skips if "assertion counts" in s], (
+        f"the assertion-count skip is back: {docs_check.skips}"
+    )
+    assert docs_check.failures == []
+    assert "no assertion-count claims found to check" in capsys.readouterr().out, (
+        "every `N assertions` claim in the repo is frozen, so the probe should say so "
+        "out loud rather than print nothing"
+    )
+
+
+def test_the_only_assertion_count_claims_are_frozen():
+    """Why the check above expects a disclosed zero, kept honest rather than asserted.
+
+    If someone writes a maintained `N assertions` claim, `check_counts` starts grading
+    it and the test above stops describing what happens. This says so at that moment,
+    instead of leaving a stale comment behind.
+    """
+    pattern = re.compile(r"\b(\d+)[\s-]assertions?\b")
+    live = [
+        f"{p.relative_to(docs_check.ROOT)}:{n}"
+        for p in docs_check.md_files()
+        if not docs_check.is_frozen(p)
+        for n, line in enumerate(p.read_text().split("\n"), 1)
+        if pattern.search(line)
+    ]
+
+    assert live == [], (
+        "a maintained doc now states an assertion count, so `check_counts` grades it "
+        f"rather than reporting the disclosed zero: {live}"
+    )
