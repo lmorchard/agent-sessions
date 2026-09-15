@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 from agent_sessions.driver import credentials, gh_query, lifecycle, reconciler, router
@@ -18,6 +18,36 @@ from .github import (
 )
 from .models import ClaimedTarget, EventsConfig, Invalidation, RepositoryConfig, ScanPolicy
 from .store import QueueStore
+
+#: Beyond this many doublings the delay has saturated for any realistic configuration,
+#: so the shift is clamped rather than evaluated. 2.0**64 is a finite float, which is
+#: what makes the multiply below total.
+_RETRY_SHIFT_CAP = 64
+
+
+def retry_delay(base: timedelta, maximum: timedelta, retry_count: int) -> timedelta:
+    """Capped exponential backoff that cannot raise.
+
+    The previous expression was `min(base * (2**retry_count), maximum)`, which evaluates
+    the multiply *before* the cap -- and `base` is a `timedelta`, not a number, so it
+    overflows instead of saturating::
+
+        41  ->  0:30:00
+        42  ->  OverflowError: days=1527099483; must have magnitude <= 999999999
+
+    With the example configuration the delay is already pinned at `maximum` from the
+    sixth attempt onward, so every shift past that was waste until it threw. And
+    `OverflowError` is not in `lifecycle._queue_failure_types()`, so it escaped
+    uncaught, the row was never acknowledged, and the repository's driver wedged on
+    every subsequent run with no fallback to the legacy scan.
+
+    Arithmetic happens in seconds so the growth is float rather than `timedelta`, and
+    the clamp is applied before converting back. Both together make this total for any
+    `retry_count`, including a negative one.
+    """
+    shift = min(max(retry_count, 0), _RETRY_SHIFT_CAP)
+    seconds = min(base.total_seconds() * (2.0**shift), maximum.total_seconds())
+    return timedelta(seconds=max(seconds, 0.0))
 
 
 @dataclass(frozen=True)
@@ -281,9 +311,10 @@ def select_work(
         try:
             resolved = resolver.resolve(runtime.repository, current_claim)
         except GitHubTransientError as error:
-            delay = min(
-                runtime.config.retry_base * (2**current_claim.retry_count),
+            delay = retry_delay(
+                runtime.config.retry_base,
                 runtime.config.retry_maximum,
+                current_claim.retry_count,
             )
             runtime.store.retry(
                 current_claim,
@@ -329,9 +360,10 @@ def select_work(
             for current_claim in claims:
                 if current_claim in acknowledged or current_claim in retried:
                     continue
-                delay = min(
-                    runtime.config.retry_base * (2**current_claim.retry_count),
+                delay = retry_delay(
+                    runtime.config.retry_base,
                     runtime.config.retry_maximum,
+                    current_claim.retry_count,
                 )
                 runtime.store.retry(
                     current_claim,

@@ -23,6 +23,28 @@ from .models import (
 )
 
 
+def _is_confirmed_missing(lowered: str) -> bool:
+    """True when GitHub has *confirmed* the target does not exist, in either dialect.
+
+    Two transports, two vocabularies, and only one of them says 404. `gh api` prints
+    `gh: Not Found (HTTP 404)`, but `gh issue view` / `gh pr view` resolve through
+    GraphQL and print no status code at all:
+
+        GraphQL: Could not resolve to an issue or pull request with the number of N.
+
+    Matching on "404" alone therefore made `_GitHubNotFound` unreachable from the two
+    call sites that reach for an issue or a pull request -- a deleted or transferred
+    target came back as transient and the queue entry retried forever instead of
+    draining. Verified live against both transports before this was widened.
+
+    Kept as a named predicate rather than an inline expression so it can be tested
+    directly against real captured messages, which is how the gap was found.
+    """
+    rest_not_found = "404" in lowered and ("http" in lowered or "not found" in lowered)
+    graphql_not_found = "could not resolve to" in lowered
+    return rest_not_found or graphql_not_found
+
+
 class GitHubError(RuntimeError):
     """A live target could not be resolved from GitHub."""
 
@@ -283,9 +305,18 @@ class LiveTargetResolver:
             raise GitHubReadStopped("GitHub read stopped before starting a subprocess")
         env = dict(os.environ)
         credential = self.read_token if token is None else token
-        if credential:
-            env["GH_TOKEN"] = credential
-            env["GITHUB_TOKEN"] = credential
+        # Absent credential means *remove* the inherited one, never fall through to it.
+        # `credentials.driver_env` pops these vars when no read token is configured, and
+        # its docstring makes that the contract: "A missing read token removes inherited
+        # active credentials." Callers that flatten a scrubbed env down to a token string
+        # (`driver/board.py`) lose the pop, so the scrub has to survive here too -- with
+        # `dict(os.environ)` as the base, skipping the install would hand the child `gh`
+        # the operator's ambient token, which may be the write token.
+        for var in credentials.AGENT_TOKEN_VARS:
+            if credential:
+                env[var] = credential
+            else:
+                env.pop(var, None)
         try:
             result = self.runner(command, capture_output=True, text=True, env=env, timeout=60)
         except subprocess.TimeoutExpired as error:
@@ -295,9 +326,7 @@ class LiveTargetResolver:
         if result.returncode != 0:
             message = str(result.stderr or result.stdout or "GitHub read failed").strip()
             lowered = message.lower()
-            confirmed_missing = "404" in lowered and (
-                "http" in lowered or "not found" in lowered
-            )
+            confirmed_missing = _is_confirmed_missing(lowered)
             if missing_is_permanent and confirmed_missing:
                 raise _GitHubNotFound(message)
             raise GitHubTransientError(message)

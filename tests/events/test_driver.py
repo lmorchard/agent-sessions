@@ -346,7 +346,15 @@ def test_issue_pr_and_revision_targets_converge_on_the_same_current_issue() -> N
 def test_missing_and_control_plane_targets_are_non_actionable() -> None:
     runner = RecordingRunner(
         [
-            Result(returncode=1, stderr="HTTP 404: Not Found"),
+            # The dialect `gh issue view` actually produces. It carries no status
+            # code, so the REST shape this used to assert never exercised the path.
+            Result(
+                returncode=1,
+                stderr=(
+                    "GraphQL: Could not resolve to an issue or pull request with "
+                    "the number of 404. (repository.issue)"
+                ),
+            ),
             Result(stdout=json.dumps({"id": "R_1", "nameWithOwner": "owner/repo"})),
             Result(stdout=json.dumps({"id": 99, "account": {"login": "owner"}})),
         ]
@@ -1530,3 +1538,51 @@ def test_lock_contended_actionable_claim_is_released_without_a_candidate(
         lease_until=NOW + timedelta(minutes=1),
         now=NOW,
     )
+
+
+# --- retry_delay: capped backoff that cannot raise ------------------------------------
+#
+# The expression this replaced was `min(base * (2**count), maximum)`, which evaluates the
+# multiply before the cap. `base` is a `timedelta`, so past 41 doublings it raised
+# OverflowError rather than saturating -- and OverflowError is not in
+# `lifecycle._queue_failure_types()`, so it escaped uncaught, the row was never
+# acknowledged, and the repository's driver wedged on every later run. Finding 1 in the
+# review supplied the permanently-transient target that walks the counter up there.
+
+
+def test_retry_delay_saturates_at_the_maximum_instead_of_overflowing() -> None:
+    base, maximum = timedelta(seconds=30), timedelta(seconds=1800)
+
+    assert events_driver.retry_delay(base, maximum, 42) == maximum
+    assert events_driver.retry_delay(base, maximum, 10_000) == maximum
+
+
+def test_the_old_expression_really_did_overflow_at_that_count() -> None:
+    """Pins the defect, so a future simplification back to it fails here first."""
+    base, maximum = timedelta(seconds=30), timedelta(seconds=1800)
+
+    with pytest.raises(OverflowError):
+        min(base * (2**42), maximum)
+
+    assert events_driver.retry_delay(base, maximum, 42) == maximum
+
+
+def test_retry_delay_grows_then_caps() -> None:
+    base, maximum = timedelta(seconds=30), timedelta(seconds=1800)
+
+    assert events_driver.retry_delay(base, maximum, 0) == timedelta(seconds=30)
+    assert events_driver.retry_delay(base, maximum, 1) == timedelta(seconds=60)
+    assert events_driver.retry_delay(base, maximum, 5) == timedelta(seconds=960)
+    assert events_driver.retry_delay(base, maximum, 6) == maximum
+
+
+def test_retry_delay_is_total_for_a_large_base() -> None:
+    """A day-scale base overflows far sooner, so the clamp cannot be a fixed shift."""
+    assert events_driver.retry_delay(timedelta(days=1), timedelta(days=7), 500) == timedelta(days=7)
+
+
+def test_retry_delay_never_returns_a_negative_delay() -> None:
+    base, maximum = timedelta(seconds=30), timedelta(seconds=1800)
+
+    assert events_driver.retry_delay(base, maximum, -3) == base
+    assert events_driver.retry_delay(base, timedelta(0), 5) == timedelta(0)
