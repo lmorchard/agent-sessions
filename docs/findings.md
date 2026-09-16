@@ -846,6 +846,8 @@ the entries most likely to be silently re-broken.**
 | **`createDiscussionCategory` is not a mutation in GitHub's GraphQL schema.** Discussion categories have no API representation; they are created in repository settings. Re-verified 2026-08-19 against the live schema. `discussion_manager.ensure_category` used to call it and fail every time; [#211](https://github.com/lmorchard/agent-sessions/issues/211) closed that, and it now delegates to `check_category`, which reports the absence and tells you to create the category by hand. | 2026-08-10, live schema introspection of the `Mutation` type; codebase half re-checked 2026-08-19 |
 | **`gh project field-list` does not expose option colors or descriptions.** Those need GraphQL (`projectV2.field(name:)` → `ProjectV2SingleSelectField.options { name color description }`). | move 7 |
 | **`updateProjectV2Field` replaces the single-select option set wholesale** — it accepts no option IDs, so any option not in the new list is deleted and **every item assigned to it loses its status.** Renaming columns is therefore a two-step operation: replace the option set, then reassign every item. Verify no item is left blank. | move 7, verified on board 9 |
+| **`gh api rate_limit` does not reflect GraphQL or REST consumption.** Measured against live response headers in the same moment: the endpoint reported `graphql: 5000/5000 used=0` while `x-ratelimit-remaining` read `4953`, then `4947` after six points were deliberately burned — the headers moved by exactly six, the endpoint never moved. **Read `x-ratelimit-remaining` / `x-ratelimit-reset` / `x-ratelimit-resource` off any response; the endpoint is not a monitor.** This is why `gh_query.check_rate_limit` may never back off (#278). | 2026-09-15, operator credential; needs re-checking under the driver's own tokens |
+| **`gh api graphql -F` coerces a numeric-looking value to a number.** `-F` is the *typed* field flag. Verified both directions: `-F s=12345` against `String!` fails with *Could not coerce value 12345 to String*, `-f s=12345` is accepted; and `-f n=9` against `Int!` fails with *Could not coerce value "9" to Int* while `-F n=9` works. So the flags are not interchangeable and **each is wrong for the other's type** — `-f` for `String`/`ID`, `-F` only for `Int`. An all-digits owner login (`owner/2024` is valid) breaks every `-F`-passed string variable. | 2026-09-15, live against the API |
 
 ### Project toolchains
 
@@ -856,6 +858,9 @@ the entries most likely to be silently re-broken.**
 | **A hard line-wrap inside a code fence misleads readers.** It is what misled Copilot into a wrong review comment on #638. Test commands in their line-wrapped form. | move 2 |
 | **Editing a running bash script can silently change what it executes — and it fails *open*.** bash reads a script incrementally, so a **truncate-and-rewrite in place** (`cat >`, Python's `open(w)`) makes the running process continue into replacement text: measured, a script went on to execute two lines that **did not exist when it started**, exiting 0 with no error and no signal. An **atomic replace via rename** (`mv`) is unaffected, because the process keeps its original inode. **Measured for this harness: Claude Code's `Write` and `Edit` both change the inode** (`363717959 → 363717969`, `363717979 → 363718025`), so they are safe. Do not rely on that — the general mitigation is to `exec` from a snapshot copy rather than to know every editor's write strategy. | move 7, verified both directions |
 | **A conditional `git stash push -- <path>` paired with an unconditional `git stash pop` targets whatever is on top.** When the push matches nothing — the work was already committed — it creates **no entry**, so the pop applies and *drops* an unrelated stash. Measured: a teeth probe ate a `419-sticky-widget-slot` stash belonging to another workstream and mixed its two files into the run's worktree. Recovered with `git stash store <sha>` after diffing to confirm, but **the stack ordering changed**, so anything relying on `stash@{0}` was silently repointed. To read a past tree, use `git show <sha>:<path>` or a worktree; never `stash` in a repo someone else may be working in. | decafclaw #727, 2026-08-02 |
+| **In WAL mode a writer does not block readers**, so a plain `BEGIN EXCLUSIVE` cannot reproduce read contention. A first attempt at a lock-contention test therefore *passed against the unfixed code*. `PRAGMA locking_mode = EXCLUSIVE` on the holder does lock readers out and is what a competing migration holds. | 2026-09-15, probing #275's queue store |
+| **A read-only open of a live WAL database rewrites the `-shm`, and creates one where none existed.** Measured: after `sqlite3.connect(..., mode=ro)` plus `.backup()`, the main file and `-wal` were byte-identical but `-shm` bytes changed; against a source with a `-wal` and no `-shm`, a `-shm` appeared. So **`VACUUM INTO` and the backup API are unavailable whenever not-touching-the-source is a requirement**, however much more atomic they are. | 2026-09-15, two controlled probes |
+| **A corrupted `-shm` does not make a healthy database look damaged.** The wal-index header carries salts and a checksum that must match the WAL, and SQLite rebuilds the index when they do not: a database copied with a deliberately scribbled `-shm` reported `integrity_check = ok` with its schema intact. Worth knowing because a plausible reading — and a code review — attributed false corruption to exactly that. | 2026-09-15, measured both ways |
 
 **A live hazard this closed for decafclaw but not in general: when the project gates dirty the
 tree, two things downstream read the mess as signal.** The tamper check's *"no collateral edits"*
@@ -925,6 +930,31 @@ above sharpens that rather than adding to the tally: **there was no warning to f
 about mutation-testing a guard that protects a dangerous state.
 
 ### Operational figures
+
+**The API budget is not close to binding, and the number is why #269 was put down.** Measured
+2026-09-15 against the live API: one GraphQL point per `gh issue list --limit 200`, per
+`gh pr list`, and per `gh issue view` with comments; two for a board's items plus fields. The
+budget is 5000 points an hour. A full scan is a few list calls plus a handful of per-candidate
+reads, and the scan policy allows at most twelve scans an hour — so **roughly 240 points an hour
+for one repository, about five percent.**
+
+Two consequences worth keeping. The budget starts binding around fifteen to twenty repositories at
+that cadence, which is the trigger written onto
+[#269](https://github.com/lmorchard/agent-sessions/issues/269). And an event-driven design does not
+automatically help: Projects and reactions have **no** webhook, so they must be polled on a fixed
+cadence, and #275's example intervals would have spent more than the scanning they replaced. The
+inputs webhooks cover are the cheap ones.
+
+**Three of fifteen findings in a high-effort code review were deliberate, test-asserted decisions
+rather than defects.** On #275: the bot-login exclusion, the daemon's raise-makes-it-unready stance,
+and the watch suppression were each locked by an existing assertion, two of them added by a named
+review pass. "Fixing" any of them meant editing an assertion to admit the change. A fourth finding
+was not reachable as written, with a real defect beside it. So **before treating a review finding as
+a defect, check whether a test already asserts the behaviour, and read the commit that added it** —
+the provenance distinguishes a decision from an oversight. Measured the other way too: eight of the
+fifteen were real exactly as reported, and three of the corrections came only from running
+something rather than from reading.
+
 
 **A green `make check` in one checkout is not a green `make check`.** Every PR of the
 2026-08-19 audit was verified from a cold `.venv`, and `main` still went red on merge. The
