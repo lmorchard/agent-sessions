@@ -27,8 +27,8 @@ its session `notes.md`, decisions in the issue body on the board, and durable ru
 
 ## 2. The handoff briefs — not authoritative at all
 
-Each was a **task brief** written for a fresh Claude Code context to pick up one move. All five
-describe finished work.
+Each was a **task brief** written for a fresh Claude Code context to pick up one move, or in the
+last case one audit. Every one of them describes finished work.
 
 | Brief | Drove | Outcome |
 |---|---|---|
@@ -37,6 +37,7 @@ describe finished work.
 | `handoff-board-driver.md` | move 3 | `driver/agent-session-driver.sh` |
 | `handoff-measurement.md` | move 5 | 170 reps; the discriminate rule measured and cut |
 | `handoff-restructure.md` | moves 6 **and** 7 | the docs split; then the board, the triage corpus, the gate-parser extraction |
+| `handoff-261.md` | the #261 audit | PRs #262-#268 and #270 -- the hook, the oracle, the instruments, the docs, the tests |
 
 **These are superseded, and several are actively wrong now:**
 
@@ -47,11 +48,16 @@ describe finished work.
 - The "corrections to inherit" lists were folded into [../findings.md](../findings.md) § Verified
   gotchas, which is the maintained version.
 
-They are kept for two reasons. They are the *inputs* to the moves the build log records the *outputs*
-of, and it links to them by name — keeping both preserves that pairing. And they are the clearest
-evidence for a claim this project makes repeatedly: **fresh context is load-bearing, not hygiene.**
-Each brief opens with "corrections to inherit" — things the previous session asserted and later found
-false — and reading them in sequence shows how often confident reasoning had to be walked back.
+They are kept for two reasons. They are the *inputs* to the work whose *outputs* are recorded
+elsewhere — the build log for moves 1–5, which links three of them by name, and the issue plus its
+PR stack for `handoff-261.md`, since the build log had already closed. Keeping both halves preserves
+that pairing.
+
+And they are the clearest evidence for a claim this project makes repeatedly: **fresh context is
+load-bearing, not hygiene.** Several carry an explicit list of things the previous session asserted
+and later found false — `handoff-measurement.md` and `handoff-restructure.md` open with one under
+that name, and `handoff-261.md` closes by warning that its own author got at least three findings
+wrong. Reading them in sequence shows how often confident reasoning had to be walked back.
 
 ## 3. Retired dev-sessions — frozen provenance, authoritative about their own run
 
